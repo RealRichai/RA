@@ -4,9 +4,9 @@
  */
 
 import { Prisma, User, UserRole, UserStatus, SubscriptionTier } from '@prisma/client';
-import { prisma } from '../../lib/database.js';
+import { db } from '../../lib/database.js';
 import { Result, ok, err } from '../../lib/result.js';
-import { AppError, ErrorCodes } from '../../lib/errors.js';
+import { AppError, ErrorCode } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 
 // ============================================================================
@@ -71,7 +71,7 @@ export class UsersRepository {
    */
   async findById(id: string): Promise<Result<UserWithoutPassword | null, AppError>> {
     try {
-      const user = await prisma.user.findUnique({
+      const user = await db.user.findUnique({
         where: { id, deletedAt: null },
       });
 
@@ -83,7 +83,7 @@ export class UsersRepository {
       return ok(userWithoutPassword);
     } catch (error) {
       logger.error({ error, userId: id }, 'Failed to find user by ID');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to find user'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to find user' }));
     }
   }
 
@@ -92,13 +92,13 @@ export class UsersRepository {
    */
   async findByEmail(email: string): Promise<Result<User | null, AppError>> {
     try {
-      const user = await prisma.user.findUnique({
+      const user = await db.user.findUnique({
         where: { email: email.toLowerCase(), deletedAt: null },
       });
       return ok(user);
     } catch (error) {
       logger.error({ error, email }, 'Failed to find user by email');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to find user'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to find user' }));
     }
   }
 
@@ -107,7 +107,7 @@ export class UsersRepository {
    */
   async findByPhone(phone: string): Promise<Result<UserWithoutPassword | null, AppError>> {
     try {
-      const user = await prisma.user.findUnique({
+      const user = await db.user.findUnique({
         where: { phone, deletedAt: null },
       });
 
@@ -119,7 +119,7 @@ export class UsersRepository {
       return ok(userWithoutPassword);
     } catch (error) {
       logger.error({ error, phone }, 'Failed to find user by phone');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to find user'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to find user' }));
     }
   }
 
@@ -149,7 +149,7 @@ export class UsersRepository {
       };
 
       const [users, total] = await Promise.all([
-        prisma.user.findMany({
+        db.user.findMany({
           where,
           skip: (pagination.page - 1) * pagination.limit,
           take: pagination.limit,
@@ -157,7 +157,7 @@ export class UsersRepository {
             ? { [pagination.sortBy]: pagination.sortOrder || 'desc' }
             : { createdAt: 'desc' },
         }),
-        prisma.user.count({ where }),
+        db.user.count({ where }),
       ]);
 
       const usersWithoutPassword = users.map(({ passwordHash, ...user }) => user);
@@ -174,7 +174,7 @@ export class UsersRepository {
       });
     } catch (error) {
       logger.error({ error, filters }, 'Failed to list users');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to list users'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to list users' }));
     }
   }
 
@@ -186,7 +186,7 @@ export class UsersRepository {
     data: UpdateUserData
   ): Promise<Result<UserWithoutPassword, AppError>> {
     try {
-      const user = await prisma.user.update({
+      const user = await db.user.update({
         where: { id, deletedAt: null },
         data,
       });
@@ -196,14 +196,14 @@ export class UsersRepository {
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2025') {
-          return err(new AppError(ErrorCodes.USER_NOT_FOUND, 'User not found'));
+          return err(new AppError({ code: ErrorCode.USER_NOT_FOUND, message: 'User not found' }));
         }
         if (error.code === 'P2002') {
-          return err(new AppError(ErrorCodes.USER_ALREADY_EXISTS, 'Phone number already in use'));
+          return err(new AppError({ code: ErrorCode.USER_ALREADY_EXISTS, message: 'Phone number already in use' }));
         }
       }
       logger.error({ error, userId: id }, 'Failed to update user');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to update user'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to update user' }));
     }
   }
 
@@ -215,7 +215,7 @@ export class UsersRepository {
     status: UserStatus
   ): Promise<Result<UserWithoutPassword, AppError>> {
     try {
-      const user = await prisma.user.update({
+      const user = await db.user.update({
         where: { id, deletedAt: null },
         data: { status },
       });
@@ -224,10 +224,10 @@ export class UsersRepository {
       return ok(userWithoutPassword);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-        return err(new AppError(ErrorCodes.USER_NOT_FOUND, 'User not found'));
+        return err(new AppError({ code: ErrorCode.USER_NOT_FOUND, message: 'User not found' }));
       }
       logger.error({ error, userId: id, status }, 'Failed to update user status');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to update user status'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to update user status' }));
     }
   }
 
@@ -240,7 +240,7 @@ export class UsersRepository {
     expiresAt: Date | null
   ): Promise<Result<UserWithoutPassword, AppError>> {
     try {
-      const user = await prisma.user.update({
+      const user = await db.user.update({
         where: { id, deletedAt: null },
         data: {
           subscriptionTier: tier,
@@ -252,10 +252,10 @@ export class UsersRepository {
       return ok(userWithoutPassword);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-        return err(new AppError(ErrorCodes.USER_NOT_FOUND, 'User not found'));
+        return err(new AppError({ code: ErrorCode.USER_NOT_FOUND, message: 'User not found' }));
       }
       logger.error({ error, userId: id, tier }, 'Failed to update subscription');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to update subscription'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to update subscription' }));
     }
   }
 
@@ -264,7 +264,7 @@ export class UsersRepository {
    */
   async delete(id: string): Promise<Result<void, AppError>> {
     try {
-      await prisma.user.update({
+      await db.user.update({
         where: { id, deletedAt: null },
         data: { 
           deletedAt: new Date(),
@@ -274,10 +274,10 @@ export class UsersRepository {
       return ok(undefined);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-        return err(new AppError(ErrorCodes.USER_NOT_FOUND, 'User not found'));
+        return err(new AppError({ code: ErrorCode.USER_NOT_FOUND, message: 'User not found' }));
       }
       logger.error({ error, userId: id }, 'Failed to delete user');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to delete user'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to delete user' }));
     }
   }
 
@@ -286,7 +286,7 @@ export class UsersRepository {
    */
   async verifyEmail(id: string): Promise<Result<UserWithoutPassword, AppError>> {
     try {
-      const user = await prisma.user.update({
+      const user = await db.user.update({
         where: { id, deletedAt: null },
         data: {
           emailVerified: true,
@@ -299,10 +299,10 @@ export class UsersRepository {
       return ok(userWithoutPassword);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-        return err(new AppError(ErrorCodes.USER_NOT_FOUND, 'User not found'));
+        return err(new AppError({ code: ErrorCode.USER_NOT_FOUND, message: 'User not found' }));
       }
       logger.error({ error, userId: id }, 'Failed to verify email');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to verify email'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to verify email' }));
     }
   }
 
@@ -311,7 +311,7 @@ export class UsersRepository {
    */
   async verifyPhone(id: string): Promise<Result<UserWithoutPassword, AppError>> {
     try {
-      const user = await prisma.user.update({
+      const user = await db.user.update({
         where: { id, deletedAt: null },
         data: {
           phoneVerified: true,
@@ -323,10 +323,10 @@ export class UsersRepository {
       return ok(userWithoutPassword);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-        return err(new AppError(ErrorCodes.USER_NOT_FOUND, 'User not found'));
+        return err(new AppError({ code: ErrorCode.USER_NOT_FOUND, message: 'User not found' }));
       }
       logger.error({ error, userId: id }, 'Failed to verify phone');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to verify phone'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to verify phone' }));
     }
   }
 
@@ -368,7 +368,7 @@ export class UsersRepository {
    */
   async countByRole(): Promise<Result<Record<UserRole, number>, AppError>> {
     try {
-      const counts = await prisma.user.groupBy({
+      const counts = await db.user.groupBy({
         by: ['role'],
         where: { deletedAt: null },
         _count: { role: true },
@@ -386,7 +386,7 @@ export class UsersRepository {
       return ok(result);
     } catch (error) {
       logger.error({ error }, 'Failed to count users by role');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to count users'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to count users' }));
     }
   }
 
@@ -406,21 +406,21 @@ export class UsersRepository {
       const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
       const [total, byRole, byStatus, newThisMonth, activeToday] = await Promise.all([
-        prisma.user.count({ where: { deletedAt: null } }),
-        prisma.user.groupBy({
+        db.user.count({ where: { deletedAt: null } }),
+        db.user.groupBy({
           by: ['role'],
           where: { deletedAt: null },
           _count: { role: true },
         }),
-        prisma.user.groupBy({
+        db.user.groupBy({
           by: ['status'],
           where: { deletedAt: null },
           _count: { status: true },
         }),
-        prisma.user.count({
+        db.user.count({
           where: { deletedAt: null, createdAt: { gte: startOfMonth } },
         }),
-        prisma.user.count({
+        db.user.count({
           where: { deletedAt: null, lastLoginAt: { gte: startOfDay } },
         }),
       ]);
@@ -450,7 +450,7 @@ export class UsersRepository {
       });
     } catch (error) {
       logger.error({ error }, 'Failed to get user statistics');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to get statistics'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to get statistics' }));
     }
   }
 }

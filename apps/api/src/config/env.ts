@@ -28,13 +28,18 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
   
   SENDGRID_API_KEY: z.string().optional(),
+  SENDGRID_FROM_EMAIL: z.string().email().optional(),
+  SENDGRID_FROM_NAME: z.string().optional(),
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_PHONE_NUMBER: z.string().optional(),
+  TWILIO_VERIFY_SID: z.string().optional(),
   SENDBLUE_API_KEY: z.string().optional(),
   SENDBLUE_API_SECRET: z.string().optional(),
   SEAM_API_KEY: z.string().optional(),
-  THEGUARANTORS_API_KEY: z.string().optional(),
+  THE_GUARANTORS_API_KEY: z.string().optional(),
+  THE_GUARANTORS_PARTNER_ID: z.string().optional(),
+  THE_GUARANTORS_API_URL: z.string().url().optional(),
   JEEVA_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
 });
@@ -57,9 +62,10 @@ export const isTest = env.NODE_ENV === 'test';
 export const integrations = {
   sendGrid: !!env.SENDGRID_API_KEY,
   twilio: !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN),
+  twilioVerify: !!env.TWILIO_VERIFY_SID,
   sendblue: !!(env.SENDBLUE_API_KEY && env.SENDBLUE_API_SECRET),
   seam: !!env.SEAM_API_KEY,
-  theGuarantors: !!env.THEGUARANTORS_API_KEY,
+  theGuarantors: !!(env.THE_GUARANTORS_API_KEY && env.THE_GUARANTORS_PARTNER_ID),
   jeeva: !!env.JEEVA_API_KEY,
   anthropic: !!env.ANTHROPIC_API_KEY,
 };

@@ -15,6 +15,13 @@ import { checkCacheHealth, disconnectCache } from './lib/cache.js';
 import { registerAuthHooks } from './modules/auth/auth.middleware.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { listingRoutes } from './modules/listings/listings.routes.js';
+import { userRoutes } from './modules/users/users.routes.js';
+import { applicationRoutes } from './modules/applications/applications.routes.js';
+import { leaseRoutes } from './modules/leases/leases.routes.js';
+import { paymentRoutes } from './modules/payments/payments.routes.js';
+import { leadRoutes, tourRoutes } from './modules/leads/leads.routes.js';
+import { feedbackRoutes } from './modules/feedback/feedback.routes.js';
+import { notificationRoutes } from './modules/notifications/notifications.routes.js';
 
 export async function createServer(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -96,7 +103,15 @@ export async function createServer(): Promise<FastifyInstance> {
   // Register API routes
   await app.register(async (api) => {
     await api.register(authRoutes, { prefix: '/auth' });
+    await api.register(userRoutes, { prefix: '/users' });
     await api.register(listingRoutes, { prefix: '/listings' });
+    await api.register(applicationRoutes, { prefix: '/applications' });
+    await api.register(leaseRoutes, { prefix: '/leases' });
+    await api.register(paymentRoutes, { prefix: '/payments' });
+    await api.register(leadRoutes, { prefix: '/leads' });
+    await api.register(tourRoutes, { prefix: '/tours' });
+    await api.register(feedbackRoutes, { prefix: '/feedback' });
+    await api.register(notificationRoutes, { prefix: '/notifications' });
   }, { prefix: '/api/v1' });
 
   return app;
