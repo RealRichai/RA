@@ -676,3 +676,121 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
 }
+
+// ====================
+// FEATURE FLAGS
+// ====================
+
+model FeatureFlag {
+  id                  String    @id @default(cuid())
+  key                 String    @unique
+  name                String
+  description         String?
+  category            String
+  enabled             Boolean   @default(false)
+  rolloutPercentage   Int?      @default(100)
+  requiresIntegration String?
+  dependencies        String[]
+  markets             String[]  // Empty = all markets
+  metadata            Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([key])
+  @@index([category])
+  @@index([enabled])
+}
+
+// ====================
+// MARKETS
+// ====================
+
+model Market {
+  id                          String    @id @default(cuid())
+  key                         String    @unique
+  name                        String
+  state                       String
+  region                      String
+  timezone                    String    @default("America/New_York")
+  zipCodePrefixes             String[]
+  enabled                     Boolean   @default(true)
+
+  // Compliance
+  fareActRequired             Boolean   @default(false)
+  fairChanceRequired          Boolean   @default(false)
+  sourceOfIncomeProtection    Boolean   @default(true)
+  securityDepositLimit        Decimal   @db.Decimal(3, 1) @default(1)
+  applicationFeeCap           Decimal   @db.Decimal(6, 2) @default(20)
+  brokerFeeRules              String    @default("negotiable")
+  rentStabilization           Boolean   @default(false)
+
+  // Default fees
+  defaultApplicationFee       Decimal   @db.Decimal(6, 2) @default(20)
+  defaultSecurityDeposit      Decimal   @db.Decimal(3, 1) @default(1)
+  typicalBrokerFeePercent     Decimal   @db.Decimal(4, 2) @default(15)
+
+  metadata                    Json?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  @@index([key])
+  @@index([region])
+  @@index([enabled])
+}
+
+// ====================
+// INTEGRATIONS
+// ====================
+
+model Integration {
+  id                  String    @id @default(cuid())
+  key                 String    @unique
+  name                String
+  description         String?
+  category            String
+  provider            String
+  docsUrl             String?
+
+  // Status
+  status              String    @default("not-configured") // configured, partial, not-configured, error
+  lastCheckedAt       DateTime?
+  lastErrorMessage    String?
+
+  // Environment variables (for reference)
+  requiredEnvVars     String[]
+  optionalEnvVars     String[]
+  configuredEnvVars   String[]  // Which env vars are actually set
+
+  // Health check
+  healthCheckEndpoint String?
+  lastHealthCheckAt   DateTime?
+  healthCheckStatus   String?
+
+  // Features that require this integration
+  features            String[]
+
+  metadata            Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([key])
+  @@index([category])
+  @@index([status])
+}
+
+// ====================
+// SYSTEM SETTINGS
+// ====================
+
+model SystemSetting {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  value       Json
+  description String?
+  category    String    @default("general")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([key])
+  @@index([category])
+}
