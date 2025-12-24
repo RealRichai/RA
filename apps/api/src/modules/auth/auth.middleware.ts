@@ -87,3 +87,7 @@ export function requireAdmin(
   }
   done();
 }
+
+// Aliases for route handlers
+export const requireAuth = authenticate;
+export const requireRole = requireRoles;

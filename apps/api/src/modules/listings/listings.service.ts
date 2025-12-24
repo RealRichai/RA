@@ -5,9 +5,9 @@
  */
 
 import { Prisma, Listing, ListingStatus, ListingType, PropertyType } from '@prisma/client';
-import { prisma } from '../../lib/database.js';
+import { db } from '../../lib/database.js';
 import { Result, ok, err } from '../../lib/result.js';
-import { AppError, ErrorCodes } from '../../lib/errors.js';
+import { AppError, ErrorCode } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 import {
   getMarketByZipCode,
@@ -341,10 +341,10 @@ export class ListingsRepository {
           compliance 
         }, 'Listing creation blocked due to compliance violations');
         
-        return err(new AppError(
-          ErrorCodes.LISTING_VALIDATION_FAILED,
-          `Listing does not meet regulatory requirements: ${compliance.errors.join('; ')}`
-        ));
+        return err(new AppError({
+          code: ErrorCode.LISTING_FARE_ACT_VIOLATION,
+          message: `Listing does not meet regulatory requirements: ${compliance.errors.join('; ')}`,
+        }));
       }
       
       const market = getMarketByZipCode(input.zipCode);
@@ -367,7 +367,7 @@ export class ListingsRepository {
         fareActDisclosures = { pending: true, brokerFeePayer: 'tenant' };
       }
       
-      const listing = await prisma.listing.create({
+      const listing = await db.listing.create({
         data: {
           ownerId: input.ownerId,
           agentId: input.agentId,
@@ -425,7 +425,7 @@ export class ListingsRepository {
       });
     } catch (error) {
       logger.error({ error, input }, 'Failed to create listing');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to create listing'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to create listing' }));
     }
   }
   
@@ -434,7 +434,7 @@ export class ListingsRepository {
    */
   async findById(id: string): Promise<Result<ListingWithMarketData | null, AppError>> {
     try {
-      const listing = await prisma.listing.findUnique({
+      const listing = await db.listing.findUnique({
         where: { id, deletedAt: null },
       });
       
@@ -460,7 +460,7 @@ export class ListingsRepository {
       });
     } catch (error) {
       logger.error({ error, listingId: id }, 'Failed to find listing');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to find listing'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to find listing' }));
     }
   }
   
@@ -522,13 +522,13 @@ export class ListingsRepository {
       };
       
       const [listings, total] = await Promise.all([
-        prisma.listing.findMany({
+        db.listing.findMany({
           where,
           skip: (page - 1) * limit,
           take: limit,
           orderBy: { createdAt: 'desc' },
         }),
-        prisma.listing.count({ where }),
+        db.listing.count({ where }),
       ]);
       
       const listingsWithMarket: ListingWithMarketData[] = listings.map(listing => {
@@ -558,7 +558,7 @@ export class ListingsRepository {
       });
     } catch (error) {
       logger.error({ error, params }, 'Failed to search listings');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to search listings'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to search listings' }));
     }
   }
   
@@ -570,17 +570,17 @@ export class ListingsRepository {
       const existing = await this.findById(id);
       if (existing.isErr()) return existing;
       if (!existing.value) {
-        return err(new AppError(ErrorCodes.LISTING_NOT_FOUND, 'Listing not found'));
+        return err(new AppError({ code: ErrorCode.LISTING_NOT_FOUND, message: 'Listing not found' }));
       }
       
       const listing = existing.value;
       
       // Re-validate compliance before publishing
       if (!listing.complianceStatus.isCompliant) {
-        return err(new AppError(
-          ErrorCodes.LISTING_VALIDATION_FAILED,
-          `Cannot publish non-compliant listing: ${listing.complianceStatus.errors.join('; ')}`
-        ));
+        return err(new AppError({
+          code: ErrorCode.LISTING_FARE_ACT_VIOLATION,
+          message: `Cannot publish non-compliant listing: ${listing.complianceStatus.errors.join('; ')}`,
+        }));
       }
       
       // Generate final FARE Act disclosure if required
@@ -592,7 +592,7 @@ export class ListingsRepository {
         }
       }
       
-      const updated = await prisma.listing.update({
+      const updated = await db.listing.update({
         where: { id },
         data: {
           status: ListingStatus.ACTIVE,
@@ -615,7 +615,7 @@ export class ListingsRepository {
       });
     } catch (error) {
       logger.error({ error, listingId: id }, 'Failed to publish listing');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to publish listing'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to publish listing' }));
     }
   }
   
@@ -634,19 +634,19 @@ export class ListingsRepository {
       const market = MARKETS[marketId];
       
       if (!market) {
-        return err(new AppError(ErrorCodes.VALIDATION_ERROR, 'Invalid market ID'));
+        return err(new AppError({ code: ErrorCode.VALIDATION_FAILED, message: 'Invalid market ID' }));
       }
       
       const zipCodes = market.submarkets.flatMap(s => s.zipCodes);
       
       const [total, active, avgRentResult] = await Promise.all([
-        prisma.listing.count({
+        db.listing.count({
           where: { zipCode: { in: zipCodes }, deletedAt: null },
         }),
-        prisma.listing.count({
+        db.listing.count({
           where: { zipCode: { in: zipCodes }, status: ListingStatus.ACTIVE, deletedAt: null },
         }),
-        prisma.listing.aggregate({
+        db.listing.aggregate({
           where: { zipCode: { in: zipCodes }, status: ListingStatus.ACTIVE, deletedAt: null },
           _avg: { rentPrice: true },
         }),
@@ -656,18 +656,18 @@ export class ListingsRepository {
       const bySubmarket = await Promise.all(
         market.submarkets.map(async (submarket) => {
           const [count, avg] = await Promise.all([
-            prisma.listing.count({
-              where: { 
-                zipCode: { in: submarket.zipCodes }, 
-                status: ListingStatus.ACTIVE, 
-                deletedAt: null 
+            db.listing.count({
+              where: {
+                zipCode: { in: submarket.zipCodes },
+                status: ListingStatus.ACTIVE,
+                deletedAt: null
               },
             }),
-            prisma.listing.aggregate({
-              where: { 
-                zipCode: { in: submarket.zipCodes }, 
-                status: ListingStatus.ACTIVE, 
-                deletedAt: null 
+            db.listing.aggregate({
+              where: {
+                zipCode: { in: submarket.zipCodes },
+                status: ListingStatus.ACTIVE,
+                deletedAt: null
               },
               _avg: { rentPrice: true },
             }),
@@ -690,7 +690,7 @@ export class ListingsRepository {
       });
     } catch (error) {
       logger.error({ error, marketId }, 'Failed to get market stats');
-      return err(new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to get market stats'));
+      return err(new AppError({ code: ErrorCode.DB_QUERY_FAILED, message: 'Failed to get market stats' }));
     }
   }
 }
