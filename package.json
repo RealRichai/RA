@@ -13,7 +13,12 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "clean": "turbo clean && rm -rf node_modules"
+    "clean": "turbo clean && rm -rf node_modules",
+    "db:generate": "pnpm --filter @realriches/api db:generate",
+    "db:push": "pnpm --filter @realriches/api db:push",
+    "db:seed": "pnpm --filter @realriches/api db:seed",
+    "db:migrate": "pnpm --filter @realriches/api db:migrate",
+    "db:studio": "pnpm --filter @realriches/api db:studio"
   },
   "devDependencies": {
     "turbo": "^2.3.0",
