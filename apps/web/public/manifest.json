@@ -1,0 +1,16 @@
+{
+  "name": "RealRiches",
+  "short_name": "RealRiches",
+  "description": "NYC's First FARE Act Compliant Rental Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#8B7355",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

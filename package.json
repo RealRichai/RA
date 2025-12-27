@@ -1,0 +1,50 @@
+{
+  "name": "realriches",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Comprehensive NYC rental platform - FARE Act compliant",
+  "type": "module",
+  "packageManager": "pnpm@9.14.2",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint -- --fix",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:run": "turbo run test:run",
+    "test:coverage": "turbo run test:coverage",
+    "db:generate": "pnpm --filter @realriches/api db:generate",
+    "db:push": "pnpm --filter @realriches/api db:push",
+    "db:studio": "pnpm --filter @realriches/api db:studio",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "security:audit": "pnpm audit --audit-level=moderate",
+    "security:audit:fix": "pnpm audit --fix",
+    "security:check": "pnpm audit --audit-level=high && echo '✅ No high/critical vulnerabilities'",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "preinstall": "npx only-allow pnpm"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "eslint": "^9.15.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "prettier": "^3.4.2",
+    "prettier-plugin-tailwindcss": "^0.6.8",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.16.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "braces@<3.0.3": ">=3.0.3",
+      "micromatch@<4.0.8": ">=4.0.8",
+      "path-to-regexp@<0.1.10": ">=0.1.10",
+      "cookie@<0.7.0": ">=0.7.0"
+    }
+  }
+}

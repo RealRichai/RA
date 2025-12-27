@@ -1,0 +1,49 @@
+{
+  "name": "@realriches/api",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "db:seed": "tsx prisma/seed.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@realriches/shared": "workspace:*",
+    "fastify": "^5.1.0",
+    "@fastify/cors": "^10.0.1",
+    "@fastify/helmet": "^12.0.1",
+    "@fastify/rate-limit": "^10.1.1",
+    "@fastify/swagger": "^9.2.0",
+    "@fastify/swagger-ui": "^5.1.0",
+    "@fastify/jwt": "^9.0.1",
+    "@fastify/cookie": "^10.0.1",
+    "@fastify/multipart": "^9.0.1",
+    "@prisma/client": "^5.22.0",
+    "ioredis": "^5.4.1",
+    "zod": "^3.23.8",
+    "argon2": "^0.41.1",
+    "neverthrow": "^8.1.1",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "date-fns": "^4.1.0",
+    "nanoid": "^5.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.6"
+  }
+}

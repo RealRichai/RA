@@ -1,0 +1,757 @@
+// =============================================================================
+// RealRiches Platform - Prisma Schema v2.0.0
+// =============================================================================
+// NYC FARE Act (Local Law 18) + Fair Chance Housing Act (Local Law 24) Compliant
+// Effective: June 11, 2025 (FARE Act), January 1, 2025 (Fair Chance)
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// ENUMS - Compliance State Machines
+// =============================================================================
+
+enum UserRole {
+  TENANT
+  LANDLORD
+  AGENT
+  INVESTOR
+  ADMIN
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum Market {
+  NYC           // FARE Act + Fair Chance Housing Act applies
+  LONG_ISLAND   // NY State law only (traditional broker fees allowed)
+  // Future markets
+  // MIAMI
+  // LOS_ANGELES
+}
+
+enum Borough {
+  MANHATTAN
+  BROOKLYN
+  QUEENS
+  BRONX
+  STATEN_ISLAND
+  NASSAU        // Long Island
+  SUFFOLK       // Long Island
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  RENTED
+  EXPIRED
+  ARCHIVED
+}
+
+enum BrokerFeePaidBy {
+  LANDLORD      // Default for NYC under FARE Act
+  TENANT        // Allowed in Long Island, requires explicit agreement in NYC
+}
+
+// =============================================================================
+// FAIR CHANCE HOUSING ACT - Application State Machine
+// =============================================================================
+// Critical: Criminal history checks can ONLY occur after CONDITIONAL_OFFER state
+// The state machine enforces legal timing requirements
+// =============================================================================
+
+enum ApplicationStatus {
+  // Initial States
+  DRAFT                       // Tenant started but not submitted
+  SUBMITTED                   // Tenant submitted, awaiting landlord review
+  
+  // Document Collection (no criminal check allowed)
+  DOCUMENTS_REQUESTED         // Landlord requested additional documents
+  DOCUMENTS_RECEIVED          // Tenant provided requested documents
+  
+  // Financial Review (no criminal check allowed)
+  FINANCIAL_REVIEW            // Credit check, income verification in progress
+  FINANCIAL_APPROVED          // Passed financial criteria
+  FINANCIAL_DENIED            // Failed financial criteria (not criminal related)
+  
+  // ============================================================
+  // CRITICAL COMPLIANCE BOUNDARY - Fair Chance Housing Act
+  // Criminal history inquiry ONLY permitted AFTER this state
+  // ============================================================
+  CONDITIONAL_OFFER           // Landlord extends conditional offer
+  
+  // Post-Conditional States (criminal check now permitted)
+  CRIMINAL_CHECK_PENDING      // TransUnion background check initiated
+  CRIMINAL_CHECK_COMPLETE     // Results received
+  
+  // Individual Assessment (required if adverse criminal history found)
+  INDIVIDUAL_ASSESSMENT       // 5 business day review period
+  ASSESSMENT_ADDITIONAL_INFO  // Tenant providing mitigating information
+  
+  // Final States
+  APPROVED                    // Fully approved, ready for lease
+  DENIED                      // Denied (must include reason if post-conditional)
+  WITHDRAWN                   // Tenant withdrew application
+  EXPIRED                     // Application expired (no action taken)
+}
+
+enum DenialReason {
+  // Pre-conditional denial reasons (no criminal check involved)
+  INSUFFICIENT_INCOME
+  POOR_CREDIT_HISTORY
+  NEGATIVE_RENTAL_HISTORY
+  INCOMPLETE_APPLICATION
+  FAILED_IDENTITY_VERIFICATION
+  
+  // Post-conditional denial reasons (Fair Chance Act applies)
+  CRIMINAL_HISTORY_DIRECT_RELATIONSHIP   // Must document direct relationship to tenancy
+  CRIMINAL_HISTORY_SAFETY_RISK           // Must document unreasonable risk
+  
+  // Other
+  LANDLORD_WITHDREW_LISTING
+  OTHER
+}
+
+enum AssessmentFactor {
+  // Fair Chance Housing Act - Individual Assessment Factors
+  TIME_SINCE_OFFENSE
+  AGE_AT_TIME_OF_OFFENSE
+  NATURE_OF_OFFENSE
+  EVIDENCE_OF_REHABILITATION
+  EMPLOYMENT_HISTORY
+  PERSONAL_REFERENCES
+  MITIGATING_CIRCUMSTANCES
+}
+
+// =============================================================================
+// LEASE STATUS
+// =============================================================================
+
+enum LeaseStatus {
+  DRAFT
+  PENDING_SIGNATURES
+  PARTIALLY_SIGNED
+  FULLY_EXECUTED
+  ACTIVE
+  EXPIRED
+  TERMINATED
+  RENEWED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+  DISPUTED
+}
+
+enum PaymentType {
+  APPLICATION_FEE           // Capped at $20 in NYC
+  SECURITY_DEPOSIT          // Capped at 1 month in NYC
+  FIRST_MONTH_RENT
+  MONTHLY_RENT
+  BROKER_FEE
+  LATE_FEE
+  PET_DEPOSIT
+  OTHER
+}
+
+// =============================================================================
+// USER MODELS
+// =============================================================================
+
+model User {
+  id                String      @id @default(uuid())
+  email             String      @unique
+  emailVerified     Boolean     @default(false)
+  passwordHash      String
+  
+  // Profile
+  firstName         String
+  lastName          String
+  phone             String?
+  phoneVerified     Boolean     @default(false)
+  avatarUrl         String?
+  
+  // Role & Status
+  role              UserRole
+  status            UserStatus  @default(PENDING_VERIFICATION)
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  lastLoginAt       DateTime?
+  
+  // Relations
+  landlordProfile   LandlordProfile?
+  tenantProfile     TenantProfile?
+  agentProfile      AgentProfile?
+  investorProfile   InvestorProfile?
+  
+  sessions          Session[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]    @relation("UserAuditLogs")
+  
+  @@index([email])
+  @@index([role, status])
+}
+
+model Session {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  tokenHash     String    @unique
+  deviceInfo    String?
+  ipAddress     String?
+  
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model LandlordProfile {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  companyName       String?
+  licenseNumber     String?
+  licenseVerified   Boolean   @default(false)
+  
+  // Stripe Connect for rent collection
+  stripeAccountId   String?   @unique
+  stripeOnboarded   Boolean   @default(false)
+  
+  // Portfolio stats (denormalized for performance)
+  totalUnits        Int       @default(0)
+  activeListings    Int       @default(0)
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Relations
+  listings          Listing[]
+  leases            Lease[]
+}
+
+model TenantProfile {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Identity verification (Persona)
+  identityVerified      Boolean   @default(false)
+  identityVerifiedAt    DateTime?
+  personaInquiryId      String?
+  
+  // Income verification (Plaid)
+  incomeVerified        Boolean   @default(false)
+  incomeVerifiedAt      DateTime?
+  plaidAccessToken      String?   // Encrypted
+  
+  // Saved search preferences
+  preferredBoroughs     Borough[]
+  minBudget             Decimal?  @db.Money
+  maxBudget             Decimal?  @db.Money
+  minBedrooms           Int?
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  
+  // Relations
+  applications          Application[]
+  leases                Lease[]
+  savedListings         SavedListing[]
+}
+
+model AgentProfile {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // License info
+  licenseNumber     String
+  licenseState      String    @default("NY")
+  licenseVerified   Boolean   @default(false)
+  licenseExpiry     DateTime?
+  
+  // Brokerage
+  brokerageName     String?
+  brokerageAddress  String?
+  
+  // Stats
+  totalDeals        Int       @default(0)
+  rating            Decimal?  @db.Decimal(2,1)
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Relations
+  listings          Listing[]
+}
+
+model InvestorProfile {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  accreditedVerified    Boolean   @default(false)
+  accreditedVerifiedAt  DateTime?
+  
+  investmentPreferences Json?     // Flexible schema for preferences
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+// =============================================================================
+// LISTING MODELS
+// =============================================================================
+
+model Listing {
+  id                  String         @id @default(uuid())
+  
+  // Ownership
+  landlordId          String
+  landlord            LandlordProfile @relation(fields: [landlordId], references: [id])
+  agentId             String?
+  agent               AgentProfile?   @relation(fields: [agentId], references: [id])
+  
+  // Status & Market
+  status              ListingStatus  @default(DRAFT)
+  market              Market
+  
+  // Location
+  address             String
+  unit                String?
+  borough             Borough
+  zipCode             String
+  latitude            Decimal?       @db.Decimal(10,7)
+  longitude           Decimal?       @db.Decimal(10,7)
+  
+  // Property Details
+  bedrooms            Int
+  bathrooms           Decimal        @db.Decimal(2,1)
+  squareFeet          Int?
+  propertyType        String         // apartment, house, condo, etc.
+  
+  // Pricing - FARE Act Compliant Fields
+  price               Decimal        @db.Money
+  securityDeposit     Decimal        @db.Money
+  applicationFee      Decimal        @db.Money     // Max $20 for NYC
+  brokerFee           Decimal        @db.Money     @default(0)
+  brokerFeePaidBy     BrokerFeePaidBy @default(LANDLORD)
+  
+  // FARE Act Compliance Tracking
+  fareActCompliant    Boolean        @default(false)
+  fareActValidatedAt  DateTime?
+  fareActViolations   Json?          // Array of violation objects
+  
+  // Amenities & Features
+  amenities           String[]
+  petPolicy           String?
+  laundry             String?
+  parking             String?
+  
+  // Media
+  photos              ListingPhoto[]
+  virtualTourUrl      String?
+  
+  // Dates
+  availableDate       DateTime
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  publishedAt         DateTime?
+  
+  // SEO
+  title               String
+  description         String         @db.Text
+  
+  // Relations
+  applications        Application[]
+  tours               Tour[]
+  savedBy             SavedListing[]
+  leases              Lease[]
+  
+  @@index([market, status])
+  @@index([borough, status])
+  @@index([price])
+  @@index([bedrooms])
+  @@index([landlordId])
+}
+
+model ListingPhoto {
+  id          String    @id @default(uuid())
+  listingId   String
+  listing     Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  
+  url         String
+  caption     String?
+  order       Int       @default(0)
+  isPrimary   Boolean   @default(false)
+  
+  createdAt   DateTime  @default(now())
+  
+  @@index([listingId])
+}
+
+model SavedListing {
+  id          String        @id @default(uuid())
+  tenantId    String
+  tenant      TenantProfile @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  listingId   String
+  listing     Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime      @default(now())
+  
+  @@unique([tenantId, listingId])
+}
+
+// =============================================================================
+// APPLICATION MODELS - Fair Chance Housing Act Compliant
+// =============================================================================
+
+model Application {
+  id                    String            @id @default(uuid())
+  
+  // Parties
+  tenantId              String
+  tenant                TenantProfile     @relation(fields: [tenantId], references: [id])
+  listingId             String
+  listing               Listing           @relation(fields: [listingId], references: [id])
+  
+  // Status - Fair Chance Housing Act State Machine
+  status                ApplicationStatus @default(DRAFT)
+  
+  // =============================================================================
+  // FAIR CHANCE HOUSING ACT COMPLIANCE TIMESTAMPS
+  // These timestamps create an immutable audit trail proving compliance
+  // =============================================================================
+  submittedAt           DateTime?
+  financialReviewAt     DateTime?
+  financialDecisionAt   DateTime?
+  
+  // CRITICAL: Conditional offer MUST be timestamped BEFORE criminal check
+  conditionalOfferAt    DateTime?         // When conditional offer was extended
+  conditionalOfferBy    String?           // User ID who approved conditional offer
+  
+  // Criminal check can ONLY happen after conditionalOfferAt is set
+  criminalCheckInitAt   DateTime?         // When background check was initiated
+  criminalCheckCompleteAt DateTime?       // When results were received
+  
+  // Individual Assessment (required if adverse criminal history)
+  assessmentStartedAt   DateTime?         // Start of 5 business day period
+  assessmentDeadline    DateTime?         // Must decide by this date
+  assessmentCompletedAt DateTime?
+  
+  // Final decision
+  finalDecisionAt       DateTime?
+  denialReason          DenialReason?
+  denialExplanation     String?           @db.Text
+  
+  // =============================================================================
+  // APPLICATION DATA
+  // =============================================================================
+  
+  // Income & Employment
+  annualIncome          Decimal?          @db.Money
+  employerName          String?
+  employmentLength      Int?              // months
+  
+  // Co-applicants
+  coApplicants          Json?             // Array of co-applicant info
+  
+  // Pets
+  hasPets               Boolean           @default(false)
+  petDetails            Json?
+  
+  // Emergency Contact
+  emergencyContact      Json?
+  
+  // Previous Rental History
+  rentalHistory         Json?             // Array of previous addresses
+  
+  // Documents
+  documents             ApplicationDocument[]
+  
+  // Payments
+  payments              Payment[]
+  
+  // Status History (immutable audit trail)
+  statusHistory         ApplicationStatusHistory[]
+  
+  // Individual Assessment (if required)
+  assessments           IndividualAssessment[]
+  
+  // Timestamps
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  expiresAt             DateTime?
+  
+  @@unique([tenantId, listingId])
+  @@index([status])
+  @@index([listingId, status])
+  @@index([tenantId])
+}
+
+// Immutable audit log for application status changes
+model ApplicationStatusHistory {
+  id              String            @id @default(uuid())
+  applicationId   String
+  application     Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  fromStatus      ApplicationStatus
+  toStatus        ApplicationStatus
+  
+  changedBy       String            // User ID who triggered the change
+  changedAt       DateTime          @default(now())
+  
+  reason          String?           // Required for certain transitions
+  metadata        Json?             // Additional context
+  
+  // IP address for legal compliance
+  ipAddress       String?
+  userAgent       String?
+  
+  @@index([applicationId])
+  @@index([changedAt])
+}
+
+model ApplicationDocument {
+  id              String      @id @default(uuid())
+  applicationId   String
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  type            String      // pay_stub, bank_statement, id, etc.
+  fileName        String
+  fileUrl         String
+  fileSize        Int
+  mimeType        String
+  
+  uploadedAt      DateTime    @default(now())
+  verifiedAt      DateTime?
+  verifiedBy      String?
+  
+  @@index([applicationId])
+}
+
+// Fair Chance Housing Act - Individual Assessment Record
+model IndividualAssessment {
+  id              String            @id @default(uuid())
+  applicationId   String
+  application     Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  // Assessment factors considered (required by law)
+  factorsConsidered AssessmentFactor[]
+  
+  // Evidence provided by tenant
+  evidenceProvided  Json?           // Array of evidence items
+  
+  // Landlord's analysis (required documentation)
+  analysisNotes     String          @db.Text
+  
+  // Direct relationship analysis (required if denying)
+  directRelationship String?        @db.Text
+  
+  // Decision
+  decision          String          // APPROVE, DENY
+  decisionReason    String          @db.Text
+  
+  // Timestamps
+  createdAt         DateTime        @default(now())
+  completedAt       DateTime?
+  completedBy       String?
+  
+  @@index([applicationId])
+}
+
+// =============================================================================
+// TOUR / SHOWING MODELS
+// =============================================================================
+
+model Tour {
+  id              String    @id @default(uuid())
+  listingId       String
+  listing         Listing   @relation(fields: [listingId], references: [id])
+  
+  tenantUserId    String
+  
+  scheduledAt     DateTime
+  duration        Int       @default(30)  // minutes
+  
+  type            String    // in_person, virtual, self_guided
+  status          String    @default("scheduled") // scheduled, completed, cancelled, no_show
+  
+  // Self-guided tour (Seam integration)
+  accessCode      String?
+  accessCodeExpiry DateTime?
+  
+  notes           String?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([listingId])
+  @@index([scheduledAt])
+}
+
+// =============================================================================
+// LEASE MODELS
+// =============================================================================
+
+model Lease {
+  id                  String        @id @default(uuid())
+  
+  // Parties
+  listingId           String
+  listing             Listing       @relation(fields: [listingId], references: [id])
+  landlordId          String
+  landlord            LandlordProfile @relation(fields: [landlordId], references: [id])
+  tenantId            String
+  tenant              TenantProfile @relation(fields: [tenantId], references: [id])
+  
+  // Status
+  status              LeaseStatus   @default(DRAFT)
+  
+  // Terms
+  startDate           DateTime
+  endDate             DateTime
+  monthlyRent         Decimal       @db.Money
+  securityDeposit     Decimal       @db.Money
+  
+  // FARE Act fields
+  applicationFeeCharged   Decimal   @db.Money
+  brokerFeeAmount         Decimal   @db.Money   @default(0)
+  brokerFeePaidBy         BrokerFeePaidBy
+  
+  // DocuSign integration
+  docusignEnvelopeId      String?   @unique
+  docusignStatus          String?
+  
+  // Signatures
+  landlordSignedAt        DateTime?
+  tenantSignedAt          DateTime?
+  fullyExecutedAt         DateTime?
+  
+  // Document
+  documentUrl             String?
+  
+  // Timestamps
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  
+  // Relations
+  payments                Payment[]
+  
+  @@index([landlordId])
+  @@index([tenantId])
+  @@index([status])
+}
+
+// =============================================================================
+// PAYMENT MODELS
+// =============================================================================
+
+model Payment {
+  id                String        @id @default(uuid())
+  
+  // Relations (one of these will be set)
+  applicationId     String?
+  application       Application?  @relation(fields: [applicationId], references: [id])
+  leaseId           String?
+  lease             Lease?        @relation(fields: [leaseId], references: [id])
+  
+  // Payment details
+  type              PaymentType
+  amount            Decimal       @db.Money
+  status            PaymentStatus @default(PENDING)
+  
+  // Stripe integration
+  stripePaymentIntentId   String?   @unique
+  stripeChargeId          String?
+  stripeRefundId          String?
+  
+  // Metadata
+  description       String?
+  metadata          Json?
+  
+  // Timestamps
+  createdAt         DateTime      @default(now())
+  processedAt       DateTime?
+  failedAt          DateTime?
+  failureReason     String?
+  
+  @@index([applicationId])
+  @@index([leaseId])
+  @@index([status])
+  @@index([stripePaymentIntentId])
+}
+
+// =============================================================================
+// NOTIFICATION MODEL
+// =============================================================================
+
+model Notification {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type        String    // application_update, tour_reminder, payment_due, etc.
+  title       String
+  message     String
+  data        Json?     // Additional data for deep linking
+  
+  read        Boolean   @default(false)
+  readAt      DateTime?
+  
+  createdAt   DateTime  @default(now())
+  
+  @@index([userId, read])
+  @@index([createdAt])
+}
+
+// =============================================================================
+// AUDIT LOG - Compliance & Security
+// =============================================================================
+
+model AuditLog {
+  id          String    @id @default(uuid())
+  
+  userId      String?
+  user        User?     @relation("UserAuditLogs", fields: [userId], references: [id])
+  
+  action      String    // create, update, delete, view, etc.
+  resource    String    // application, listing, lease, etc.
+  resourceId  String
+  
+  // What changed
+  changes     Json?     // { field: { old: x, new: y } }
+  
+  // Context
+  ipAddress   String?
+  userAgent   String?
+  
+  // Timestamp
+  createdAt   DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([resource, resourceId])
+  @@index([createdAt])
+}
