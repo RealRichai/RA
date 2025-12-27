@@ -7,3 +7,22 @@ dist
 .DS_Store
 coverage
 *.log
+
+# deps / builds
+node_modules/
+.next/
+dist/
+.turbo/
+
+# env
+.env
+.env.*
+# deps / builds
+node_modules/
+.next/
+dist/
+.turbo/
+
+# env
+.env
+.env.*
