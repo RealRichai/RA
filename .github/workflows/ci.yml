@@ -12,15 +12,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: build
+  build-test:
+    name: build-test
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
     env:
       NEXT_PUBLIC_API_URL: http://localhost:4000/api/v1
       SKIP_ENV_VALIDATION: "1"
-      NODE_ENV: production
+      NODE_ENV: test
+      HUSKY: 0
+      CI: true
 
     steps:
       - name: Checkout
@@ -31,12 +33,14 @@ jobs:
         with:
           node-version: "22"
 
-      # ✅ This guarantees pnpm exists in PATH
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Install
+        run: pnpm install --frozen-lockfile --prod=false
 
-      - name: Build (Turbo)
+      - name: Build
         run: pnpm turbo build
+
+      - name: Test
+        run: pnpm turbo test
