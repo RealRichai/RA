@@ -1,0 +1,179 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-primary: 13 148 136;
+    --color-secondary: 212 175 55;
+    --color-accent: 205 127 50;
+    --color-charcoal: 54 69 79;
+    --color-cream: 255 253 250;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    @apply text-charcoal;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-6 py-3 
+           bg-primary text-white font-medium rounded-lg
+           hover:bg-primary/90 focus:outline-none focus:ring-2 
+           focus:ring-primary focus:ring-offset-2
+           transition-all duration-200 ease-in-out
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-6 py-3 
+           bg-secondary text-charcoal font-medium rounded-lg
+           hover:bg-secondary/90 focus:outline-none focus:ring-2 
+           focus:ring-secondary focus:ring-offset-2
+           transition-all duration-200 ease-in-out
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-outline {
+    @apply inline-flex items-center justify-center px-6 py-3 
+           border-2 border-primary text-primary font-medium rounded-lg
+           hover:bg-primary hover:text-white focus:outline-none focus:ring-2 
+           focus:ring-primary focus:ring-offset-2
+           transition-all duration-200 ease-in-out
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-ghost {
+    @apply inline-flex items-center justify-center px-6 py-3 
+           text-charcoal font-medium rounded-lg
+           hover:bg-charcoal/5 focus:outline-none focus:ring-2 
+           focus:ring-charcoal/20 focus:ring-offset-2
+           transition-all duration-200 ease-in-out;
+  }
+  
+  .input {
+    @apply w-full px-4 py-3 bg-white border border-charcoal/20 rounded-lg
+           text-charcoal placeholder:text-charcoal/40
+           focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+           transition-all duration-200 ease-in-out
+           disabled:bg-charcoal/5 disabled:cursor-not-allowed;
+  }
+  
+  .input-error {
+    @apply border-red-500 focus:ring-red-500;
+  }
+  
+  .label {
+    @apply block text-sm font-medium text-charcoal mb-1.5;
+  }
+  
+  .card {
+    @apply bg-white rounded-xl shadow-luxury overflow-hidden;
+  }
+  
+  .card-hover {
+    @apply card transition-all duration-300 ease-in-out
+           hover:shadow-luxury-lg hover:-translate-y-1;
+  }
+  
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full 
+           text-xs font-medium;
+  }
+  
+  .badge-primary {
+    @apply badge bg-primary/10 text-primary;
+  }
+  
+  .badge-secondary {
+    @apply badge bg-secondary/10 text-secondary;
+  }
+  
+  .badge-success {
+    @apply badge bg-green-100 text-green-800;
+  }
+  
+  .badge-warning {
+    @apply badge bg-amber-100 text-amber-800;
+  }
+  
+  .badge-error {
+    @apply badge bg-red-100 text-red-800;
+  }
+  
+  .section {
+    @apply py-16 md:py-24;
+  }
+  
+  .container-narrow {
+    @apply max-w-4xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+  
+  .container-wide {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary via-secondary to-accent 
+           bg-clip-text text-transparent;
+  }
+  
+  .luxury-border {
+    @apply border border-secondary/30;
+  }
+  
+  .luxury-divider {
+    @apply h-px bg-gradient-to-r from-transparent via-secondary/50 to-transparent;
+  }
+  
+  .glass {
+    @apply bg-white/80 backdrop-blur-md;
+  }
+  
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+  }
+  
+  .animate-slide-up {
+    animation: slideUp 0.5s ease-out;
+  }
+  
+  .animate-scale-in {
+    animation: scaleIn 0.3s ease-out;
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  @keyframes scaleIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}

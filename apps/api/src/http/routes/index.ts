@@ -1,0 +1,14 @@
+export { authRoutes } from './auth.js';
+export { userRoutes } from './users.js';
+export { listingRoutes } from './listings.js';
+export { applicationRoutes } from './applications.js';
+export { leaseRoutes } from './leases.js';
+export { paymentRoutes } from './payments.js';
+export { agentRoutes } from './agents.js';
+export { messageRoutes } from './messages.js';
+export { notificationRoutes } from './notifications.js';
+export { complianceRoutes } from './compliance.js';
+export { smartLockRoutes } from './smart-locks.js';
+export { adminRoutes } from './admin.js';
+export { marketRoutes } from './markets.js';
+export { webhookRoutes } from './webhooks.js';

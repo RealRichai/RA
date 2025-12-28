@@ -1,0 +1,40 @@
+{
+  "name": "realriches",
+  "version": "3.1.0",
+  "private": true,
+  "description": "RealRiches - NYC Luxury Rental Platform with FARE Act & FCHA Compliance",
+  "author": "RealRiches Inc",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "start": "turbo run start",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:generate": "pnpm --filter @realriches/api db:generate",
+    "db:push": "pnpm --filter @realriches/api db:push",
+    "db:migrate": "pnpm --filter @realriches/api db:migrate",
+    "db:studio": "pnpm --filter @realriches/api db:studio",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11",
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": ["eslint --fix", "prettier --write"],
+    "*.{json,md}": ["prettier --write"]
+  }
+}

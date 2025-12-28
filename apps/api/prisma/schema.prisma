@@ -1,0 +1,1010 @@
+// RealRiches Prisma Schema
+// PostgreSQL 16 with comprehensive NYC rental compliance
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  TENANT
+  LANDLORD
+  AGENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  ACTIVE
+  RENTED
+  EXPIRED
+  ARCHIVED
+}
+
+enum PropertyType {
+  APARTMENT
+  CONDO
+  TOWNHOUSE
+  HOUSE
+  STUDIO
+  LOFT
+  PENTHOUSE
+}
+
+enum BrokerFeeResponsibility {
+  TENANT
+  LANDLORD
+  SPLIT
+  NO_FEE
+}
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  PENDING_DOCUMENTS
+  CONDITIONALLY_APPROVED
+  FCHA_PENDING
+  FCHA_REVIEW
+  APPROVED
+  DENIED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum DocumentType {
+  ID
+  INCOME
+  EMPLOYMENT
+  BANK_STATEMENT
+  TAX_RETURN
+  CREDIT_REPORT
+  REFERENCE_LETTER
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum LeaseStatus {
+  DRAFT
+  PENDING_SIGNATURE
+  ACTIVE
+  RENEWED
+  EXPIRED
+  TERMINATED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentType {
+  RENT
+  SECURITY_DEPOSIT
+  APPLICATION_FEE
+  BROKER_FEE
+  LATE_FEE
+  UTILITY
+  COMMISSION
+  OTHER
+}
+
+enum AgentStatus {
+  PENDING_VETTING
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+}
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+  DISPUTED
+  CANCELLED
+}
+
+enum NotificationType {
+  APPLICATION_SUBMITTED
+  APPLICATION_APPROVED
+  APPLICATION_DENIED
+  LEASE_READY
+  LEASE_SIGNED
+  PAYMENT_DUE
+  PAYMENT_RECEIVED
+  PAYMENT_FAILED
+  MESSAGE_RECEIVED
+  FCHA_ASSESSMENT_REQUIRED
+  FCHA_ASSESSMENT_COMPLETE
+  LISTING_FAVORITED
+}
+
+enum FCHAAssessmentStatus {
+  PENDING
+  APPROVED
+  DENIED
+  APPEALED
+}
+
+// ============================================================================
+// USER & AUTH MODELS
+// ============================================================================
+
+model User {
+  id             String     @id @default(cuid())
+  email          String     @unique
+  emailVerified  Boolean    @default(false)
+  phone          String?
+  phoneVerified  Boolean    @default(false)
+  passwordHash   String
+  
+  firstName      String
+  lastName       String
+  avatarUrl      String?
+  
+  role           UserRole   @default(TENANT)
+  status         UserStatus @default(PENDING)
+  
+  // Encrypted PII
+  dateOfBirth    String?    // Encrypted
+  ssnLastFour    String?    // Encrypted
+  
+  // Relationships
+  sessions       Session[]
+  tenantProfile  TenantProfile?
+  landlordProfile LandlordProfile?
+  agentProfile   AgentProfile?
+  
+  // Activity
+  listings       Listing[]  @relation("LandlordListings")
+  applications   Application[]
+  leases         Lease[]    @relation("TenantLeases")
+  landlordLeases Lease[]    @relation("LandlordLeases")
+  paymentsSent   Payment[]  @relation("PayerPayments")
+  paymentsReceived Payment[] @relation("RecipientPayments")
+  
+  favorites      Favorite[]
+  messages       Message[]
+  conversations  ConversationParticipant[]
+  notifications  Notification[]
+  documents      UserDocument[]
+  
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  lastLoginAt    DateTime?
+  
+  @@index([email])
+  @@index([role, status])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  refreshToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  
+  @@index([userId])
+  @@index([refreshToken])
+}
+
+model TenantProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Employment
+  employerName    String?
+  jobTitle        String?
+  annualIncome    Decimal? @db.Decimal(12, 2)
+  employmentStart DateTime?
+  
+  // Financial
+  creditScore     Int?
+  monthlyDebt     Decimal? @db.Decimal(12, 2)
+  
+  // Emergency Contact
+  emergencyName   String?
+  emergencyPhone  String?
+  emergencyRelation String?
+  
+  // Plaid
+  plaidAccessToken String?
+  plaidItemId      String?
+  incomeVerified   Boolean @default(false)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model LandlordProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  companyName       String?
+  businessLicense   String?
+  
+  // Stripe Connect
+  stripeAccountId   String?  @unique
+  stripeOnboarded   Boolean  @default(false)
+  stripePayoutsEnabled Boolean @default(false)
+  
+  // Settings
+  autoApproveApplications Boolean @default(false)
+  requireScreening        Boolean @default(true)
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@index([stripeAccountId])
+}
+
+model AgentProfile {
+  id               String      @id @default(cuid())
+  userId           String      @unique
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // License
+  licenseNumber    String
+  licenseState     String      @db.Char(2)
+  licenseExpiry    DateTime
+  licenseVerified  Boolean     @default(false)
+  licenseVerifiedAt DateTime?
+  
+  // Profile
+  bio              String?     @db.Text
+  specialties      String[]
+  serviceAreas     String[]
+  languages        String[]
+  
+  // Ratings
+  averageRating    Decimal     @default(0) @db.Decimal(2, 1)
+  totalReviews     Int         @default(0)
+  
+  // Commission
+  commissionRate   Decimal     @default(2.5) @db.Decimal(4, 2)
+  
+  // Status
+  status           AgentStatus @default(PENDING_VETTING)
+  fareActCertified Boolean     @default(false)
+  fchaCertified    Boolean     @default(false)
+  
+  // Relationships
+  listings         Listing[]
+  reviews          AgentReview[]
+  commissions      Commission[]
+  
+  // Stripe Connect
+  stripeAccountId  String?     @unique
+  stripeOnboarded  Boolean     @default(false)
+  
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  
+  @@index([licenseNumber, licenseState])
+  @@index([status])
+}
+
+// ============================================================================
+// LISTING MODELS
+// ============================================================================
+
+model Market {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  displayName String
+  state       String    @db.Char(2)
+  timezone    String
+  enabled     Boolean   @default(true)
+  
+  // Regulations
+  fareActApplies            Boolean @default(false)
+  fchaApplies               Boolean @default(false)
+  maxApplicationFee         Decimal @db.Decimal(6, 2)
+  maxSecurityDepositMonths  Int
+  
+  // Bounds
+  boundsNorth Decimal   @db.Decimal(10, 6)
+  boundsSouth Decimal   @db.Decimal(10, 6)
+  boundsEast  Decimal   @db.Decimal(10, 6)
+  boundsWest  Decimal   @db.Decimal(10, 6)
+  centerLat   Decimal   @db.Decimal(10, 6)
+  centerLng   Decimal   @db.Decimal(10, 6)
+  
+  listings    Listing[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Listing {
+  id             String        @id @default(cuid())
+  
+  // Basic Info
+  title          String
+  description    String        @db.Text
+  propertyType   PropertyType
+  status         ListingStatus @default(DRAFT)
+  
+  // Location
+  address        String
+  unit           String?
+  city           String
+  state          String        @db.Char(2)
+  zipCode        String        @db.VarChar(10)
+  neighborhood   String?
+  latitude       Decimal?      @db.Decimal(10, 6)
+  longitude      Decimal?      @db.Decimal(10, 6)
+  
+  // Details
+  bedrooms       Int
+  bathrooms      Decimal       @db.Decimal(3, 1)
+  squareFeet     Int?
+  floorNumber    Int?
+  totalFloors    Int?
+  
+  // Pricing (FARE Act Compliant)
+  monthlyRent    Decimal       @db.Decimal(10, 2)
+  securityDeposit Decimal      @db.Decimal(10, 2)
+  brokerFee      Decimal?      @db.Decimal(10, 2)
+  brokerFeeResponsibility BrokerFeeResponsibility @default(LANDLORD)
+  applicationFee Decimal       @default(20) @db.Decimal(6, 2)
+  
+  // Availability
+  availableDate  DateTime
+  leaseTermMonths Int          @default(12)
+  
+  // Features
+  amenities      String[]
+  
+  // Relationships
+  landlordId     String
+  landlord       User          @relation("LandlordListings", fields: [landlordId], references: [id])
+  agentId        String?
+  agent          AgentProfile? @relation(fields: [agentId], references: [id])
+  marketId       String
+  market         Market        @relation(fields: [marketId], references: [id])
+  
+  images         ListingImage[]
+  applications   Application[]
+  leases         Lease[]
+  favorites      Favorite[]
+  fareDisclosures FAREActDisclosure[]
+  
+  // Virtual Tour
+  virtualTourUrl String?
+  
+  // Meta
+  viewCount      Int           @default(0)
+  inquiryCount   Int           @default(0)
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  publishedAt    DateTime?
+  expiresAt      DateTime?
+  
+  @@index([landlordId])
+  @@index([agentId])
+  @@index([marketId])
+  @@index([status, availableDate])
+  @@index([city, state, status])
+  @@index([monthlyRent])
+  @@index([bedrooms, bathrooms])
+}
+
+model ListingImage {
+  id         String   @id @default(cuid())
+  listingId  String
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  
+  url        String
+  caption    String?
+  order      Int      @default(0)
+  isPrimary  Boolean  @default(false)
+  
+  createdAt  DateTime @default(now())
+  
+  @@index([listingId])
+}
+
+model Favorite {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listingId  String
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  
+  createdAt  DateTime @default(now())
+  
+  @@unique([userId, listingId])
+  @@index([userId])
+}
+
+// ============================================================================
+// APPLICATION MODELS
+// ============================================================================
+
+model Application {
+  id             String            @id @default(cuid())
+  
+  listingId      String
+  listing        Listing           @relation(fields: [listingId], references: [id])
+  tenantId       String
+  tenant         User              @relation(fields: [tenantId], references: [id])
+  
+  status         ApplicationStatus @default(DRAFT)
+  
+  // Employment (from tenant profile or overridden)
+  employerName   String?
+  jobTitle       String?
+  annualIncome   Decimal?          @db.Decimal(12, 2)
+  employmentStart DateTime?
+  
+  // Financial
+  creditScore    Int?
+  monthlyDebt    Decimal?          @db.Decimal(12, 2)
+  
+  // FCHA Fields
+  fchaDisclosureRequired Boolean    @default(false)
+  fchaDisclosureProvided Boolean    @default(false)
+  fchaAssessmentId       String?
+  fchaAssessment         FCHAAssessment? @relation(fields: [fchaAssessmentId], references: [id])
+  
+  // FARE Act
+  applicationFeeAmount   Decimal    @db.Decimal(6, 2)
+  applicationFeePaid     Boolean    @default(false)
+  applicationFeePaymentId String?
+  
+  // Documents
+  documents      ApplicationDocument[]
+  
+  // Timeline
+  submittedAt    DateTime?
+  reviewedAt     DateTime?
+  reviewedBy     String?
+  reviewNotes    String?           @db.Text
+  
+  // Result
+  denialReason   String?           @db.Text
+  
+  lease          Lease?
+  
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  expiresAt      DateTime?
+  
+  @@index([listingId])
+  @@index([tenantId])
+  @@index([status])
+}
+
+model ApplicationDocument {
+  id            String         @id @default(cuid())
+  applicationId String
+  application   Application    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  type          DocumentType
+  name          String
+  url           String
+  status        DocumentStatus @default(PENDING)
+  
+  verifiedAt    DateTime?
+  verifiedBy    String?
+  rejectionReason String?
+  
+  uploadedAt    DateTime       @default(now())
+  
+  @@index([applicationId])
+}
+
+model UserDocument {
+  id         String         @id @default(cuid())
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type       DocumentType
+  name       String
+  url        String
+  size       Int
+  mimeType   String
+  status     DocumentStatus @default(PENDING)
+  
+  uploadedAt DateTime       @default(now())
+  
+  @@index([userId])
+}
+
+// ============================================================================
+// FCHA (Fair Chance Housing Act) MODELS
+// ============================================================================
+
+model FCHAAssessment {
+  id              String              @id @default(cuid())
+  
+  applicationId   String
+  applications    Application[]
+  
+  // Disclosure
+  hasConviction   Boolean
+  convictionDetails String?           @db.Text
+  rehabilitationEvidence String?      @db.Text
+  mitigatingFactors String?           @db.Text
+  
+  // Assessment
+  status          FCHAAssessmentStatus @default(PENDING)
+  assessorId      String?
+  
+  // Article 23-A Factors (1-5 scale)
+  factorPublicPolicy      Int?
+  factorJobRelatedness    Int?
+  factorTimeSinceConviction Int?
+  factorAgeAtOffense      Int?
+  factorSeverity          Int?
+  factorRehabilitation    Int?
+  factorEmployerInterest  Int?
+  factorCertificateOfRelief Boolean?
+  
+  rationale       String?             @db.Text
+  
+  // Timeline
+  disclosedAt     DateTime?
+  assessedAt      DateTime?
+  
+  // Dispute
+  disputedAt      DateTime?
+  disputeReason   String?             @db.Text
+  disputeResolvedAt DateTime?
+  disputeResolution String?           @db.Text
+  
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  
+  @@index([status])
+}
+
+// ============================================================================
+// LEASE MODELS
+// ============================================================================
+
+model Lease {
+  id              String      @id @default(cuid())
+  
+  listingId       String
+  listing         Listing     @relation(fields: [listingId], references: [id])
+  applicationId   String      @unique
+  application     Application @relation(fields: [applicationId], references: [id])
+  
+  tenantId        String
+  tenant          User        @relation("TenantLeases", fields: [tenantId], references: [id])
+  landlordId      String
+  landlord        User        @relation("LandlordLeases", fields: [landlordId], references: [id])
+  
+  status          LeaseStatus @default(DRAFT)
+  
+  // Terms
+  startDate       DateTime
+  endDate         DateTime
+  monthlyRent     Decimal     @db.Decimal(10, 2)
+  securityDeposit Decimal     @db.Decimal(10, 2)
+  specialTerms    String?     @db.Text
+  
+  // Signatures
+  tenantSignature    String?
+  tenantSignedAt     DateTime?
+  landlordSignature  String?
+  landlordSignedAt   DateTime?
+  
+  // DocuSign
+  docuSignEnvelopeId String?   @unique
+  signedDocumentUrl  String?
+  
+  // Renewal
+  renewalOffered     Boolean   @default(false)
+  renewalOfferDate   DateTime?
+  renewalAccepted    Boolean?
+  renewalRejectedAt  DateTime?
+  previousLeaseId    String?
+  
+  // Payments
+  payments        Payment[]
+  
+  // Smart Lock
+  smartLocks      SmartLock[]
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  terminatedAt    DateTime?
+  terminationReason String?
+  
+  @@index([tenantId])
+  @@index([landlordId])
+  @@index([status])
+}
+
+// ============================================================================
+// PAYMENT MODELS
+// ============================================================================
+
+model Payment {
+  id              String        @id @default(cuid())
+  
+  leaseId         String?
+  lease           Lease?        @relation(fields: [leaseId], references: [id])
+  
+  payerId         String
+  payer           User          @relation("PayerPayments", fields: [payerId], references: [id])
+  recipientId     String
+  recipient       User          @relation("RecipientPayments", fields: [recipientId], references: [id])
+  
+  type            PaymentType
+  status          PaymentStatus @default(PENDING)
+  
+  amount          Decimal       @db.Decimal(10, 2)
+  currency        String        @default("usd") @db.Char(3)
+  platformFee     Decimal       @default(0) @db.Decimal(10, 2)
+  netAmount       Decimal       @db.Decimal(10, 2)
+  
+  // Stripe
+  stripePaymentIntentId String? @unique
+  stripeTransferId      String?
+  stripeChargeId        String?
+  
+  // Schedule
+  dueDate         DateTime?
+  paidAt          DateTime?
+  
+  description     String?
+  metadata        Json?
+  
+  // Refund
+  refundedAmount  Decimal?      @db.Decimal(10, 2)
+  refundedAt      DateTime?
+  refundReason    String?
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([leaseId])
+  @@index([payerId])
+  @@index([recipientId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([stripePaymentIntentId])
+}
+
+model PaymentMethod {
+  id              String   @id @default(cuid())
+  userId          String
+  
+  stripePaymentMethodId String @unique
+  type            String   // card, us_bank_account
+  last4           String
+  brand           String?  // visa, mastercard, etc.
+  expiryMonth     Int?
+  expiryYear      Int?
+  
+  isDefault       Boolean  @default(false)
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([userId])
+}
+
+// ============================================================================
+// AGENT MODELS
+// ============================================================================
+
+model AgentReview {
+  id            String       @id @default(cuid())
+  
+  agentId       String
+  agent         AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  reviewerId    String
+  
+  rating        Int          // 1-5
+  comment       String?      @db.Text
+  
+  // Transaction reference
+  leaseId       String?
+  applicationId String?
+  
+  isVerified    Boolean      @default(false)
+  
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  @@index([agentId])
+  @@index([reviewerId])
+}
+
+model Commission {
+  id            String           @id @default(cuid())
+  
+  agentId       String
+  agent         AgentProfile     @relation(fields: [agentId], references: [id])
+  
+  leaseId       String
+  
+  amount        Decimal          @db.Decimal(10, 2)
+  rate          Decimal          @db.Decimal(4, 2)
+  status        CommissionStatus @default(PENDING)
+  
+  // Payout
+  stripeTransferId String?
+  paidAt           DateTime?
+  
+  approvedAt    DateTime?
+  approvedBy    String?
+  
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  
+  @@index([agentId])
+  @@index([status])
+}
+
+// ============================================================================
+// MESSAGING MODELS
+// ============================================================================
+
+model Conversation {
+  id            String   @id @default(cuid())
+  
+  listingId     String?
+  applicationId String?
+  
+  participants  ConversationParticipant[]
+  messages      Message[]
+  
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  
+  @@index([listingId])
+  @@index([applicationId])
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  lastReadAt     DateTime?
+  
+  createdAt      DateTime     @default(now())
+  
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id])
+  
+  content        String       @db.Text
+  attachments    Json?
+  
+  readAt         DateTime?
+  
+  createdAt      DateTime     @default(now())
+  
+  @@index([conversationId])
+  @@index([senderId])
+}
+
+// ============================================================================
+// NOTIFICATION MODELS
+// ============================================================================
+
+model Notification {
+  id        String           @id @default(cuid())
+  
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type      NotificationType
+  title     String
+  body      String
+  data      Json?
+  
+  read      Boolean          @default(false)
+  readAt    DateTime?
+  
+  createdAt DateTime         @default(now())
+  
+  @@index([userId, read])
+}
+
+// ============================================================================
+// COMPLIANCE MODELS
+// ============================================================================
+
+model FAREActDisclosure {
+  id              String   @id @default(cuid())
+  
+  listingId       String
+  listing         Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  
+  brokerFeeAmount       Decimal @db.Decimal(10, 2)
+  brokerFeeResponsibility BrokerFeeResponsibility
+  applicationFeeAmount  Decimal @db.Decimal(6, 2)
+  
+  // Move-in costs breakdown
+  firstMonthRent        Decimal @db.Decimal(10, 2)
+  securityDeposit       Decimal @db.Decimal(10, 2)
+  brokerFee             Decimal @db.Decimal(10, 2)
+  applicationFee        Decimal @db.Decimal(6, 2)
+  totalMoveInCost       Decimal @db.Decimal(10, 2)
+  
+  acknowledgedAt        DateTime?
+  acknowledgedBy        String?
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  @@index([listingId])
+}
+
+// ============================================================================
+// SMART LOCK MODELS
+// ============================================================================
+
+model SmartLock {
+  id              String   @id @default(cuid())
+  
+  leaseId         String?
+  lease           Lease?   @relation(fields: [leaseId], references: [id])
+  listingId       String?
+  
+  // Seam
+  seamDeviceId    String   @unique
+  deviceType      String
+  deviceName      String
+  manufacturer    String?
+  model           String?
+  
+  isOnline        Boolean  @default(true)
+  batteryLevel    Int?
+  
+  accessCodes     SmartLockAccessCode[]
+  events          SmartLockEvent[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([leaseId])
+  @@index([seamDeviceId])
+}
+
+model SmartLockAccessCode {
+  id            String    @id @default(cuid())
+  
+  smartLockId   String
+  smartLock     SmartLock @relation(fields: [smartLockId], references: [id], onDelete: Cascade)
+  
+  seamCodeId    String    @unique
+  code          String
+  name          String
+  
+  startsAt      DateTime?
+  endsAt        DateTime?
+  
+  isActive      Boolean   @default(true)
+  
+  // Usage
+  usageCount    Int       @default(0)
+  lastUsedAt    DateTime?
+  
+  createdAt     DateTime  @default(now())
+  
+  @@index([smartLockId])
+}
+
+model SmartLockEvent {
+  id           String    @id @default(cuid())
+  
+  smartLockId  String
+  smartLock    SmartLock @relation(fields: [smartLockId], references: [id], onDelete: Cascade)
+  
+  eventType    String    // lock, unlock, code_used
+  accessCodeId String?
+  method       String?   // keypad, app, manual
+  
+  occurredAt   DateTime
+  createdAt    DateTime  @default(now())
+  
+  @@index([smartLockId])
+  @@index([occurredAt])
+}
+
+// ============================================================================
+// AUDIT & SYSTEM MODELS
+// ============================================================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String?
+  
+  oldValues   Json?
+  newValues   Json?
+  
+  ipAddress   String?
+  userAgent   String?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model SystemConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  description String?
+  
+  updatedAt   DateTime @updatedAt
+  updatedBy   String?
+}
+
+model EmailLog {
+  id          String   @id @default(cuid())
+  
+  to          String
+  subject     String
+  template    String
+  status      String   // sent, delivered, bounced, failed
+  
+  sendgridId  String?
+  
+  sentAt      DateTime @default(now())
+  deliveredAt DateTime?
+  openedAt    DateTime?
+  
+  @@index([to])
+  @@index([status])
+}
