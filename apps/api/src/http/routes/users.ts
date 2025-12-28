@@ -58,7 +58,6 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         tenantProfile: true,
         landlordProfile: true,
         agentProfile: true,
-        market: true,
         documents: true
       }
     });
@@ -167,7 +166,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     const favorites = await prisma.favorite.findMany({
       where: { userId: request.user.userId },
       include: { listing: { include: { images: true, market: true } } },
-      orderBy: { uploadedAt: 'desc' }
+      orderBy: { createdAt: 'desc' }
     });
 
     return reply.send({ success: true, data: favorites });

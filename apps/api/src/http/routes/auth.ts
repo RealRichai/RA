@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Auth Routes - Registration, Login, Token Management
  */

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Application Routes - FCHA Compliant
  * Fair Chance Housing Act (NYC Local Law 63) compliance

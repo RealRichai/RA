@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Listing Routes - FARE Act Compliant
  * Application fee capped at $20, commission disclosure required

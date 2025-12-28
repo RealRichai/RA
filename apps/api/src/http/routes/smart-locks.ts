@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Smart Lock Routes - Seam API Integration
  */

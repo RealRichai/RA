@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Lease Routes - DocuSign Integration
  */

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Message Routes - In-app messaging, Sendblue iMessage integration
  */

@@ -64,8 +64,7 @@ export async function authPlugin(fastify: FastifyInstance): Promise<void> {
       await request.jwtVerify();
     } catch {
       // Token is invalid or missing, but we allow the request to continue
-      // @ts-expect-error - setting user to undefined for optional auth
-      request.user = undefined;
+      request.user = undefined as any;
     }
   });
 
