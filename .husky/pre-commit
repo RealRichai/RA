@@ -1,0 +1,6 @@
+#!/bin/sh
+# RealRiches Pre-commit Hook
+# Prevents committing build artifacts and dependencies
+
+# Run artifact check
+./scripts/check-artifacts.sh

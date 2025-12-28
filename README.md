@@ -93,6 +93,50 @@ JWT_REFRESH_SECRET=...
 
 **Agent Feedback System**: Private constructive feedback to help agents improve, 14 performance categories.
 
+## Contributing
+
+### Repository Hygiene
+
+Before committing, ensure you're not including build artifacts:
+
+```bash
+# Verify repo state
+./scripts/verify-repo.sh
+
+# Check for forbidden artifacts in staged files
+./scripts/check-artifacts.sh
+```
+
+### Pre-commit Hook
+
+A pre-commit hook automatically blocks commits containing:
+- `node_modules/`
+- `.next/`
+- `dist/`
+- `.turbo/`
+- `coverage/`
+- `.env` files (except `.env.example`)
+
+### If You Accidentally Stage Artifacts
+
+```bash
+# Remove from index only (keeps files locally)
+git rm --cached -r node_modules/
+git rm --cached -r dist/
+git rm --cached .env
+
+# Then commit the .gitignore update
+git add .gitignore
+git commit -m "chore: update gitignore"
+```
+
+### Development Workflow
+
+1. Create a feature branch from `main`
+2. Make changes
+3. Run `./scripts/verify-repo.sh` before committing
+4. Push and create PR
+
 ## License
 
 Proprietary - All rights reserved.

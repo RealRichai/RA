@@ -1,0 +1,73 @@
+# ============================================================================
+# RealRiches .gitignore
+# ============================================================================
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Turbo
+.turbo/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Prisma
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+
+# Generated files
+*.generated.ts
+*.generated.js
+
+# Cache
+.cache/
+.eslintcache
+.prettiercache
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Secrets (extra protection)
+*.pem
+*.key
+secrets/
+credentials.json
+
+# Duplicate/accidental directories
+realriches 5/
