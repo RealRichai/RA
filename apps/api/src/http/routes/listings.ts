@@ -8,7 +8,6 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { AppError, ErrorCode } from '../../lib/errors.js';
 import { redis } from '../../lib/redis.js';
-import type { Prisma } from '@prisma/client';
 
 const FARE_ACT_MAX_APPLICATION_FEE = 2000; // $20.00 in cents
 
@@ -81,22 +80,23 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
     const limit = query.limit || 20;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.ListingWhereInput = { status: 'ACTIVE' };
+    const where: Record<string, unknown> = { status: 'ACTIVE' };
 
-    if (query.marketId) where.marketId = query.marketId;
+    if (query.marketId) where['marketId'] = query.marketId;
     if (query.minPrice || query.maxPrice) {
-      where.monthlyRent = {};
-      if (query.minPrice) where.monthlyRent.gte = query.minPrice;
-      if (query.maxPrice) where.monthlyRent.lte = query.maxPrice;
+      const rentFilter: Record<string, number> = {};
+      if (query.minPrice) rentFilter['gte'] = query.minPrice;
+      if (query.maxPrice) rentFilter['lte'] = query.maxPrice;
+      where['monthlyRent'] = rentFilter;
     }
-    if (query.bedrooms !== undefined) where.bedrooms = query.bedrooms;
-    if (query.bathrooms !== undefined) where.bathrooms = { gte: query.bathrooms };
-    if (query.propertyType) where.propertyType = query.propertyType;
-    if (query.noFee) where.brokerFee = 0;
-    if (query.availableFrom) where.availableDate = { lte: new Date(query.availableFrom) };
-    if (query.amenities?.length) where.amenities = { hasEvery: query.amenities };
+    if (query.bedrooms !== undefined) where['bedrooms'] = query.bedrooms;
+    if (query.bathrooms !== undefined) where['bathrooms'] = { gte: query.bathrooms };
+    if (query.propertyType) where['propertyType'] = query.propertyType;
+    if (query.noFee) where['brokerFee'] = 0;
+    if (query.availableFrom) where['availableDate'] = { lte: new Date(query.availableFrom) };
+    if (query.amenities?.length) where['amenities'] = { hasEvery: query.amenities };
 
-    let orderBy: Prisma.ListingOrderByWithRelationInput = { createdAt: 'desc' };
+    let orderBy: Record<string, 'asc' | 'desc'> = { createdAt: 'desc' };
     switch (query.sortBy) {
       case 'price_asc': orderBy = { monthlyRent: 'asc' }; break;
       case 'price_desc': orderBy = { monthlyRent: 'desc' }; break;
@@ -263,34 +263,34 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(ErrorCode.FARE_ACT_VIOLATION, 'Application fee exceeds FARE Act maximum of $20', 400);
     }
 
-    // Build update data with proper Prisma types
-    const updateData: Prisma.ListingUpdateInput = {};
-    if (body.title !== undefined) updateData.title = body.title;
-    if (body.description !== undefined) updateData.description = body.description;
-    if (body.propertyType !== undefined) updateData.propertyType = body.propertyType;
-    if (body.bedrooms !== undefined) updateData.bedrooms = body.bedrooms;
-    if (body.bathrooms !== undefined) updateData.bathrooms = body.bathrooms;
-    if (body.squareFeet !== undefined) updateData.squareFeet = body.squareFeet;
-    if (body.monthlyRent !== undefined) updateData.monthlyRent = body.monthlyRent;
-    if (body.securityDeposit !== undefined) updateData.securityDeposit = body.securityDeposit;
-    if (body.applicationFee !== undefined) updateData.applicationFee = body.applicationFee;
-    if (body.brokerFee !== undefined) updateData.brokerFee = body.brokerFee;
-    if (body.brokerFeeResponsibility !== undefined) updateData.brokerFeeResponsibility = body.brokerFeeResponsibility;
+    // Build update data
+    const updateData: Record<string, unknown> = {};
+    if (body.title !== undefined) updateData['title'] = body.title;
+    if (body.description !== undefined) updateData['description'] = body.description;
+    if (body.propertyType !== undefined) updateData['propertyType'] = body.propertyType;
+    if (body.bedrooms !== undefined) updateData['bedrooms'] = body.bedrooms;
+    if (body.bathrooms !== undefined) updateData['bathrooms'] = body.bathrooms;
+    if (body.squareFeet !== undefined) updateData['squareFeet'] = body.squareFeet;
+    if (body.monthlyRent !== undefined) updateData['monthlyRent'] = body.monthlyRent;
+    if (body.securityDeposit !== undefined) updateData['securityDeposit'] = body.securityDeposit;
+    if (body.applicationFee !== undefined) updateData['applicationFee'] = body.applicationFee;
+    if (body.brokerFee !== undefined) updateData['brokerFee'] = body.brokerFee;
+    if (body.brokerFeeResponsibility !== undefined) updateData['brokerFeeResponsibility'] = body.brokerFeeResponsibility;
     if (body.address !== undefined) {
-      updateData.address = body.address.street;
-      updateData.unit = body.address.unit;
-      updateData.city = body.address.city;
-      updateData.state = body.address.state;
-      updateData.zipCode = body.address.zip;
+      updateData['address'] = body.address.street;
+      updateData['unit'] = body.address.unit;
+      updateData['city'] = body.address.city;
+      updateData['state'] = body.address.state;
+      updateData['zipCode'] = body.address.zip;
     }
     if (body.coordinates !== undefined) {
-      updateData.latitude = body.coordinates.lat;
-      updateData.longitude = body.coordinates.lng;
+      updateData['latitude'] = body.coordinates.lat;
+      updateData['longitude'] = body.coordinates.lng;
     }
-    if (body.amenities !== undefined) updateData.amenities = body.amenities;
-    if (body.availableDate !== undefined) updateData.availableDate = new Date(body.availableDate);
-    if (body.leaseTermMonths !== undefined) updateData.leaseTermMonths = body.leaseTermMonths;
-    if (body.marketId !== undefined) updateData.market = { connect: { id: body.marketId } };
+    if (body.amenities !== undefined) updateData['amenities'] = body.amenities;
+    if (body.availableDate !== undefined) updateData['availableDate'] = new Date(body.availableDate);
+    if (body.leaseTermMonths !== undefined) updateData['leaseTermMonths'] = body.leaseTermMonths;
+    if (body.marketId !== undefined) updateData['market'] = { connect: { id: body.marketId } };
 
     const updated = await prisma.listing.update({
       where: { id },
@@ -323,7 +323,7 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get my listings (landlord/agent)
   fastify.get('/my/listings', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    let where: Prisma.ListingWhereInput;
+    let where: Record<string, unknown>;
 
     if (request.user.role === 'LANDLORD') {
       where = { landlordId: request.user.userId };
