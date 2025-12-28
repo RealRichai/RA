@@ -1,21 +1,22 @@
 import type { FastifyReply } from 'fastify';
 import { ErrorCode } from '@realriches/shared';
+export { ErrorCode } from '@realriches/shared';
 
 export class AppError extends Error {
   public readonly statusCode: number;
   public readonly code: ErrorCode;
-  public readonly details: Record<string, unknown> | undefined;
+  public readonly details: Record<string, unknown> | undefined = undefined;
 
   constructor(
+    code: ErrorCode,
     message: string,
     statusCode: number = 500,
-    code: ErrorCode = ErrorCode.INTERNAL_ERROR,
-    details: Record<string, unknown> | undefined
+    details: Record<string, unknown> | undefined = undefined
   ) {
     super(message);
     this.name = 'AppError';
-    this.statusCode = statusCode;
     this.code = code;
+    this.statusCode = statusCode;
     if (details !== undefined) this.details = details;
     Error.captureStackTrace(this, this.constructor);
   }
@@ -36,60 +37,60 @@ export class AppError extends Error {
 export const errors = {
   // Auth errors
   unauthorized: (message = 'Unauthorized') =>
-    new AppError(message, 401, ErrorCode.UNAUTHORIZED),
-  
+    new AppError(ErrorCode.UNAUTHORIZED, message, 401),
+
   forbidden: (message = 'Forbidden') =>
-    new AppError(message, 403, ErrorCode.FORBIDDEN),
-  
+    new AppError(ErrorCode.FORBIDDEN, message, 403),
+
   tokenExpired: () =>
-    new AppError('Token has expired', 401, ErrorCode.TOKEN_EXPIRED),
-  
+    new AppError(ErrorCode.TOKEN_EXPIRED, 'Token has expired', 401),
+
   tokenInvalid: () =>
-    new AppError('Invalid token', 401, ErrorCode.TOKEN_INVALID),
+    new AppError(ErrorCode.TOKEN_INVALID, 'Invalid token', 401),
 
   // Validation errors
-  validation: (message: string, details: Record<string, unknown> | undefined) =>
-    new AppError(message, 400, ErrorCode.VALIDATION_ERROR, details),
-  
+  validation: (message: string, details: Record<string, unknown> | undefined = undefined) =>
+    new AppError(ErrorCode.VALIDATION_ERROR, message, 400, details),
+
   badRequest: (message: string) =>
-    new AppError(message, 400, ErrorCode.VALIDATION_ERROR),
+    new AppError(ErrorCode.VALIDATION_ERROR, message, 400),
 
   // Resource errors
   notFound: (resource: string) =>
-    new AppError(`${resource} not found`, 404, ErrorCode.NOT_FOUND),
-  
+    new AppError(ErrorCode.NOT_FOUND, `${resource} not found`, 404),
+
   conflict: (message: string) =>
-    new AppError(message, 409, ErrorCode.CONFLICT),
+    new AppError(ErrorCode.CONFLICT, message, 409),
 
   // Rate limiting
   rateLimited: (retryAfter?: number) =>
     new AppError(
+      ErrorCode.RATE_LIMITED,
       'Too many requests. Please try again later.',
       429,
-      ErrorCode.RATE_LIMITED,
       retryAfter ? { retryAfter } : undefined
     ),
 
   // Compliance errors
-  fareActViolation: (message: string, details: Record<string, unknown> | undefined) =>
-    new AppError(message, 400, ErrorCode.FARE_ACT_VIOLATION, details),
-  
-  fchaViolation: (message: string, details: Record<string, unknown> | undefined) =>
-    new AppError(message, 400, ErrorCode.FCHA_VIOLATION, details),
+  fareActViolation: (message: string, details: Record<string, unknown> | undefined = undefined) =>
+    new AppError(ErrorCode.FARE_ACT_VIOLATION, message, 400, details),
+
+  fchaViolation: (message: string, details: Record<string, unknown> | undefined = undefined) =>
+    new AppError(ErrorCode.FCHA_VIOLATION, message, 400, details),
 
   // Payment errors
-  paymentFailed: (message: string, details: Record<string, unknown> | undefined) =>
-    new AppError(message, 402, ErrorCode.PAYMENT_FAILED, details),
-  
-  stripeError: (message: string, details: Record<string, unknown> | undefined) =>
-    new AppError(message, 400, ErrorCode.STRIPE_ERROR, details),
+  paymentFailed: (message: string, details: Record<string, unknown> | undefined = undefined) =>
+    new AppError(ErrorCode.PAYMENT_FAILED, message, 402, details),
+
+  stripeError: (message: string, details: Record<string, unknown> | undefined = undefined) =>
+    new AppError(ErrorCode.STRIPE_ERROR, message, 400, details),
 
   // Server errors
   internal: (message = 'Internal server error') =>
-    new AppError(message, 500, ErrorCode.INTERNAL_ERROR),
-  
+    new AppError(ErrorCode.INTERNAL_ERROR, message, 500),
+
   serviceUnavailable: (service: string) =>
-    new AppError(`${service} is temporarily unavailable`, 503, ErrorCode.INTERNAL_ERROR),
+    new AppError(ErrorCode.INTERNAL_ERROR, `${service} is temporarily unavailable`, 503),
 };
 
 // Error handler for routes
@@ -154,7 +155,6 @@ export function handleError(error: unknown, reply: FastifyReply): FastifyReply {
 }
 
 
-export function errorHandler(error: unknown) {
-  // Convenience wrapper for places that only need a serializer
-  return handleError(error);
+export function errorHandler(error: unknown, _req: any, reply: any) {
+  return handleError(error, reply);
 }

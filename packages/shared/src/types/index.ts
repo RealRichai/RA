@@ -23,28 +23,34 @@ export const ErrorCode = {
   UNAUTHORIZED: 'UNAUTHORIZED',
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   TOKEN_INVALID: 'TOKEN_INVALID',
+  INVALID_TOKEN: 'INVALID_TOKEN',
   CREDENTIALS_INVALID: 'CREDENTIALS_INVALID',
+  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   SESSION_EXPIRED: 'SESSION_EXPIRED',
   MFA_REQUIRED: 'MFA_REQUIRED',
-  
+  ACCOUNT_SUSPENDED: 'ACCOUNT_SUSPENDED',
+  EMAIL_EXISTS: 'EMAIL_EXISTS',
+
   // Authorization (2xxx)
   FORBIDDEN: 'FORBIDDEN',
   INSUFFICIENT_PERMISSIONS: 'INSUFFICIENT_PERMISSIONS',
   ROLE_REQUIRED: 'ROLE_REQUIRED',
   FEATURE_DISABLED: 'FEATURE_DISABLED',
-  
+
   // Validation (3xxx)
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INVALID_INPUT: 'INVALID_INPUT',
   MISSING_REQUIRED_FIELD: 'MISSING_REQUIRED_FIELD',
   INVALID_FORMAT: 'INVALID_FORMAT',
-  
+  INVALID_TRANSITION: 'INVALID_TRANSITION',
+
   // Resource (4xxx)
   NOT_FOUND: 'NOT_FOUND',
   ALREADY_EXISTS: 'ALREADY_EXISTS',
   CONFLICT: 'CONFLICT',
   GONE: 'GONE',
-  
+  DUPLICATE: 'DUPLICATE',
+
   // Business Logic (5xxx)
   FARE_ACT_VIOLATION: 'FARE_ACT_VIOLATION',
   FCHA_VIOLATION: 'FCHA_VIOLATION',
@@ -52,14 +58,14 @@ export const ErrorCode = {
   LEASE_NOT_SIGNABLE: 'LEASE_NOT_SIGNABLE',
   PAYMENT_FAILED: 'PAYMENT_FAILED',
   INSUFFICIENT_FUNDS: 'INSUFFICIENT_FUNDS',
-  
+
   // External Services (6xxx)
   STRIPE_ERROR: 'STRIPE_ERROR',
   DOCUSIGN_ERROR: 'DOCUSIGN_ERROR',
   PLAID_ERROR: 'PLAID_ERROR',
   SEAM_ERROR: 'SEAM_ERROR',
   SENDGRID_ERROR: 'SENDGRID_ERROR',
-  
+
   // System (9xxx)
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
@@ -148,13 +154,26 @@ export interface AuthTokens {
 }
 
 export interface JWTPayload {
-  sub: string;
+  /**
+   * App-level user id. This is what our auth plugin signs into tokens and
+   * what route handlers should use for authorization.
+   */
+  userId: string;
+
+  /**
+   * Optional JWT subject (kept for interoperability / legacy).
+   * Prefer `userId` in application code.
+   */
+  sub?: string;
+
   email: string;
   role: UserRole;
+  sessionId?: string;
+
+  // Standard JWT timestamps (populated by the JWT library)
   iat: number;
   exp: number;
 }
-
 // ============================================================================
 // LISTING TYPES
 // ============================================================================
@@ -517,6 +536,8 @@ export const NotificationType = {
   APPLICATION_SUBMITTED: 'APPLICATION_SUBMITTED',
   APPLICATION_APPROVED: 'APPLICATION_APPROVED',
   APPLICATION_DENIED: 'APPLICATION_DENIED',
+  APPLICATION_UPDATE: 'APPLICATION_UPDATE',
+  NEW_APPLICATION: 'NEW_APPLICATION',
   LEASE_READY: 'LEASE_READY',
   LEASE_SIGNED: 'LEASE_SIGNED',
   PAYMENT_DUE: 'PAYMENT_DUE',
@@ -526,6 +547,7 @@ export const NotificationType = {
   LISTING_FAVORITED: 'LISTING_FAVORITED',
   FCHA_ASSESSMENT_REQUIRED: 'FCHA_ASSESSMENT_REQUIRED',
   FCHA_ASSESSMENT_COMPLETE: 'FCHA_ASSESSMENT_COMPLETE',
+  LICENSE_VERIFICATION: 'LICENSE_VERIFICATION',
 } as const;
 
 export type NotificationType = typeof NotificationType[keyof typeof NotificationType];

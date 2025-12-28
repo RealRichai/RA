@@ -92,10 +92,10 @@ export function generateTokenPair(fastify: FastifyInstance, payload: JWTPayload)
     expiresIn: env.JWT_ACCESS_EXPIRY,
   });
 
-  // Refresh token uses different secret
+  // Refresh token uses different secret (minimal payload)
   const refreshToken = fastify.jwt.sign(
-    { userId: payload.userId, sessionId: payload.sessionId },
-    { 
+    { userId: payload.userId, sessionId: payload.sessionId } as any,
+    {
       expiresIn: env.JWT_REFRESH_EXPIRY,
       // In production, use a separate secret for refresh tokens
     }

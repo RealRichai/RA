@@ -26,16 +26,28 @@ export class APIClient {
   private config: Required<SDKConfig>;
   private isRefreshing = false;
   private refreshPromise: Promise<AuthTokens> | null = null;
-  
+  private _accessToken: string | null = null;
+  private _refreshToken: string | null = null;
+
   constructor(config: SDKConfig) {
     this.config = {
       timeout: 30000,
       onTokenRefresh: () => {},
       onAuthError: () => {},
-      getAccessToken: () => null,
-      getRefreshToken: () => null,
+      getAccessToken: () => this._accessToken,
+      getRefreshToken: () => this._refreshToken,
       ...config,
     };
+  }
+
+  setTokens(accessToken: string, refreshToken: string): void {
+    this._accessToken = accessToken;
+    this._refreshToken = refreshToken;
+  }
+
+  clearTokens(): void {
+    this._accessToken = null;
+    this._refreshToken = null;
   }
   
   private async request<T>(
@@ -493,3 +505,6 @@ export function createSDK(config: SDKConfig) {
 }
 
 export type SDK = ReturnType<typeof createSDK>;
+
+// Alias for backwards compatibility
+export { APIClient as RealRichesClient };

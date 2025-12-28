@@ -1,7 +1,9 @@
-import Redis from 'ioredis';
+import IORedis from 'ioredis';
 import { env } from '../config/env.js';
 
-export const redis = new Redis(env.REDIS_URL, {
+const RedisCtor: any = (IORedis as any).default ?? IORedis;
+
+export const redis = new RedisCtor(env.REDIS_URL, {
   maxRetriesPerRequest: 3,
   retryDelayOnFailover: 100,
   enableReadyCheck: true,

@@ -16,11 +16,14 @@ const stripe = new Stripe(env.STRIPE_SECRET_KEY, {
   apiVersion: '2025-02-24.acacia',
 });
 
+// Narrowed type for webhook secret (may be undefined in dev)
+const webhookSecret = env.STRIPE_WEBHOOK_SECRET ?? '';
+
 export const webhookRoutes: FastifyPluginAsync = async (fastify) => {
   // Stripe webhooks
   fastify.post('/stripe', { config: { rawBody: true } }, async (request, reply) => {
     // Local dev / missing secrets: accept but no-op.
-    if (!env.STRIPE_WEBHOOK_SECRET || env.STRIPE_WEBHOOK_SECRET.trim().length === 0) {
+    if (!webhookSecret || webhookSecret.trim().length === 0) {
       fastify.log.warn('STRIPE_WEBHOOK_SECRET not set; accepting webhook without verification (dev-only).');
       return reply.send({ received: true, verified: false });
     }
@@ -33,7 +36,7 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify) => {
 
     let event: Stripe.Event;
     try {
-      event = stripe.webhooks.constructEvent(rawBody, sig, env.STRIPE_WEBHOOK_SECRET);
+      event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
     } catch (err) {
       fastify.log.warn({ err }, 'Stripe signature verification failed');
       return reply.code(400).send({ error: 'Invalid signature' });

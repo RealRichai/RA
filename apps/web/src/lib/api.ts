@@ -35,6 +35,9 @@ export function getApiClient(): RealRichesClient {
   return clientInstance;
 }
 
+// Singleton export for convenience
+export const apiClient = getApiClient();
+
 // Server-side fetch helper for RSC
 export async function serverFetch<T>(
   path: string,

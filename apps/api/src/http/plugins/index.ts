@@ -12,7 +12,7 @@ import { authPlugin } from './auth.js';
 export async function registerPlugins(fastify: FastifyInstance): Promise<void> {
   // Security headers
   await fastify.register(fastifyHelmet, {
-    contentSecurityPolicy: isDevelopment ? false : undefined,
+    contentSecurityPolicy: !isDevelopment,
   });
 
   // CORS

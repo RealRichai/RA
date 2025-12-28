@@ -32,7 +32,7 @@ interface FeatureToggle {
   category: 'CORE' | 'COMPLIANCE' | 'INTEGRATIONS' | 'EXPERIMENTAL';
 }
 
-export default function AdminDashboardPage() {
+export default function AdminDashboardPage(): React.JSX.Element {
   const { user, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'features' | 'compliance'>('overview');

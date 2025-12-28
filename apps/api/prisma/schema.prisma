@@ -134,6 +134,8 @@ enum NotificationType {
   APPLICATION_SUBMITTED
   APPLICATION_APPROVED
   APPLICATION_DENIED
+  APPLICATION_UPDATE
+  NEW_APPLICATION
   LEASE_READY
   LEASE_SIGNED
   PAYMENT_DUE
@@ -143,6 +145,7 @@ enum NotificationType {
   FCHA_ASSESSMENT_REQUIRED
   FCHA_ASSESSMENT_COMPLETE
   LISTING_FAVORITED
+  LICENSE_VERIFICATION
 }
 
 enum FCHAAssessmentStatus {
@@ -194,11 +197,12 @@ model User {
   conversations  ConversationParticipant[]
   notifications  Notification[]
   documents      UserDocument[]
-  
+  agentReviews   AgentReview[]
+
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   lastLoginAt    DateTime?
-  
+
   @@index([email])
   @@index([role, status])
 }
@@ -275,44 +279,50 @@ model AgentProfile {
   id               String      @id @default(cuid())
   userId           String      @unique
   user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   // License
   licenseNumber    String
   licenseState     String      @db.Char(2)
   licenseExpiry    DateTime
   licenseVerified  Boolean     @default(false)
   licenseVerifiedAt DateTime?
-  
+  licenseDocumentUrl String?
+  verificationStatus String?   @default("PENDING")
+
+  // Brokerage
+  brokerageName    String?
+  brokerageAddress String?
+
   // Profile
   bio              String?     @db.Text
   specialties      String[]
   serviceAreas     String[]
   languages        String[]
-  
+
   // Ratings
   averageRating    Decimal     @default(0) @db.Decimal(2, 1)
   totalReviews     Int         @default(0)
-  
+
   // Commission
   commissionRate   Decimal     @default(2.5) @db.Decimal(4, 2)
-  
+
   // Status
   status           AgentStatus @default(PENDING_VETTING)
   fareActCertified Boolean     @default(false)
   fchaCertified    Boolean     @default(false)
-  
+
   // Relationships
   listings         Listing[]
   reviews          AgentReview[]
   commissions      Commission[]
-  
+
   // Stripe Connect
   stripeAccountId  String?     @unique
   stripeOnboarded  Boolean     @default(false)
-  
+
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
-  
+
   @@index([licenseNumber, licenseState])
   @@index([status])
 }
@@ -402,7 +412,8 @@ model Listing {
   leases         Lease[]
   favorites      Favorite[]
   fareDisclosures FAREActDisclosure[]
-  
+  commissions    Commission[]
+
   // Virtual Tour
   virtualTourUrl String?
   
@@ -639,15 +650,16 @@ model Lease {
   
   // Payments
   payments        Payment[]
-  
+  commissions     Commission[]
+
   // Smart Lock
   smartLocks      SmartLock[]
-  
+
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   terminatedAt    DateTime?
   terminationReason String?
-  
+
   @@index([tenantId])
   @@index([landlordId])
   @@index([status])
@@ -728,49 +740,54 @@ model PaymentMethod {
 
 model AgentReview {
   id            String       @id @default(cuid())
-  
+
   agentId       String
   agent         AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
   reviewerId    String
-  
+  reviewer      User         @relation(fields: [reviewerId], references: [id])
+
   rating        Int          // 1-5
   comment       String?      @db.Text
-  
+  transactionType String?    // LEASE, APPLICATION, etc.
+
   // Transaction reference
   leaseId       String?
   applicationId String?
-  
+
   isVerified    Boolean      @default(false)
-  
+
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
-  
+
   @@index([agentId])
   @@index([reviewerId])
 }
 
 model Commission {
   id            String           @id @default(cuid())
-  
+
   agentId       String
   agent         AgentProfile     @relation(fields: [agentId], references: [id])
-  
+
   leaseId       String
-  
+  lease         Lease            @relation(fields: [leaseId], references: [id])
+  listingId     String?
+  listing       Listing?         @relation(fields: [listingId], references: [id])
+
   amount        Decimal          @db.Decimal(10, 2)
   rate          Decimal          @db.Decimal(4, 2)
   status        CommissionStatus @default(PENDING)
-  
+
   // Payout
   stripeTransferId String?
   paidAt           DateTime?
-  
+
   approvedAt    DateTime?
   approvedBy    String?
-  
+
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
-  
+
   @@index([agentId])
   @@index([status])
 }
@@ -961,20 +978,21 @@ model SmartLockEvent {
 
 model AuditLog {
   id          String   @id @default(cuid())
-  
+
   userId      String?
   action      String
   entityType  String
   entityId    String?
-  
+
   oldValues   Json?
   newValues   Json?
-  
+  details     Json?
+
   ipAddress   String?
   userAgent   String?
-  
+
   createdAt   DateTime @default(now())
-  
+
   @@index([userId])
   @@index([entityType, entityId])
   @@index([action])
