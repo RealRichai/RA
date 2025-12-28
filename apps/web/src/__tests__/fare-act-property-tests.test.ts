@@ -125,10 +125,10 @@ const nycRentArb = fc.integer({ min: 500, max: 50000 });
 const applicationFeeArb = fc.integer({ min: 0, max: 500 });
 
 // Security deposit: $0 to 3x rent (tests various scenarios)
-const securityDepositMultiplierArb = fc.float({ min: 0, max: 3, noNaN: true });
+const securityDepositMultiplierArb = fc.float({ min: 0, max: Math.fround(3), noNaN: true });
 
 // Broker fee percentage: 0% to 20% of annual rent
-const brokerFeePercentArb = fc.float({ min: 0, max: 0.20, noNaN: true });
+const brokerFeePercentArb = fc.float({ min: 0, max: Math.fround(0.20), noNaN: true });
 
 // Market selection
 const marketArb = fc.constantFrom<Market>('nyc', 'long_island');
@@ -464,7 +464,7 @@ describe('FARE Act Compliance - Property-Based Tests', () => {
       fc.assert(
         fc.property(
           nycRentArb,
-          fc.float({ min: 19.99, max: 20.01, noNaN: true }),
+          fc.float({ min: Math.fround(19.99), max: Math.fround(20.01), noNaN: true }),
           (price, appFee) => {
             const input: FareActInput = {
               market: 'nyc',

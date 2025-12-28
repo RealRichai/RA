@@ -62,16 +62,21 @@ function validateZipCode(zipCode: string): ValidationResult {
 // Price validation
 function validatePrice(price: string | number, options?: { min?: number; max?: number; required?: boolean }): ValidationResult {
   const { min = 0, max = Infinity, required = true } = options || {};
-  
+
   if (!price && price !== 0) {
     if (required) {
       return { valid: false, error: 'Price is required' };
     }
     return { valid: true };
   }
-  
+
+  // Check for valid number format before parsing (reject multiple decimals, etc.)
+  if (typeof price === 'string' && !/^-?\d+(\.\d+)?$/.test(price.trim())) {
+    return { valid: false, error: 'Please enter a valid number' };
+  }
+
   const numPrice = typeof price === 'string' ? parseFloat(price) : price;
-  
+
   if (isNaN(numPrice)) {
     return { valid: false, error: 'Please enter a valid number' };
   }
