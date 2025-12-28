@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Listing Routes - FARE Act Compliant
  * Application fee capped at $20, commission disclosure required
@@ -9,13 +8,14 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { AppError, ErrorCode } from '../../lib/errors.js';
 import { redis } from '../../lib/redis.js';
+import type { Prisma } from '@prisma/client';
 
 const FARE_ACT_MAX_APPLICATION_FEE = 2000; // $20.00 in cents
 
 const createListingSchema = z.object({
   title: z.string().min(10).max(200),
   description: z.string().min(50).max(5000),
-  propertyType: z.enum(['APARTMENT', 'HOUSE', 'CONDO', 'TOWNHOUSE', 'STUDIO', 'LOFT']),
+  propertyType: z.enum(['APARTMENT', 'HOUSE', 'CONDO', 'TOWNHOUSE', 'STUDIO', 'LOFT', 'PENTHOUSE']),
   bedrooms: z.number().int().min(0).max(10),
   bathrooms: z.number().min(0.5).max(10),
   squareFeet: z.number().int().positive().optional(),
@@ -23,8 +23,7 @@ const createListingSchema = z.object({
   securityDeposit: z.number().int().min(0),
   applicationFee: z.number().int().min(0).max(FARE_ACT_MAX_APPLICATION_FEE),
   brokerFee: z.number().min(0).optional(),
-  brokerFeeType: z.enum(['NONE', 'FLAT', 'PERCENTAGE']).optional(),
-  brokerFeePaidBy: z.enum(['TENANT', 'LANDLORD', 'SPLIT']).optional(),
+  brokerFeeResponsibility: z.enum(['TENANT', 'LANDLORD', 'SPLIT', 'NO_FEE']).optional(),
   address: z.object({
     street: z.string(),
     unit: z.string().optional(),
@@ -65,7 +64,7 @@ const searchListingsSchema = z.object({
   maxPrice: z.number().int().positive().optional(),
   bedrooms: z.number().int().min(0).optional(),
   bathrooms: z.number().min(0).optional(),
-  propertyType: z.enum(['APARTMENT', 'HOUSE', 'CONDO', 'TOWNHOUSE', 'STUDIO', 'LOFT']).optional(),
+  propertyType: z.enum(['APARTMENT', 'HOUSE', 'CONDO', 'TOWNHOUSE', 'STUDIO', 'LOFT', 'PENTHOUSE']).optional(),
   amenities: z.array(z.string()).optional(),
   noFee: z.boolean().optional(),
   availableFrom: z.string().datetime().optional(),
@@ -82,11 +81,14 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
     const limit = query.limit || 20;
     const skip = (page - 1) * limit;
 
-    const where: any = { status: 'ACTIVE' };
-    
+    const where: Prisma.ListingWhereInput = { status: 'ACTIVE' };
+
     if (query.marketId) where.marketId = query.marketId;
-    if (query.minPrice) where.monthlyRent = { ...where.monthlyRent, gte: query.minPrice };
-    if (query.maxPrice) where.monthlyRent = { ...where.monthlyRent, lte: query.maxPrice };
+    if (query.minPrice || query.maxPrice) {
+      where.monthlyRent = {};
+      if (query.minPrice) where.monthlyRent.gte = query.minPrice;
+      if (query.maxPrice) where.monthlyRent.lte = query.maxPrice;
+    }
     if (query.bedrooms !== undefined) where.bedrooms = query.bedrooms;
     if (query.bathrooms !== undefined) where.bathrooms = { gte: query.bathrooms };
     if (query.propertyType) where.propertyType = query.propertyType;
@@ -94,15 +96,14 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
     if (query.availableFrom) where.availableDate = { lte: new Date(query.availableFrom) };
     if (query.amenities?.length) where.amenities = { hasEvery: query.amenities };
 
-    const orderBy: any = {};
+    let orderBy: Prisma.ListingOrderByWithRelationInput = { createdAt: 'desc' };
     switch (query.sortBy) {
-      case 'price_asc': orderBy.monthlyRent = 'asc'; break;
-      case 'price_desc': orderBy.monthlyRent = 'desc'; break;
-      case 'date_asc': orderBy.availableDate = 'asc'; break;
-      case 'date_desc': orderBy.availableDate = 'desc'; break;
-      case 'sqft_asc': orderBy.squareFeet = 'asc'; break;
-      case 'sqft_desc': orderBy.squareFeet = 'desc'; break;
-      default: orderBy.createdAt = 'desc';
+      case 'price_asc': orderBy = { monthlyRent: 'asc' }; break;
+      case 'price_desc': orderBy = { monthlyRent: 'desc' }; break;
+      case 'date_asc': orderBy = { availableDate: 'asc' }; break;
+      case 'date_desc': orderBy = { availableDate: 'desc' }; break;
+      case 'sqft_asc': orderBy = { squareFeet: 'asc' }; break;
+      case 'sqft_desc': orderBy = { squareFeet: 'desc' }; break;
     }
 
     const [listings, total] = await Promise.all([
@@ -126,7 +127,7 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
   // Get single listing (public)
   fastify.get('/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    
+
     // Try cache first
     const cached = await redis.get(`listing:${id}`);
     if (cached) {
@@ -138,9 +139,13 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
       include: {
         images: { orderBy: { order: 'asc' } },
         market: true,
-        landlord: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-        agent: { select: { id: true, firstName: true, lastName: true, avatar: true, agentProfile: true } },
-        fareActDisclosure: true
+        landlord: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+        agent: {
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } }
+          }
+        },
+        fareDisclosures: true
       }
     });
 
@@ -173,18 +178,51 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(ErrorCode.VALIDATION_ERROR, 'Security deposit cannot exceed one month rent', 400);
     }
 
+    // Get agent profile ID if the user is an agent
+    let agentProfileId: string | undefined;
+    if (request.user.role === 'AGENT') {
+      const agentProfile = await prisma.agentProfile.findUnique({
+        where: { userId: request.user.userId }
+      });
+      agentProfileId = agentProfile?.id;
+    }
+
+    // Create listing with proper schema fields
     const listing = await prisma.listing.create({
       data: {
-        ...body,
-        landlordId: request.user.role === 'LANDLORD' ? request.user.userId : undefined,
-        agentId: request.user.role === 'AGENT' ? request.user.userId : undefined,
-        address: body.address,
-        coordinates: body.coordinates,
+        title: body.title,
+        description: body.description,
+        propertyType: body.propertyType,
+        bedrooms: body.bedrooms,
+        bathrooms: body.bathrooms,
+        squareFeet: body.squareFeet,
+        monthlyRent: body.monthlyRent,
+        securityDeposit: body.securityDeposit,
+        applicationFee: body.applicationFee,
+        brokerFee: body.brokerFee,
+        brokerFeeResponsibility: body.brokerFeeResponsibility || 'LANDLORD',
+        // Address fields - schema uses separate fields, not JSON
+        address: body.address.street,
+        unit: body.address.unit,
+        city: body.address.city,
+        state: body.address.state,
+        zipCode: body.address.zip,
+        latitude: body.coordinates?.lat,
+        longitude: body.coordinates?.lng,
         amenities: body.amenities || [],
-        utilities: body.utilities || {},
-        policies: body.policies || {},
+        availableDate: new Date(body.availableDate),
+        leaseTermMonths: body.leaseTermMonths || 12,
+        landlordId: request.user.userId,
+        agentId: agentProfileId,
+        marketId: body.marketId,
         status: 'ACTIVE',
-        images: body.images ? { create: body.images } : undefined
+        images: body.images ? {
+          create: body.images.map(img => ({
+            url: img.url,
+            caption: img.caption,
+            order: img.order
+          }))
+        } : undefined
       },
       include: { images: true, market: true }
     });
@@ -193,11 +231,14 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
     await prisma.fAREActDisclosure.create({
       data: {
         listingId: listing.id,
-        applicationFee: body.applicationFee,
+        brokerFeeAmount: body.brokerFee || 0,
+        brokerFeeResponsibility: body.brokerFeeResponsibility || 'LANDLORD',
+        applicationFeeAmount: body.applicationFee,
+        firstMonthRent: body.monthlyRent,
+        securityDeposit: body.securityDeposit,
         brokerFee: body.brokerFee || 0,
-        brokerFeePaidBy: body.brokerFeePaidBy || 'TENANT',
-        disclosureText: generateFareActDisclosure(body),
-        acceptedAt: null
+        applicationFee: body.applicationFee,
+        totalMoveInCost: body.monthlyRent + body.securityDeposit + (body.brokerFee || 0) + body.applicationFee
       }
     });
 
@@ -222,9 +263,38 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(ErrorCode.FARE_ACT_VIOLATION, 'Application fee exceeds FARE Act maximum of $20', 400);
     }
 
+    // Build update data with proper Prisma types
+    const updateData: Prisma.ListingUpdateInput = {};
+    if (body.title !== undefined) updateData.title = body.title;
+    if (body.description !== undefined) updateData.description = body.description;
+    if (body.propertyType !== undefined) updateData.propertyType = body.propertyType;
+    if (body.bedrooms !== undefined) updateData.bedrooms = body.bedrooms;
+    if (body.bathrooms !== undefined) updateData.bathrooms = body.bathrooms;
+    if (body.squareFeet !== undefined) updateData.squareFeet = body.squareFeet;
+    if (body.monthlyRent !== undefined) updateData.monthlyRent = body.monthlyRent;
+    if (body.securityDeposit !== undefined) updateData.securityDeposit = body.securityDeposit;
+    if (body.applicationFee !== undefined) updateData.applicationFee = body.applicationFee;
+    if (body.brokerFee !== undefined) updateData.brokerFee = body.brokerFee;
+    if (body.brokerFeeResponsibility !== undefined) updateData.brokerFeeResponsibility = body.brokerFeeResponsibility;
+    if (body.address !== undefined) {
+      updateData.address = body.address.street;
+      updateData.unit = body.address.unit;
+      updateData.city = body.address.city;
+      updateData.state = body.address.state;
+      updateData.zipCode = body.address.zip;
+    }
+    if (body.coordinates !== undefined) {
+      updateData.latitude = body.coordinates.lat;
+      updateData.longitude = body.coordinates.lng;
+    }
+    if (body.amenities !== undefined) updateData.amenities = body.amenities;
+    if (body.availableDate !== undefined) updateData.availableDate = new Date(body.availableDate);
+    if (body.leaseTermMonths !== undefined) updateData.leaseTermMonths = body.leaseTermMonths;
+    if (body.marketId !== undefined) updateData.market = { connect: { id: body.marketId } };
+
     const updated = await prisma.listing.update({
       where: { id },
-      data: body,
+      data: updateData,
       include: { images: true, market: true }
     });
 
@@ -234,7 +304,7 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ success: true, data: updated });
   });
 
-  // Delete listing
+  // Delete listing - use ARCHIVED instead of DELETED (not in enum)
   fastify.delete('/:id', { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
@@ -245,7 +315,7 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not authorized to delete this listing', 403);
     }
 
-    await prisma.listing.update({ where: { id }, data: { status: 'DELETED' } });
+    await prisma.listing.update({ where: { id }, data: { status: 'ARCHIVED' } });
     await redis.del(`listing:${id}`);
 
     return reply.send({ success: true, message: 'Listing deleted' });
@@ -253,12 +323,20 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get my listings (landlord/agent)
   fastify.get('/my/listings', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const where = request.user.role === 'LANDLORD'
-      ? { landlordId: request.user.userId }
-      : { agentId: request.user.userId };
+    let where: Prisma.ListingWhereInput;
+
+    if (request.user.role === 'LANDLORD') {
+      where = { landlordId: request.user.userId };
+    } else {
+      // For agents, find listings by agent profile id
+      const agentProfile = await prisma.agentProfile.findUnique({
+        where: { userId: request.user.userId }
+      });
+      where = { agentId: agentProfile?.id };
+    }
 
     const listings = await prisma.listing.findMany({
-      where: { ...where, status: { not: 'DELETED' } },
+      where: { ...where, status: { not: 'ARCHIVED' } },
       include: { images: { orderBy: { order: 'asc' } }, market: true, _count: { select: { applications: true } } },
       orderBy: { createdAt: 'desc' }
     });
@@ -266,26 +344,3 @@ export const listingRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ success: true, data: listings });
   });
 };
-
-function generateFareActDisclosure(listing: z.infer<typeof createListingSchema>): string {
-  const lines = [
-    'FARE Act Disclosure (NYC Local Law 18 of 2024)',
-    '',
-    `Monthly Rent: $${(listing.monthlyRent / 100).toFixed(2)}`,
-    `Security Deposit: $${(listing.securityDeposit / 100).toFixed(2)}`,
-    `Application Fee: $${(listing.applicationFee / 100).toFixed(2)} (Maximum allowed: $20.00)`,
-  ];
-
-  if (listing.brokerFee && listing.brokerFee > 0) {
-    const feeText = listing.brokerFeeType === 'PERCENTAGE'
-      ? `${listing.brokerFee}% of annual rent`
-      : `$${(listing.brokerFee / 100).toFixed(2)}`;
-    lines.push(`Broker Fee: ${feeText} (Paid by: ${listing.brokerFeePaidBy})`);
-  } else {
-    lines.push('Broker Fee: None (No Fee Listing)');
-  }
-
-  lines.push('', 'This disclosure is provided in compliance with the NYC FARE Act effective June 14, 2025.');
-  
-  return lines.join('\n');
-}

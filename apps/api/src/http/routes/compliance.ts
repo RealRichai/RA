@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Compliance Routes - FARE Act, FCHA, NYC Local Laws
  */
@@ -6,6 +5,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { prisma } from '../../lib/prisma.js';
 import { AppError, ErrorCode } from '../../lib/errors.js';
+import type { Prisma } from '@prisma/client';
 
 const FARE_ACT_MAX_APPLICATION_FEE = 2000; // $20.00
 
@@ -14,7 +14,7 @@ export const complianceRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/fare-act/:listingId', async (request, reply) => {
     const { listingId } = request.params as { listingId: string };
 
-    const disclosure = await prisma.fAREActDisclosure.findUnique({
+    const disclosure = await prisma.fAREActDisclosure.findFirst({
       where: { listingId },
       include: { listing: { select: { id: true, title: true, monthlyRent: true } } }
     });
@@ -28,12 +28,12 @@ export const complianceRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/fare-act/:listingId/accept', { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { listingId } = request.params as { listingId: string };
 
-    const disclosure = await prisma.fAREActDisclosure.findUnique({ where: { listingId } });
+    const disclosure = await prisma.fAREActDisclosure.findFirst({ where: { listingId } });
     if (!disclosure) throw new AppError(ErrorCode.NOT_FOUND, 'Disclosure not found', 404);
 
     const updated = await prisma.fAREActDisclosure.update({
-      where: { listingId },
-      data: { acceptedAt: new Date(), acceptedBy: request.user.userId }
+      where: { id: disclosure.id },
+      data: { acknowledgedAt: new Date(), acknowledgedBy: request.user.userId }
     });
 
     return reply.send({ success: true, data: updated });
@@ -108,18 +108,33 @@ export const complianceRoutes: FastifyPluginAsync = async (fastify) => {
       entityType?: string; entityId?: string; page?: number; limit?: number;
     };
 
-    const where: any = {};
+    const where: Prisma.AuditLogWhereInput = {};
     if (entityType) where.entityType = entityType;
     if (entityId) where.entityId = entityId;
 
     const logs = await prisma.auditLog.findMany({
       where,
-      include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * limit,
       take: limit
     });
 
-    return reply.send({ success: true, data: logs });
+    // Fetch user details for logs that have userId
+    const userIds = logs.map(log => log.userId).filter((id): id is string => id !== null);
+    const users = userIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, firstName: true, lastName: true, email: true }
+        })
+      : [];
+
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    const logsWithUsers = logs.map(log => ({
+      ...log,
+      user: log.userId ? userMap.get(log.userId) ?? null : null
+    }));
+
+    return reply.send({ success: true, data: logsWithUsers });
   });
 };

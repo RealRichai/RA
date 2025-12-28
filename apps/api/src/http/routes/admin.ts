@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Admin Routes - Platform Management, Feature Toggles
  */
@@ -7,11 +6,12 @@ import { FastifyPluginAsync } from 'fastify';
 import { prisma } from '../../lib/prisma.js';
 import { AppError, ErrorCode } from '../../lib/errors.js';
 import { redis } from '../../lib/redis.js';
+import type { UserStatus, Prisma } from '@prisma/client';
 
 export const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // Admin middleware
   fastify.addHook('preHandler', async (request) => {
-    await fastify.authenticate(request, {} as any);
+    await fastify.authenticate(request, {} as never);
     if (request.user.role !== 'ADMIN') {
       throw new AppError(ErrorCode.FORBIDDEN, 'Admin access required', 403);
     }
@@ -26,15 +26,30 @@ export const adminRoutes: FastifyPluginAsync = async (fastify) => {
       prisma.payment.aggregate({ _sum: { amount: true, platformFee: true }, _count: true })
     ]);
 
+    const userStats: Record<string, number> = {};
+    for (const u of users) {
+      userStats[u.role] = u._count;
+    }
+
+    const listingStats: Record<string, number> = {};
+    for (const l of listings) {
+      listingStats[l.status] = l._count;
+    }
+
+    const applicationStats: Record<string, number> = {};
+    for (const a of applications) {
+      applicationStats[a.status] = a._count;
+    }
+
     return reply.send({
       success: true,
       data: {
-        users: users.reduce((acc, u) => ({ ...acc, [u.role]: u._count }), {}),
-        listings: listings.reduce((acc, l) => ({ ...acc, [l.status]: l._count }), {}),
-        applications: applications.reduce((acc, a) => ({ ...acc, [a.status]: a._count }), {}),
+        users: userStats,
+        listings: listingStats,
+        applications: applicationStats,
         payments: {
-          total: payments._sum.amount || 0,
-          platformFees: payments._sum.platformFee || 0,
+          total: payments._sum.amount ? Number(payments._sum.amount) : 0,
+          platformFees: payments._sum.platformFee ? Number(payments._sum.platformFee) : 0,
           count: payments._count
         }
       }
@@ -47,9 +62,9 @@ export const adminRoutes: FastifyPluginAsync = async (fastify) => {
       role?: string; status?: string; search?: string; page?: number; limit?: number;
     };
 
-    const where: any = {};
-    if (role) where.role = role;
-    if (status) where.status = status;
+    const where: Prisma.UserWhereInput = {};
+    if (role) where.role = role as Prisma.EnumUserRoleFilter;
+    if (status) where.status = status as Prisma.EnumUserStatusFilter;
     if (search) {
       where.OR = [
         { email: { contains: search, mode: 'insensitive' } },
@@ -82,11 +97,11 @@ export const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // Update user status
   fastify.patch('/users/:id/status', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { status, reason } = request.body as { status: string; reason?: string };
+    const { status, reason } = request.body as { status: UserStatus; reason?: string };
 
     const user = await prisma.user.update({
       where: { id },
-      data: { status, statusReason: reason }
+      data: { status }
     });
 
     // Audit log
@@ -109,24 +124,27 @@ export const adminRoutes: FastifyPluginAsync = async (fastify) => {
       where: { key: { startsWith: 'feature.' } }
     });
 
-    const features = configs.reduce((acc, c) => {
+    const features: Record<string, unknown> = {};
+    for (const c of configs) {
       const key = c.key.replace('feature.', '');
-      return { ...acc, [key]: JSON.parse(c.value) };
-    }, {});
+      // c.value is already Json type, parse if string
+      const value = typeof c.value === 'string' ? JSON.parse(c.value) : c.value;
+      features[key] = value;
+    }
 
     return reply.send({ success: true, data: features });
   });
 
   fastify.patch('/features/:key', async (request, reply) => {
     const { key } = request.params as { key: string };
-    const { enabled, config } = request.body as { enabled: boolean; config?: any };
+    const { enabled, config } = request.body as { enabled: boolean; config?: Record<string, unknown> };
 
     const fullKey = `feature.${key}`;
-    
+
     await prisma.systemConfig.upsert({
       where: { key: fullKey },
-      update: { value: JSON.stringify({ enabled, ...config }) },
-      create: { key: fullKey, value: JSON.stringify({ enabled, ...config }) }
+      update: { value: { enabled, ...config } },
+      create: { key: fullKey, value: { enabled, ...config } }
     });
 
     // Invalidate cache
@@ -156,9 +174,8 @@ export const adminRoutes: FastifyPluginAsync = async (fastify) => {
       where: { userId: id },
       data: {
         verificationStatus: status,
-        verificationNotes: notes,
-        verifiedAt: status === 'VERIFIED' ? new Date() : null,
-        verifiedBy: request.user.userId
+        licenseVerified: status === 'VERIFIED',
+        licenseVerifiedAt: status === 'VERIFIED' ? new Date() : null
       }
     });
 
@@ -168,7 +185,7 @@ export const adminRoutes: FastifyPluginAsync = async (fastify) => {
         userId: id,
         type: 'LICENSE_VERIFICATION',
         title: status === 'VERIFIED' ? 'License Verified!' : 'License Verification Failed',
-        message: status === 'VERIFIED' 
+        body: status === 'VERIFIED'
           ? 'Your license has been verified. You can now list properties.'
           : `Your license verification was rejected. ${notes || ''}`
       }
@@ -185,12 +202,12 @@ export const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.patch('/config/:key', async (request, reply) => {
     const { key } = request.params as { key: string };
-    const { value } = request.body as { value: string };
+    const { value } = request.body as { value: Record<string, unknown> | string | number | boolean };
 
     const config = await prisma.systemConfig.upsert({
       where: { key },
-      update: { value },
-      create: { key, value }
+      update: { value: value as Prisma.InputJsonValue },
+      create: { key, value: value as Prisma.InputJsonValue }
     });
 
     await redis.del(`config:${key}`);
@@ -204,7 +221,7 @@ export const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
     const payments = await prisma.payment.findMany({
       where: {
-        status: 'COMPLETED',
+        status: 'SUCCEEDED',
         paidAt: {
           gte: new Date(startDate),
           lte: new Date(endDate)
@@ -214,14 +231,14 @@ export const adminRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     // Group by month
-    const byMonth = payments.reduce((acc, p) => {
+    const byMonth: Record<string, { total: number; fees: number; count: number }> = {};
+    for (const p of payments) {
       const month = p.paidAt!.toISOString().slice(0, 7);
-      if (!acc[month]) acc[month] = { total: 0, fees: 0, count: 0 };
-      acc[month].total += p.amount;
-      acc[month].fees += p.platformFee || 0;
-      acc[month].count += 1;
-      return acc;
-    }, {} as Record<string, { total: number; fees: number; count: number }>);
+      if (!byMonth[month]) byMonth[month] = { total: 0, fees: 0, count: 0 };
+      byMonth[month].total += Number(p.amount);
+      byMonth[month].fees += Number(p.platformFee);
+      byMonth[month].count += 1;
+    }
 
     return reply.send({ success: true, data: byMonth });
   });

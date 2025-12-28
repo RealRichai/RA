@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Application Routes - FCHA Compliant
  * Fair Chance Housing Act (NYC Local Law 63) compliance
@@ -68,19 +67,19 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     // Check listing exists and is active
     const listing = await prisma.listing.findUnique({
       where: { id: body.listingId },
-      include: { fareActDisclosure: true }
+      include: { fareDisclosures: true }
     });
 
     if (!listing || listing.status !== 'ACTIVE') {
       throw new AppError(ErrorCode.NOT_FOUND, 'Listing not found or not available', 404);
     }
 
-    // Check for existing application
+    // Check for existing application - use DENIED and WITHDRAWN
     const existing = await prisma.application.findFirst({
-      where: { 
-        listingId: body.listingId, 
+      where: {
+        listingId: body.listingId,
         tenantId: request.user.userId,
-        status: { notIn: ['WITHDRAWN', 'REJECTED'] }
+        status: { notIn: ['WITHDRAWN', 'DENIED'] }
       }
     });
 
@@ -92,29 +91,26 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       data: {
         listingId: body.listingId,
         tenantId: request.user.userId,
-        status: 'PENDING',
-        employmentInfo: body.employmentInfo,
-        references: body.references || [],
-        additionalOccupants: body.additionalOccupants || 0,
-        pets: body.pets || [],
-        moveInDate: new Date(body.moveInDate),
-        message: body.message,
-        fchaStatus: 'NOT_APPLICABLE', // FCHA only applies after conditional offer
-        fareActDisclosureAccepted: true,
-        fareActDisclosureAcceptedAt: new Date()
+        status: 'SUBMITTED',
+        employerName: body.employmentInfo.employer,
+        jobTitle: body.employmentInfo.title,
+        annualIncome: body.employmentInfo.monthlyIncome * 12,
+        employmentStart: body.employmentInfo.startDate ? new Date(body.employmentInfo.startDate) : undefined,
+        applicationFeeAmount: listing.applicationFee,
+        submittedAt: new Date()
       },
       include: { listing: { include: { images: true } } }
     });
 
     // Notify landlord/agent
-    const recipientId = listing.landlordId || listing.agentId;
+    const recipientId = listing.landlordId || (listing.agentId ? listing.agentId : null);
     if (recipientId) {
       await prisma.notification.create({
         data: {
           userId: recipientId,
           type: 'NEW_APPLICATION',
           title: 'New Application Received',
-          message: `New application for ${listing.title}`,
+          body: `New application for ${listing.title}`,
           data: { applicationId: application.id, listingId: listing.id }
         }
       });
@@ -131,7 +127,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       where: { id },
       include: {
         listing: { include: { images: true, market: true } },
-        tenant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, avatar: true } },
+        tenant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, avatarUrl: true } },
         documents: true,
         fchaAssessment: true
       }
@@ -141,7 +137,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Authorization: tenant can see their own, landlord/agent can see for their listings
     const isOwner = application.tenantId === request.user.userId;
-    const isListingOwner = application.listing.landlordId === request.user.userId || 
+    const isListingOwner = application.listing.landlordId === request.user.userId ||
                            application.listing.agentId === request.user.userId;
     const isAdmin = request.user.role === 'ADMIN';
 
@@ -177,7 +173,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const applications = await prisma.application.findMany({
       where: { listingId },
       include: {
-        tenant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, avatar: true, tenantProfile: true } },
+        tenant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, avatarUrl: true, tenantProfile: true } },
         documents: true
       },
       orderBy: { createdAt: 'desc' }
@@ -198,20 +194,21 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
 
     if (!application) throw new AppError(ErrorCode.NOT_FOUND, 'Application not found', 404);
 
-    if (application.listing.landlordId !== request.user.userId && 
-        application.listing.agentId !== request.user.userId && 
+    if (application.listing.landlordId !== request.user.userId &&
+        application.listing.agentId !== request.user.userId &&
         request.user.role !== 'ADMIN') {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not authorized', 403);
     }
 
-    // FCHA Compliance: Can only move to CONDITIONAL_OFFER before assessing criminal history
+    // FCHA Compliance: Can only move to CONDITIONALLY_APPROVED before assessing criminal history
+    // Map to correct ApplicationStatus values from schema
     const validTransitions: Record<string, string[]> = {
-      'PENDING': ['UNDER_REVIEW', 'REJECTED', 'WITHDRAWN'],
-      'UNDER_REVIEW': ['CONDITIONAL_OFFER', 'REJECTED'],
-      'CONDITIONAL_OFFER': ['FCHA_PENDING', 'APPROVED', 'REJECTED'], // FCHA only after conditional offer
-      'FCHA_PENDING': ['FCHA_APPROVED', 'FCHA_DENIED'],
-      'FCHA_APPROVED': ['APPROVED'],
-      'FCHA_DENIED': ['REJECTED']
+      'SUBMITTED': ['UNDER_REVIEW', 'DENIED', 'WITHDRAWN'],
+      'UNDER_REVIEW': ['CONDITIONALLY_APPROVED', 'DENIED', 'PENDING_DOCUMENTS'],
+      'PENDING_DOCUMENTS': ['UNDER_REVIEW', 'DENIED'],
+      'CONDITIONALLY_APPROVED': ['FCHA_PENDING', 'APPROVED', 'DENIED'],
+      'FCHA_PENDING': ['FCHA_REVIEW', 'APPROVED', 'DENIED'],
+      'FCHA_REVIEW': ['APPROVED', 'DENIED']
     };
 
     if (!validTransitions[application.status]?.includes(status)) {
@@ -221,11 +218,10 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const updated = await prisma.application.update({
       where: { id },
       data: {
-        status,
-        statusReason: reason,
-        ...(status === 'CONDITIONAL_OFFER' && { conditionalOfferAt: new Date() }),
-        ...(status === 'FCHA_PENDING' && { fchaStatus: 'PENDING_ASSESSMENT' }),
-        ...(status === 'APPROVED' && { approvedAt: new Date() })
+        status: status as 'SUBMITTED' | 'UNDER_REVIEW' | 'CONDITIONALLY_APPROVED' | 'FCHA_PENDING' | 'FCHA_REVIEW' | 'APPROVED' | 'DENIED' | 'WITHDRAWN',
+        denialReason: status === 'DENIED' ? reason : undefined,
+        reviewedAt: ['APPROVED', 'DENIED'].includes(status) ? new Date() : undefined,
+        reviewedBy: ['APPROVED', 'DENIED'].includes(status) ? request.user.userId : undefined
       }
     });
 
@@ -235,7 +231,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         userId: application.tenantId,
         type: 'APPLICATION_UPDATE',
         title: 'Application Status Updated',
-        message: `Your application status has been updated to: ${status}`,
+        body: `Your application status has been updated to: ${status}`,
         data: { applicationId: id, status }
       }
     });
@@ -246,7 +242,8 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   // Submit FCHA assessment (AFTER conditional offer only)
   fastify.post('/:id/fcha-assessment', { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = fchaAssessmentSchema.parse({ ...request.body, applicationId: id });
+    const rawBody = request.body as Record<string, unknown>;
+    const body = fchaAssessmentSchema.parse({ ...rawBody, applicationId: id });
 
     const application = await prisma.application.findUnique({
       where: { id },
@@ -256,7 +253,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     if (!application) throw new AppError(ErrorCode.NOT_FOUND, 'Application not found', 404);
 
     // FCHA Compliance: Can only assess after conditional offer
-    if (application.status !== 'FCHA_PENDING' && application.status !== 'CONDITIONAL_OFFER') {
+    if (application.status !== 'FCHA_PENDING' && application.status !== 'CONDITIONALLY_APPROVED') {
       throw new AppError(
         ErrorCode.FCHA_VIOLATION,
         'Criminal history can only be assessed after a conditional offer is made (FCHA compliance)',
@@ -264,8 +261,8 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       );
     }
 
-    if (application.listing.landlordId !== request.user.userId && 
-        application.listing.agentId !== request.user.userId && 
+    if (application.listing.landlordId !== request.user.userId &&
+        application.listing.agentId !== request.user.userId &&
         request.user.role !== 'ADMIN') {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not authorized', 403);
     }
@@ -281,20 +278,24 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     );
 
     // Score >= 3.0 generally favors approval
-    const recommendation = weightedScore >= 3.0 ? 'APPROVE' : 'FURTHER_REVIEW';
+    const recommendation: 'PENDING' | 'APPROVED' | 'DENIED' = weightedScore >= 3.0 ? 'APPROVED' : 'PENDING';
 
     const assessment = await prisma.fCHAAssessment.create({
       data: {
         applicationId: id,
-        assessedBy: request.user.userId,
-        hasCriminalHistory: body.hasCriminalHistory,
-        convictionDetails: body.convictionDetails || [],
-        article23AFactors: body.factors,
-        weightedScore,
-        recommendation,
-        supportingDocuments: body.supportingDocuments || [],
-        additionalContext: body.additionalContext,
-        status: 'COMPLETED'
+        assessorId: request.user.userId,
+        hasConviction: body.hasCriminalHistory,
+        convictionDetails: body.convictionDetails ? JSON.stringify(body.convictionDetails) : undefined,
+        rehabilitationEvidence: body.additionalContext,
+        factorTimeSinceConviction: factors.timeElapsed,
+        factorAgeAtOffense: factors.ageAtOffense,
+        factorRehabilitation: factors.rehabilitation,
+        factorJobRelatedness: factors.relevanceToHousing,
+        factorEmployerInterest: factors.characterReferences,
+        rationale: `Weighted score: ${weightedScore.toFixed(2)}`,
+        status: recommendation,
+        disclosedAt: new Date(),
+        assessedAt: new Date()
       }
     });
 
@@ -302,8 +303,8 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     await prisma.application.update({
       where: { id },
       data: {
-        fchaStatus: 'ASSESSMENT_COMPLETE',
-        fchaAssessmentId: assessment.id
+        fchaAssessmentId: assessment.id,
+        status: 'FCHA_REVIEW'
       }
     });
 
@@ -321,13 +322,13 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not authorized', 403);
     }
 
-    if (['APPROVED', 'REJECTED', 'WITHDRAWN'].includes(application.status)) {
+    if (['APPROVED', 'DENIED', 'WITHDRAWN'].includes(application.status)) {
       throw new AppError(ErrorCode.INVALID_TRANSITION, 'Cannot withdraw application in current status', 400);
     }
 
     const updated = await prisma.application.update({
       where: { id },
-      data: { status: 'WITHDRAWN', withdrawnAt: new Date() }
+      data: { status: 'WITHDRAWN' }
     });
 
     return reply.send({ success: true, data: updated });
@@ -336,8 +337,8 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   // Upload application document
   fastify.post('/:id/documents', { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { type, url, name, mimeType, size } = request.body as {
-      type: string; url: string; name: string; mimeType: string; size: number;
+    const { type, url, name } = request.body as {
+      type: string; url: string; name: string;
     };
 
     const application = await prisma.application.findUnique({ where: { id } });
@@ -346,8 +347,20 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not authorized', 403);
     }
 
+    // Map document type to valid enum values
+    const validTypes = ['ID', 'INCOME', 'EMPLOYMENT', 'BANK_STATEMENT', 'TAX_RETURN', 'CREDIT_REPORT', 'REFERENCE_LETTER', 'OTHER'] as const;
+    const docType = validTypes.includes(type as typeof validTypes[number])
+      ? type as typeof validTypes[number]
+      : 'OTHER';
+
     const document = await prisma.applicationDocument.create({
-      data: { applicationId: id, type, url, name, mimeType, size, status: 'PENDING' }
+      data: {
+        applicationId: id,
+        type: docType,
+        url,
+        name,
+        status: 'PENDING'
+      }
     });
 
     return reply.status(201).send({ success: true, data: document });

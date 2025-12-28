@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Payment Routes - Stripe Connect Integration
  * Platform fee: 1% of transaction
@@ -11,7 +10,7 @@ import { AppError, ErrorCode } from '../../lib/errors.js';
 import Stripe from 'stripe';
 import { env } from '../../config/env.js';
 
-const stripe = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2024-12-18.acacia' });
+const stripe = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2025-02-24.acacia' });
 
 const PLATFORM_FEE_PERCENT = 1; // 1% platform fee
 
@@ -26,8 +25,8 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
   // Get payment history
   fastify.get('/', { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const where = request.user.role === 'TENANT'
-      ? { tenantId: request.user.userId }
-      : { landlordId: request.user.userId };
+      ? { payerId: request.user.userId }
+      : { recipientId: request.user.userId };
 
     const payments = await prisma.payment.findMany({
       where,
@@ -48,15 +47,15 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
       where: { id },
       include: {
         lease: { include: { listing: true } },
-        tenant: { select: { id: true, firstName: true, lastName: true } },
-        landlord: { select: { id: true, firstName: true, lastName: true } }
+        payer: { select: { id: true, firstName: true, lastName: true } },
+        recipient: { select: { id: true, firstName: true, lastName: true } }
       }
     });
 
     if (!payment) throw new AppError(ErrorCode.NOT_FOUND, 'Payment not found', 404);
 
-    if (payment.tenantId !== request.user.userId && 
-        payment.landlordId !== request.user.userId && 
+    if (payment.payerId !== request.user.userId &&
+        payment.recipientId !== request.user.userId &&
         request.user.role !== 'ADMIN') {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not authorized', 403);
     }
@@ -74,7 +73,7 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
 
     const lease = await prisma.lease.findUnique({
       where: { id: body.leaseId },
-      include: { 
+      include: {
         landlord: { include: { landlordProfile: true } }
       }
     });
@@ -86,11 +85,12 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Calculate platform fee
     const platformFee = Math.round(body.amount * PLATFORM_FEE_PERCENT / 100);
+    const netAmount = body.amount - platformFee;
 
     // Get landlord's Stripe Connect account
     const landlordProfile = lease.landlord.landlordProfile;
-    if (!landlordProfile?.stripeConnectId || !landlordProfile?.stripeOnboardingComplete) {
-      throw new AppError(ErrorCode.STRIPE_CONNECT_REQUIRED, 'Landlord has not completed Stripe Connect setup', 400);
+    if (!landlordProfile?.stripeAccountId || !landlordProfile?.stripeOnboarded) {
+      throw new AppError(ErrorCode.PAYMENT_FAILED, 'Landlord has not completed Stripe Connect setup', 400);
     }
 
     // Create Stripe Payment Intent with Connect
@@ -99,7 +99,7 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
       currency: 'usd',
       application_fee_amount: platformFee,
       transfer_data: {
-        destination: landlordProfile.stripeConnectId
+        destination: landlordProfile.stripeAccountId
       },
       metadata: {
         leaseId: body.leaseId,
@@ -112,10 +112,11 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
     const payment = await prisma.payment.create({
       data: {
         leaseId: body.leaseId,
-        tenantId: request.user.userId,
-        landlordId: lease.landlordId,
+        payerId: request.user.userId,
+        recipientId: lease.landlordId,
         amount: body.amount,
         platformFee,
+        netAmount,
         type: body.type,
         status: 'PENDING',
         stripePaymentIntentId: paymentIntent.id,
@@ -141,13 +142,13 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
     const payment = await prisma.payment.findUnique({ where: { id } });
     if (!payment) throw new AppError(ErrorCode.NOT_FOUND, 'Payment not found', 404);
 
-    if (payment.tenantId !== request.user.userId) {
+    if (payment.payerId !== request.user.userId) {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not authorized', 403);
     }
 
     // Verify with Stripe
     const paymentIntent = await stripe.paymentIntents.retrieve(stripePaymentIntentId);
-    
+
     if (paymentIntent.status !== 'succeeded') {
       throw new AppError(ErrorCode.PAYMENT_FAILED, 'Payment not confirmed by Stripe', 400);
     }
@@ -155,7 +156,7 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
     const updated = await prisma.payment.update({
       where: { id },
       data: {
-        status: 'COMPLETED',
+        status: 'SUCCEEDED',
         paidAt: new Date(),
         stripeChargeId: paymentIntent.latest_charge as string
       }
@@ -164,10 +165,10 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
     // Notify landlord
     await prisma.notification.create({
       data: {
-        userId: payment.landlordId,
+        userId: payment.recipientId,
         type: 'PAYMENT_RECEIVED',
         title: 'Payment Received',
-        message: `Payment of $${(payment.amount / 100).toFixed(2)} received`,
+        body: `Payment of $${(Number(payment.amount) / 100).toFixed(2)} received`,
         data: { paymentId: id }
       }
     });
@@ -188,7 +189,7 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
 
     if (!user) throw new AppError(ErrorCode.NOT_FOUND, 'User not found', 404);
 
-    let accountId = user.landlordProfile?.stripeConnectId;
+    let accountId = user.landlordProfile?.stripeAccountId;
 
     // Create account if not exists
     if (!accountId) {
@@ -208,15 +209,18 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
 
       await prisma.landlordProfile.update({
         where: { userId: user.id },
-        data: { stripeConnectId: accountId }
+        data: { stripeAccountId: accountId }
       });
     }
+
+    // Get web URL from env, with fallback
+    const webUrl = env.WEB_APP_URL || 'http://localhost:3000';
 
     // Create onboarding link
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
-      refresh_url: `${env.WEB_URL}/payments/connect/refresh`,
-      return_url: `${env.WEB_URL}/payments/connect/complete`,
+      refresh_url: `${webUrl}/payments/connect/refresh`,
+      return_url: `${webUrl}/payments/connect/complete`,
       type: 'account_onboarding'
     });
 
@@ -233,17 +237,17 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
       where: { userId: request.user.userId }
     });
 
-    if (!profile?.stripeConnectId) {
+    if (!profile?.stripeAccountId) {
       return reply.send({ success: true, data: { connected: false, onboardingComplete: false } });
     }
 
-    const account = await stripe.accounts.retrieve(profile.stripeConnectId);
+    const account = await stripe.accounts.retrieve(profile.stripeAccountId);
     const onboardingComplete = account.details_submitted && account.payouts_enabled;
 
-    if (onboardingComplete && !profile.stripeOnboardingComplete) {
+    if (onboardingComplete && !profile.stripeOnboarded) {
       await prisma.landlordProfile.update({
         where: { userId: request.user.userId },
-        data: { stripeOnboardingComplete: true }
+        data: { stripeOnboarded: true }
       });
     }
 
@@ -252,15 +256,15 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
       data: {
         connected: true,
         onboardingComplete,
-        accountId: profile.stripeConnectId
+        accountId: profile.stripeAccountId
       }
     });
   });
 
   // Add payment method (tenant)
   fastify.post('/methods', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const { stripePaymentMethodId, isDefault } = request.body as { 
-      stripePaymentMethodId: string; isDefault?: boolean; 
+    const { stripePaymentMethodId, isDefault } = request.body as {
+      stripePaymentMethodId: string; isDefault?: boolean;
     };
 
     // Retrieve payment method details from Stripe
@@ -278,7 +282,7 @@ export const paymentRoutes: FastifyPluginAsync = async (fastify) => {
         userId: request.user.userId,
         stripePaymentMethodId,
         type: pm.type.toUpperCase(),
-        last4: pm.card?.last4 || pm.us_bank_account?.last4,
+        last4: pm.card?.last4 || pm.us_bank_account?.last4 || '****',
         brand: pm.card?.brand,
         expiryMonth: pm.card?.exp_month,
         expiryYear: pm.card?.exp_year,

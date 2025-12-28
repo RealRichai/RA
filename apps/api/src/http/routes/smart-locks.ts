@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Smart Lock Routes - Seam API Integration
  */
@@ -9,7 +8,7 @@ import { prisma } from '../../lib/prisma.js';
 import { AppError, ErrorCode } from '../../lib/errors.js';
 
 const createAccessCodeSchema = z.object({
-  lockId: z.string().uuid(),
+  smartLockId: z.string().uuid(),
   name: z.string(),
   code: z.string().regex(/^\d{4,8}$/),
   type: z.enum(['PERMANENT', 'TEMPORARY', 'SCHEDULED']),
@@ -25,15 +24,15 @@ export const smartLockRoutes: FastifyPluginAsync = async (fastify) => {
     const listing = await prisma.listing.findUnique({ where: { id: listingId } });
     if (!listing) throw new AppError(ErrorCode.NOT_FOUND, 'Listing not found', 404);
 
-    if (listing.landlordId !== request.user.userId && 
-        listing.agentId !== request.user.userId && 
+    if (listing.landlordId !== request.user.userId &&
+        listing.agentId !== request.user.userId &&
         request.user.role !== 'ADMIN') {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not authorized', 403);
     }
 
     const locks = await prisma.smartLock.findMany({
       where: { listingId },
-      include: { accessCodes: { where: { status: 'ACTIVE' } } }
+      include: { accessCodes: { where: { isActive: true } } }
     });
 
     return reply.send({ success: true, data: locks });
@@ -41,8 +40,8 @@ export const smartLockRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Register lock
   fastify.post('/register', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const { listingId, seamDeviceId, name, location } = request.body as {
-      listingId: string; seamDeviceId: string; name: string; location?: string;
+    const { listingId, seamDeviceId, deviceName, deviceType, location } = request.body as {
+      listingId: string; seamDeviceId: string; deviceName: string; deviceType?: string; location?: string;
     };
 
     const listing = await prisma.listing.findUnique({ where: { id: listingId } });
@@ -57,9 +56,9 @@ export const smartLockRoutes: FastifyPluginAsync = async (fastify) => {
       data: {
         listingId,
         seamDeviceId,
-        name,
-        location,
-        status: 'ONLINE',
+        deviceName,
+        deviceType: deviceType || 'smart_lock',
+        isOnline: true,
         batteryLevel: 100
       }
     });
@@ -72,29 +71,48 @@ export const smartLockRoutes: FastifyPluginAsync = async (fastify) => {
     const body = createAccessCodeSchema.parse(request.body);
 
     const lock = await prisma.smartLock.findUnique({
-      where: { id: body.lockId },
-      include: { listing: true }
+      where: { id: body.smartLockId },
+      include: { lease: { include: { listing: true } } }
     });
 
     if (!lock) throw new AppError(ErrorCode.NOT_FOUND, 'Lock not found', 404);
 
-    if (lock.listing.landlordId !== request.user.userId && 
-        lock.listing.agentId !== request.user.userId && 
-        request.user.role !== 'ADMIN') {
+    // Get listing info - could be from lease or direct listingId
+    const listing = lock.lease?.listing;
+    const listingId = lock.listingId;
+
+    // Check authorization - need to find the listing
+    let isAuthorized = false;
+    if (listing) {
+      isAuthorized = listing.landlordId === request.user.userId ||
+                     listing.agentId === request.user.userId ||
+                     request.user.role === 'ADMIN';
+    } else if (listingId) {
+      const directListing = await prisma.listing.findUnique({ where: { id: listingId } });
+      if (directListing) {
+        isAuthorized = directListing.landlordId === request.user.userId ||
+                       directListing.agentId === request.user.userId ||
+                       request.user.role === 'ADMIN';
+      }
+    }
+
+    if (!isAuthorized) {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not authorized', 403);
     }
+
+    // Generate a unique seam code ID
+    const seamCodeId = `code_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
     // TODO: Create code via Seam API
     const accessCode = await prisma.smartLockAccessCode.create({
       data: {
-        lockId: body.lockId,
+        smartLockId: body.smartLockId,
+        seamCodeId,
         name: body.name,
         code: body.code,
-        type: body.type,
         startsAt: body.startsAt ? new Date(body.startsAt) : null,
         endsAt: body.endsAt ? new Date(body.endsAt) : null,
-        status: 'ACTIVE',
-        createdBy: request.user.userId
+        isActive: true
       }
     });
 
@@ -102,13 +120,13 @@ export const smartLockRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // Generate showing code
-  fastify.post('/:lockId/showing-code', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const { lockId } = request.params as { lockId: string };
+  fastify.post('/:smartLockId/showing-code', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const { smartLockId } = request.params as { smartLockId: string };
     const { duration = 60, applicantName } = request.body as { duration?: number; applicantName?: string };
 
     const lock = await prisma.smartLock.findUnique({
-      where: { id: lockId },
-      include: { listing: true }
+      where: { id: smartLockId },
+      include: { lease: { include: { listing: true } } }
     });
 
     if (!lock) throw new AppError(ErrorCode.NOT_FOUND, 'Lock not found', 404);
@@ -118,26 +136,37 @@ export const smartLockRoutes: FastifyPluginAsync = async (fastify) => {
     const startsAt = new Date();
     const endsAt = new Date(startsAt.getTime() + duration * 60 * 1000);
 
+    // Generate a unique seam code ID for the showing code
+    const seamCodeId = `showing_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
     const accessCode = await prisma.smartLockAccessCode.create({
       data: {
-        lockId,
+        smartLockId,
+        seamCodeId,
         name: `Showing - ${applicantName || 'Guest'}`,
         code,
-        type: 'TEMPORARY',
         startsAt,
         endsAt,
-        status: 'ACTIVE',
-        createdBy: request.user.userId
+        isActive: true
       }
     });
 
-    return reply.status(201).send({ 
-      success: true, 
+    // Get address from listing (through lease or direct)
+    let address = 'Address not available';
+    if (lock.lease?.listing) {
+      address = lock.lease.listing.address;
+    } else if (lock.listingId) {
+      const listing = await prisma.listing.findUnique({ where: { id: lock.listingId } });
+      if (listing) address = listing.address;
+    }
+
+    return reply.status(201).send({
+      success: true,
       data: {
         code,
         expiresAt: endsAt,
-        lockName: lock.name,
-        address: lock.listing.address
+        lockName: lock.deviceName,
+        address
       }
     });
   });
@@ -148,39 +177,53 @@ export const smartLockRoutes: FastifyPluginAsync = async (fastify) => {
 
     const code = await prisma.smartLockAccessCode.findUnique({
       where: { id },
-      include: { lock: { include: { listing: true } } }
+      include: { smartLock: { include: { lease: { include: { listing: true } } } } }
     });
 
     if (!code) throw new AppError(ErrorCode.NOT_FOUND, 'Access code not found', 404);
 
-    if (code.lock.listing.landlordId !== request.user.userId && 
-        code.lock.listing.agentId !== request.user.userId && 
-        request.user.role !== 'ADMIN') {
+    // Check authorization
+    let isAuthorized = false;
+    const listing = code.smartLock.lease?.listing;
+    if (listing) {
+      isAuthorized = listing.landlordId === request.user.userId ||
+                     listing.agentId === request.user.userId ||
+                     request.user.role === 'ADMIN';
+    } else if (code.smartLock.listingId) {
+      const directListing = await prisma.listing.findUnique({ where: { id: code.smartLock.listingId } });
+      if (directListing) {
+        isAuthorized = directListing.landlordId === request.user.userId ||
+                       directListing.agentId === request.user.userId ||
+                       request.user.role === 'ADMIN';
+      }
+    }
+
+    if (!isAuthorized) {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not authorized', 403);
     }
 
     await prisma.smartLockAccessCode.update({
       where: { id },
-      data: { status: 'REVOKED' }
+      data: { isActive: false }
     });
 
     return reply.send({ success: true, message: 'Access code revoked' });
   });
 
   // Get lock events
-  fastify.get('/:lockId/events', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const { lockId } = request.params as { lockId: string };
+  fastify.get('/:smartLockId/events', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const { smartLockId } = request.params as { smartLockId: string };
     const { page = 1, limit = 50 } = request.query as { page?: number; limit?: number };
 
     const lock = await prisma.smartLock.findUnique({
-      where: { id: lockId },
-      include: { listing: true }
+      where: { id: smartLockId },
+      include: { lease: { include: { listing: true } } }
     });
 
     if (!lock) throw new AppError(ErrorCode.NOT_FOUND, 'Lock not found', 404);
 
     const events = await prisma.smartLockEvent.findMany({
-      where: { lockId },
+      where: { smartLockId },
       orderBy: { occurredAt: 'desc' },
       skip: (page - 1) * limit,
       take: limit
@@ -190,16 +233,15 @@ export const smartLockRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // Lock/unlock
-  fastify.post('/:lockId/lock', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const { lockId } = request.params as { lockId: string };
+  fastify.post('/:smartLockId/lock', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const { smartLockId } = request.params as { smartLockId: string };
 
     // TODO: Call Seam API to lock
     await prisma.smartLockEvent.create({
       data: {
-        lockId,
+        smartLockId,
         eventType: 'LOCKED',
         method: 'REMOTE',
-        userId: request.user.userId,
         occurredAt: new Date()
       }
     });
@@ -207,16 +249,15 @@ export const smartLockRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ success: true, message: 'Lock command sent' });
   });
 
-  fastify.post('/:lockId/unlock', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const { lockId } = request.params as { lockId: string };
+  fastify.post('/:smartLockId/unlock', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const { smartLockId } = request.params as { smartLockId: string };
 
     // TODO: Call Seam API to unlock
     await prisma.smartLockEvent.create({
       data: {
-        lockId,
+        smartLockId,
         eventType: 'UNLOCKED',
         method: 'REMOTE',
-        userId: request.user.userId,
         occurredAt: new Date()
       }
     });

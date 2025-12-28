@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Auth Routes - Registration, Login, Token Management
  */
@@ -6,9 +5,10 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
-import { hashPassword, verifyPassword, generateTokens, verifyRefreshToken } from '../../lib/crypto.js';
+import { hashPassword, verifyPassword } from '../../lib/crypto.js';
 import { AppError, ErrorCode } from '../../lib/errors.js';
-import { redis } from '../../lib/redis.js';
+import { generateTokenPair, verifyRefreshToken } from '../plugins/auth.js';
+import type { JWTPayload } from '@realriches/shared';
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -36,7 +36,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const passwordHash = await hashPassword(body.password);
-    
+
     const user = await prisma.user.create({
       data: {
         email: body.email,
@@ -45,7 +45,6 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         lastName: body.lastName,
         phone: body.phone,
         role: body.role,
-        marketId: body.marketId,
         emailVerified: false,
         status: 'ACTIVE'
       }
@@ -56,11 +55,17 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       await prisma.tenantProfile.create({ data: { userId: user.id } });
     } else if (body.role === 'LANDLORD') {
       await prisma.landlordProfile.create({ data: { userId: user.id } });
-    } else if (body.role === 'AGENT') {
-      await prisma.agentProfile.create({ data: { userId: user.id, verificationStatus: 'PENDING' } });
     }
+    // Note: AgentProfile creation requires license info, handled separately in agent onboarding
 
-    const tokens = generateTokens(user.id, user.role);
+    const payload: JWTPayload = {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600
+    };
+    const tokens = generateTokenPair(fastify, payload);
     
     await prisma.session.create({
       data: {
@@ -86,7 +91,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     const body = loginSchema.parse(request.body);
     
     const user = await prisma.user.findUnique({ where: { email: body.email } });
-    if (!user || !await verifyPassword(body.password, user.passwordHash)) {
+    if (!user || !(await verifyPassword(body.password, user.passwordHash))) {
       throw new AppError(ErrorCode.INVALID_CREDENTIALS, 'Invalid email or password', 401);
     }
 
@@ -94,7 +99,14 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(ErrorCode.ACCOUNT_SUSPENDED, 'Account is suspended', 403);
     }
 
-    const tokens = generateTokens(user.id, user.role);
+    const payload: JWTPayload = {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600
+    };
+    const tokens = generateTokenPair(fastify, payload);
     
     await prisma.session.create({
       data: {
@@ -123,14 +135,14 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
   // Refresh token
   fastify.post('/refresh', async (request, reply) => {
     const { refreshToken } = request.body as { refreshToken: string };
-    
-    const payload = verifyRefreshToken(refreshToken);
-    if (!payload) {
+
+    const decoded = verifyRefreshToken(fastify, refreshToken);
+    if (!decoded) {
       throw new AppError(ErrorCode.INVALID_TOKEN, 'Invalid refresh token', 401);
     }
 
     const session = await prisma.session.findFirst({
-      where: { refreshToken, userId: payload.userId, expiresAt: { gt: new Date() } },
+      where: { refreshToken, userId: decoded.userId, expiresAt: { gt: new Date() } },
       include: { user: true }
     });
 
@@ -138,8 +150,15 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(ErrorCode.INVALID_TOKEN, 'Session expired or invalid', 401);
     }
 
-    const tokens = generateTokens(session.userId, session.user.role);
-    
+    const newPayload: JWTPayload = {
+      userId: session.userId,
+      email: session.user.email,
+      role: session.user.role,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600
+    };
+    const tokens = generateTokenPair(fastify, newPayload);
+
     await prisma.session.update({
       where: { id: session.id },
       data: { refreshToken: tokens.refreshToken, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }
@@ -168,8 +187,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       include: {
         tenantProfile: true,
         landlordProfile: true,
-        agentProfile: true,
-        market: true
+        agentProfile: true
       }
     });
 

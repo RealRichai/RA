@@ -84,30 +84,24 @@ export function maskSSN(ssn: string): string {
   return '***-**-' + digits.slice(-4);
 }
 
-// Password hashing (alias for hashWithSalt for auth routes)
-export function hashPassword(password: string): Promise<{ hash: string; salt: string }> {
-  return Promise.resolve(hashWithSalt(password));
+/**
+ * Hash a password and return a combined string (salt:hash format for single-field storage)
+ */
+export async function hashPassword(password: string): Promise<string> {
+  const { hash, salt } = hashWithSalt(password);
+  return `${salt}:${hash}`;
 }
 
-export function verifyPassword(password: string, hash: string, salt: string): Promise<boolean> {
-  return Promise.resolve(verifyHash(password, hash, salt));
-}
-
-// Token generation for auth (returns access + refresh pair structure)
-export function generateTokens(): { accessToken: string; refreshToken: string } {
-  return {
-    accessToken: generateToken(32),
-    refreshToken: generateToken(64),
-  };
-}
-
-// Refresh token verification stub (actual JWT verify is in auth plugin)
-export function verifyRefreshToken(token: string): { valid: boolean; userId?: string } {
-  // This is a stub - actual verification happens in auth plugin with JWT
-  if (!token || token.length < 10) {
-    return { valid: false };
+/**
+ * Verify a password against a stored hash (salt:hash format)
+ */
+export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  const parts = storedHash.split(':');
+  if (parts.length !== 2) {
+    return false;
   }
-  return { valid: true };
+  const [salt, hash] = parts;
+  return verifyHash(password, hash, salt);
 }
 
 // PII redaction for logging

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Market Routes - 11 NYC/Long Island Markets
  */
@@ -17,9 +16,9 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const markets = await prisma.market.findMany({
-      where: { active: true },
+      where: { enabled: true },
       include: { _count: { select: { listings: { where: { status: 'ACTIVE' } } } } },
-      orderBy: { displayOrder: 'asc' }
+      orderBy: { name: 'asc' }
     });
 
     await redis.setex('markets:all', 3600, JSON.stringify(markets));
@@ -34,7 +33,7 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
     const market = await prisma.market.findUnique({
       where: { id },
       include: {
-        _count: { select: { listings: { where: { status: 'ACTIVE' } }, users: true } }
+        _count: { select: { listings: { where: { status: 'ACTIVE' } } } }
       }
     });
 
@@ -62,7 +61,7 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
       success: true,
       data: {
         activeListings: listings,
-        averageRent: avgRent._avg.monthlyRent || 0,
+        averageRent: avgRent._avg.monthlyRent ? Number(avgRent._avg.monthlyRent) : 0,
         totalApplications: applications
       }
     });
@@ -91,29 +90,48 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
     });
   });
 
-  // Get neighborhoods in market
-  fastify.get('/:id/neighborhoods', async (request, reply) => {
-    const { id } = request.params as { id: string };
-
-    const market = await prisma.market.findUnique({ where: { id } });
-    if (!market) throw new AppError(ErrorCode.NOT_FOUND, 'Market not found', 404);
-
-    return reply.send({ success: true, data: market.neighborhoods || [] });
-  });
-
   // Admin: Create market
   fastify.post('/', { preHandler: [fastify.authenticate] }, async (request, reply) => {
     if (request.user.role !== 'ADMIN') {
       throw new AppError(ErrorCode.FORBIDDEN, 'Admin access required', 403);
     }
 
-    const { name, slug, region, state, active, boundaries, neighborhoods, displayOrder } = request.body as {
-      name: string; slug: string; region: string; state: string;
-      active: boolean; boundaries?: any; neighborhoods?: string[]; displayOrder?: number;
+    const body = request.body as {
+      name: string;
+      displayName: string;
+      state: string;
+      timezone: string;
+      enabled?: boolean;
+      fareActApplies?: boolean;
+      fchaApplies?: boolean;
+      maxApplicationFee: number;
+      maxSecurityDepositMonths: number;
+      boundsNorth: number;
+      boundsSouth: number;
+      boundsEast: number;
+      boundsWest: number;
+      centerLat: number;
+      centerLng: number;
     };
 
     const market = await prisma.market.create({
-      data: { name, slug, region, state, active, boundaries, neighborhoods, displayOrder }
+      data: {
+        name: body.name,
+        displayName: body.displayName,
+        state: body.state,
+        timezone: body.timezone,
+        enabled: body.enabled ?? true,
+        fareActApplies: body.fareActApplies ?? false,
+        fchaApplies: body.fchaApplies ?? false,
+        maxApplicationFee: body.maxApplicationFee,
+        maxSecurityDepositMonths: body.maxSecurityDepositMonths,
+        boundsNorth: body.boundsNorth,
+        boundsSouth: body.boundsSouth,
+        boundsEast: body.boundsEast,
+        boundsWest: body.boundsWest,
+        centerLat: body.centerLat,
+        centerLng: body.centerLng
+      }
     });
 
     await redis.del('markets:all');
@@ -129,7 +147,12 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
 
     const { id } = request.params as { id: string };
     const body = request.body as Partial<{
-      name: string; active: boolean; boundaries: any; neighborhoods: string[]; displayOrder: number;
+      displayName: string;
+      enabled: boolean;
+      fareActApplies: boolean;
+      fchaApplies: boolean;
+      maxApplicationFee: number;
+      maxSecurityDepositMonths: number;
     }>;
 
     const market = await prisma.market.update({

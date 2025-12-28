@@ -1,6 +1,5 @@
-// @ts-nocheck
 /**
- * Message Routes - In-app messaging, Sendblue iMessage integration
+ * Message Routes - In-app messaging
  */
 
 import { FastifyPluginAsync } from 'fastify';
@@ -9,8 +8,8 @@ import { prisma } from '../../lib/prisma.js';
 import { AppError, ErrorCode } from '../../lib/errors.js';
 
 const createConversationSchema = z.object({
-  participantIds: z.array(z.string().uuid()).min(1),
-  listingId: z.string().uuid().optional(),
+  participantIds: z.array(z.string()).min(1),
+  listingId: z.string().optional(),
   initialMessage: z.string().min(1).max(2000).optional()
 });
 
@@ -27,29 +26,38 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
   // Get conversations
   fastify.get('/conversations', { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const conversations = await prisma.conversation.findMany({
-      where: { participants: { some: { id: request.user.userId } } },
+      where: {
+        participants: { some: { userId: request.user.userId } }
+      },
       include: {
-        participants: { select: { id: true, firstName: true, lastName: true, avatar: true, role: true } },
-        listing: { select: { id: true, title: true, images: { take: 1 } } },
-        messages: { 
-          take: 1, 
+        participants: {
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true, role: true } }
+          }
+        },
+        messages: {
+          take: 1,
           orderBy: { createdAt: 'desc' },
           select: { id: true, content: true, createdAt: true, senderId: true }
         }
       },
-      orderBy: { updatedAt: 'desc' }
+      orderBy: { lastMessageAt: 'desc' }
     });
 
     // Add unread count
     const result = await Promise.all(conversations.map(async (conv) => {
       const unreadCount = await prisma.message.count({
-        where: { 
-          conversationId: conv.id, 
+        where: {
+          conversationId: conv.id,
           senderId: { not: request.user.userId },
           readAt: null
         }
       });
-      return { ...conv, unreadCount };
+      return {
+        ...conv,
+        unreadCount,
+        participants: conv.participants.map(p => p.user)
+      };
     }));
 
     return reply.send({ success: true, data: result });
@@ -62,25 +70,46 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
     // Include current user in participants
     const allParticipants = [...new Set([request.user.userId, ...body.participantIds])];
 
-    // Check if conversation already exists
+    // Check if conversation already exists between these participants
     const existing = await prisma.conversation.findFirst({
       where: {
-        AND: allParticipants.map(id => ({ participants: { some: { id } } })),
-        participants: { every: { id: { in: allParticipants } } }
+        AND: allParticipants.map(id => ({
+          participants: { some: { userId: id } }
+        }))
       },
-      include: { participants: { select: { id: true, firstName: true, lastName: true, avatar: true } } }
+      include: {
+        participants: {
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } }
+          }
+        }
+      }
     });
 
-    if (existing) {
-      return reply.send({ success: true, data: existing });
+    if (existing && existing.participants.length === allParticipants.length) {
+      return reply.send({
+        success: true,
+        data: {
+          ...existing,
+          participants: existing.participants.map(p => p.user)
+        }
+      });
     }
 
     const conversation = await prisma.conversation.create({
       data: {
-        participants: { connect: allParticipants.map(id => ({ id })) },
-        listingId: body.listingId
+        listingId: body.listingId,
+        participants: {
+          create: allParticipants.map(userId => ({ userId }))
+        }
       },
-      include: { participants: { select: { id: true, firstName: true, lastName: true, avatar: true } } }
+      include: {
+        participants: {
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } }
+          }
+        }
+      }
     });
 
     // Send initial message if provided
@@ -92,9 +121,20 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
           content: body.initialMessage
         }
       });
+
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: new Date() }
+      });
     }
 
-    return reply.status(201).send({ success: true, data: conversation });
+    return reply.status(201).send({
+      success: true,
+      data: {
+        ...conversation,
+        participants: conversation.participants.map(p => p.user)
+      }
+    });
   });
 
   // Get conversation messages
@@ -104,17 +144,17 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
 
     const conversation = await prisma.conversation.findUnique({
       where: { id },
-      include: { participants: { select: { id: true } } }
+      include: { participants: { select: { userId: true } } }
     });
 
     if (!conversation) throw new AppError(ErrorCode.NOT_FOUND, 'Conversation not found', 404);
-    if (!conversation.participants.some(p => p.id === request.user.userId)) {
+    if (!conversation.participants.some(p => p.userId === request.user.userId)) {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not a participant', 403);
     }
 
     const messages = await prisma.message.findMany({
       where: { conversationId: id },
-      include: { sender: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
+      include: { sender: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } } },
       orderBy: { createdAt: 'desc' },
       take: limit,
       ...(cursor && { cursor: { id: cursor }, skip: 1 })
@@ -122,16 +162,16 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Mark messages as read
     await prisma.message.updateMany({
-      where: { 
-        conversationId: id, 
+      where: {
+        conversationId: id,
         senderId: { not: request.user.userId },
         readAt: null
       },
       data: { readAt: new Date() }
     });
 
-    return reply.send({ 
-      success: true, 
+    return reply.send({
+      success: true,
       data: messages.reverse(),
       nextCursor: messages.length === limit ? messages[0].id : null
     });
@@ -144,11 +184,11 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
 
     const conversation = await prisma.conversation.findUnique({
       where: { id },
-      include: { participants: { select: { id: true } } }
+      include: { participants: { select: { userId: true } } }
     });
 
     if (!conversation) throw new AppError(ErrorCode.NOT_FOUND, 'Conversation not found', 404);
-    if (!conversation.participants.some(p => p.id === request.user.userId)) {
+    if (!conversation.participants.some(p => p.userId === request.user.userId)) {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not a participant', 403);
     }
 
@@ -159,48 +199,45 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
         content: body.content,
         attachments: body.attachments || []
       },
-      include: { sender: { select: { id: true, firstName: true, lastName: true, avatar: true } } }
+      include: { sender: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } } }
     });
 
     // Update conversation timestamp
     await prisma.conversation.update({
       where: { id },
-      data: { updatedAt: new Date() }
+      data: { lastMessageAt: new Date() }
     });
 
     // Notify other participants
-    const otherParticipants = conversation.participants.filter(p => p.id !== request.user.userId);
-    await prisma.notification.createMany({
-      data: otherParticipants.map(p => ({
-        userId: p.id,
-        type: 'NEW_MESSAGE',
-        title: 'New Message',
-        message: body.content.substring(0, 100),
-        data: { conversationId: id, messageId: message.id }
-      }))
-    });
+    const otherParticipants = conversation.participants.filter(p => p.userId !== request.user.userId);
+    if (otherParticipants.length > 0) {
+      await prisma.notification.createMany({
+        data: otherParticipants.map(p => ({
+          userId: p.userId,
+          type: 'MESSAGE_RECEIVED' as const,
+          title: 'New Message',
+          body: body.content.substring(0, 100),
+          data: { conversationId: id, messageId: message.id }
+        }))
+      });
+    }
 
     return reply.status(201).send({ success: true, data: message });
   });
 
-  // Delete conversation
+  // Delete conversation (leave)
   fastify.delete('/conversations/:id', { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
-    const conversation = await prisma.conversation.findUnique({
-      where: { id },
-      include: { participants: { select: { id: true } } }
+    const participant = await prisma.conversationParticipant.findFirst({
+      where: { conversationId: id, userId: request.user.userId }
     });
 
-    if (!conversation) throw new AppError(ErrorCode.NOT_FOUND, 'Conversation not found', 404);
-    if (!conversation.participants.some(p => p.id === request.user.userId)) {
-      throw new AppError(ErrorCode.FORBIDDEN, 'Not a participant', 403);
-    }
+    if (!participant) throw new AppError(ErrorCode.NOT_FOUND, 'Conversation not found', 404);
 
-    // Soft delete - just remove participant
-    await prisma.conversation.update({
-      where: { id },
-      data: { participants: { disconnect: { id: request.user.userId } } }
+    // Remove participant from conversation
+    await prisma.conversationParticipant.delete({
+      where: { id: participant.id }
     });
 
     return reply.send({ success: true, message: 'Left conversation' });
@@ -210,7 +247,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/unread-count', { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const count = await prisma.message.count({
       where: {
-        conversation: { participants: { some: { id: request.user.userId } } },
+        conversation: { participants: { some: { userId: request.user.userId } } },
         senderId: { not: request.user.userId },
         readAt: null
       }
