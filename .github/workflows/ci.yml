@@ -28,16 +28,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+          cache: "pnpm"
 
       - name: Install
-        run: pnpm install --frozen-lockfile --prod=false
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm turbo build
