@@ -91,6 +91,7 @@ model Session {
   ipAddress   String   @map("ip_address")
   userAgent   String   @map("user_agent")
   isValid     Boolean  @default(true) @map("is_valid")
+  isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   expiresAt   DateTime @map("expires_at")
   lastActiveAt DateTime @default(now()) @map("last_active_at")
@@ -105,7 +106,10 @@ model Session {
 model RefreshToken {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String   @map("user_id") @db.Uuid
+  token     String?
   tokenHash String   @unique @map("token_hash")
+  sessionId String?  @map("session_id") @db.Uuid
+  revoked   Boolean  @default(false)
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
   revokedAt DateTime? @map("revoked_at")
@@ -260,6 +264,8 @@ model Property {
   ownerId            String         @map("owner_id") @db.Uuid
   managerId          String?        @map("manager_id") @db.Uuid
   name               String
+  address            String?
+  squareFeet         Int?           @map("square_feet")
   street1            String
   street2            String?
   city               String
@@ -330,6 +336,7 @@ model Unit {
   bathrooms          Float
   squareFeet         Int?       @map("square_feet")
   marketRentAmount   Int        @map("market_rent_amount")
+  rent               Int?
   currentRentAmount  Int?       @map("current_rent_amount")
   status             UnitStatus @default(vacant)
   amenities          String[]   @default([])
@@ -391,6 +398,7 @@ model Listing {
   type               ListingType
   status             ListingStatus @default(draft)
   priceAmount        Int           @map("price_amount")
+  rent               Int?
   securityDepositAmount Int?       @map("security_deposit_amount")
   applicationFeeAmount Int?        @map("application_fee_amount")
   brokerFeeAmount    Int?          @map("broker_fee_amount")
@@ -556,6 +564,7 @@ model Lease {
   unitId                String      @map("unit_id") @db.Uuid
   landlordId            String      @map("landlord_id") @db.Uuid
   primaryTenantId       String      @map("primary_tenant_id") @db.Uuid
+  tenantId              String?     @map("tenant_id") @db.Uuid
   agentId               String?     @map("agent_id") @db.Uuid
   leaseNumber           String      @unique @map("lease_number")
   type                  LeaseType
@@ -565,6 +574,7 @@ model Lease {
   startDate             DateTime    @map("start_date")
   endDate               DateTime    @map("end_date")
   monthlyRentAmount     Int         @map("monthly_rent_amount")
+  monthlyRent           Int?        @map("monthly_rent")
   securityDepositAmount Int         @map("security_deposit_amount")
   lastMonthDepositAmount Int?       @map("last_month_deposit_amount")
   petDepositAmount      Int?        @map("pet_deposit_amount")
@@ -746,6 +756,7 @@ model Payment {
   plaidTransferId       String?       @map("plaid_transfer_id")
   scheduledDate         DateTime?     @map("scheduled_date")
   processedAt           DateTime?     @map("processed_at")
+  paidAt                DateTime?     @map("paid_at")
   billingPeriodStart    DateTime?     @map("billing_period_start")
   billingPeriodEnd      DateTime?     @map("billing_period_end")
   description           String?
@@ -902,12 +913,14 @@ model DepositAlternative {
 model RentersInsurance {
   id                        String   @id @default(uuid()) @db.Uuid
   tenantId                  String   @map("tenant_id") @db.Uuid
+  userId                    String?  @map("user_id") @db.Uuid
   leaseId                   String?  @map("lease_id") @db.Uuid
   provider                  String
   policyNumber              String   @map("policy_number")
   coverageAmount            Int      @map("coverage_amount")
   liabilityCoverageAmount   Int      @map("liability_coverage_amount")
   deductibleAmount          Int      @map("deductible_amount")
+  deductible                Int?
   monthlyPremiumAmount      Int      @map("monthly_premium_amount")
   annualPremiumAmount       Int      @map("annual_premium_amount")
   status                    String   @default("active")
@@ -931,6 +944,8 @@ model GuarantorProduct {
   id                    String   @id @default(uuid()) @db.Uuid
   leaseId               String   @map("lease_id") @db.Uuid
   tenantId              String   @map("tenant_id") @db.Uuid
+  userId                String?  @map("user_id") @db.Uuid
+  applicationId         String?  @map("application_id") @db.Uuid
   provider              String
   guaranteeAmount       Int      @map("guarantee_amount")
   monthlyPremiumAmount  Int      @map("monthly_premium_amount")
@@ -1077,6 +1092,8 @@ model WorkOrder {
   billToTenant        Boolean             @default(false) @map("bill_to_tenant")
   invoiceId           String?             @map("invoice_id") @db.Uuid
   resolvedAt          DateTime?           @map("resolved_at")
+  completedAt         DateTime?           @map("completed_at")
+  actualCost          Int?                @map("actual_cost")
   resolutionNotes     String?             @map("resolution_notes")
   requiresFollowUp    Boolean             @default(false) @map("requires_follow_up")
   followUpDate        DateTime?           @map("follow_up_date")
@@ -1304,6 +1321,9 @@ model ComplianceCheck {
   marketId            String   @map("market_id")
   checkType           String   @map("check_type")
   status              String   @default("pending_review")
+  result              Json?
+  checkedAt           DateTime? @map("checked_at")
+  checkedById         String?  @map("checked_by_id") @db.Uuid
   severity            String   @default("info")
   title               String
   description         String
@@ -1361,9 +1381,11 @@ model DisclosureRecord {
   id             String   @id @default(uuid()) @db.Uuid
   disclosureId   String   @map("disclosure_id") @db.Uuid
   recipientId    String   @map("recipient_id") @db.Uuid
+  recipientType  String?  @map("recipient_type")
   recipientEmail String   @map("recipient_email")
   entityType     String   @map("entity_type")
   entityId       String   @map("entity_id") @db.Uuid
+  deliveredAt    DateTime? @map("delivered_at")
   sentAt         DateTime @map("sent_at")
   viewedAt       DateTime? @map("viewed_at")
   acknowledgedAt DateTime? @map("acknowledged_at")
@@ -1388,14 +1410,20 @@ model DisclosureRecord {
 // =============================================================================
 
 model AIConversation {
-  id            String   @id @default(uuid()) @db.Uuid
-  userId        String   @map("user_id") @db.Uuid
-  agentType     String   @map("agent_type")
-  model         String
-  status        String   @default("active")
-  contextId     String?  @map("context_id") @db.Uuid
-  handoffHistory Json    @default("[]") @map("handoff_history")
-  metrics       Json     @default("{}")
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @map("user_id") @db.Uuid
+  agentType          String   @map("agent_type")
+  contextType        String?  @map("context_type")
+  entityType         String?  @map("entity_type")
+  entityId           String?  @map("entity_id") @db.Uuid
+  context            Json?
+  model              String
+  status             String   @default("active")
+  contextId          String?  @map("context_id") @db.Uuid
+  handoffReason      String?  @map("handoff_reason")
+  handoffRequestedAt DateTime? @map("handoff_requested_at")
+  handoffHistory     Json     @default("[]") @map("handoff_history")
+  metrics            Json     @default("{}")
   startedAt     DateTime @default(now()) @map("started_at")
   lastMessageAt DateTime @default(now()) @map("last_message_at")
   endedAt       DateTime? @map("ended_at")
@@ -1421,6 +1449,7 @@ model AIMessage {
   voiceData      Json?    @map("voice_data")
   processingTime Int?     @map("processing_time")
   tokensUsed     Json?    @map("tokens_used")
+  metadata       Json?
   model          String?
   timestamp      DateTime @default(now())
   createdAt      DateTime @default(now()) @map("created_at")
@@ -1455,8 +1484,10 @@ model MaintenanceTriage {
   id               String   @id @default(uuid()) @db.Uuid
   conversationId   String   @map("conversation_id") @db.Uuid
   reportedBy       String   @map("reported_by") @db.Uuid
+  reportedById     String?  @map("reported_by_id") @db.Uuid
   propertyId       String   @map("property_id") @db.Uuid
   unitId           String?  @map("unit_id") @db.Uuid
+  description      String?
   issueType        String   @map("issue_type")
   issueCategory    String   @map("issue_category")
   urgency          String
@@ -1465,6 +1496,7 @@ model MaintenanceTriage {
   symptoms         String[] @default([])
   affectedAreas    String[] @default([]) @map("affected_areas")
   photos           Json     @default("[]")
+  images           String[] @default([])
   videos           Json     @default("[]")
   aiDiagnosis      String?  @map("ai_diagnosis")
   suggestedActions Json     @default("[]") @map("suggested_actions")
@@ -1607,6 +1639,7 @@ model FeatureFlag {
   description          String?
   type                 String   @default("boolean")
   enabled              Boolean  @default(false)
+  isEnabled            Boolean  @default(false) @map("is_enabled")
   defaultValue         Json     @map("default_value")
   rules                Json     @default("[]")
   variants             Json?
@@ -1638,6 +1671,8 @@ model MarketConfig {
   city                String?
   timezone            String
   isEnabled           Boolean  @default(true) @map("is_enabled")
+  isActive            Boolean  @default(true) @map("is_active")
+  rules               Json     @default("[]")
   launchDate          DateTime? @map("launch_date")
   features            Json     @default("{}")
   compliance          Json     @default("{}")
