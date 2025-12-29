@@ -1,18 +1,29 @@
 import type { Permission, Role } from '@realriches/types';
 import { RolePermissionsMap } from '@realriches/types';
-import type { FastifyInstance, FastifyRequest, FastifyReply, FastifyPluginCallback } from 'fastify';
+import type { FastifyRequest, FastifyReply, FastifyPluginCallback } from 'fastify';
 import fp from 'fastify-plugin';
 
-// Extend FastifyRequest to include user
-declare module 'fastify' {
-  interface FastifyRequest {
-    user: {
-      id: string;
+// Define user type for the application
+export interface AppUser {
+  id: string;
+  email: string;
+  role: Role;
+  permissions: Permission[];
+  sessionId: string;
+}
+
+// Use @fastify/jwt's type augmentation pattern
+declare module '@fastify/jwt' {
+  interface FastifyJWT {
+    payload: {
+      sub: string;
       email: string;
       role: Role;
       permissions: Permission[];
       sessionId: string;
-    } | null;
+      type: 'access' | 'refresh';
+    };
+    user: AppUser;
   }
 }
 

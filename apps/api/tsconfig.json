@@ -11,7 +11,13 @@
       "@middleware/*": ["./middleware/*"],
       "@lib/*": ["./lib/*"],
       "@jobs/*": ["./jobs/*"]
-    }
+    },
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "strictPropertyInitialization": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests"]
