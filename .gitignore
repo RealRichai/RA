@@ -38,9 +38,15 @@ test-results/
 
 # Caches
 .turbo/
+.turbo
+**/.turbo/
+**/.turbo
 .cache/
 .eslintcache
 .prettiercache
+
+# Turbo build caches (never commit)
+**/turbo-*.log
 
 # Database
 *.db

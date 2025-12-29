@@ -11,6 +11,7 @@ import { getConfig } from '@realriches/config';
 
 import { redisPlugin } from './redis';
 import { authPlugin } from './auth';
+import { auditPlugin } from './audit';
 import { errorHandler } from './error-handler';
 
 export async function registerPlugins(app: FastifyInstance): Promise<void> {
@@ -81,6 +82,9 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
 
   // Auth decorators
   await app.register(authPlugin);
+
+  // Audit logging (non-blocking, records all write operations)
+  await app.register(auditPlugin);
 
   // Swagger documentation
   await app.register(swagger, {

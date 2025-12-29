@@ -11,7 +11,7 @@ RealRiches is a comprehensive, AI-powered real estate platform built with modern
 ## Technology Stack
 
 ### Core Technologies
-- **Runtime**: Node.js 20+
+- **Runtime**: Node.js 22+ (required)
 - **Language**: TypeScript 5.3+
 - **Package Manager**: pnpm 8+
 - **Monorepo**: TurboRepo
@@ -74,10 +74,10 @@ realriches/
 ## Getting Started
 
 ### Prerequisites
-- Node.js 20+
+- Node.js 22+ (required)
 - pnpm 8+
 - Docker & Docker Compose
-- PostgreSQL 15+
+- PostgreSQL 16+ (with PostGIS)
 - Redis 7+
 
 ### Installation
@@ -292,8 +292,58 @@ pnpm start
 ### CI/CD
 
 GitHub Actions workflows are configured in `.github/workflows/`:
-- `ci.yml` - Lint, test, build, security scan
-- `deploy.yml` - Deploy to staging/production
+- `ci.yml` - Secrets guard, lint, test, build, security scan
+
+The CI pipeline includes:
+1. **Secrets Guard**: Fails if `.env`, `.turbo/`, `.pem`, `.key` files are committed
+2. **Lint & Type Check**: ESLint + TypeScript strict mode
+3. **Unit Tests**: Vitest with coverage reporting
+4. **Build**: Full production build verification
+5. **Security Scan**: Snyk vulnerability scanning
+
+---
+
+## API Response Envelope
+
+All API responses follow a standard envelope format:
+
+```typescript
+// Success Response
+{
+  "success": true,
+  "data": { ... },
+  "meta": {
+    "page": 1,
+    "limit": 20,
+    "total": 100,
+    "requestId": "uuid"
+  }
+}
+
+// Error Response
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Human-readable message",
+    "details": { ... }
+  }
+}
+```
+
+See `apps/api/src/lib/response.ts` for implementation.
+
+---
+
+## Audit Logging
+
+All write operations (POST, PUT, PATCH, DELETE) are automatically logged:
+
+- **Non-blocking**: Uses `setImmediate()` to not slow down requests
+- **Sensitive field redaction**: Passwords, tokens, SSN, etc. are auto-redacted
+- **Captures**: Actor, action, entity, changes, IP, user-agent, request ID
+
+See `apps/api/src/plugins/audit.ts` for implementation.
 
 ---
 
@@ -301,12 +351,14 @@ GitHub Actions workflows are configured in `.github/workflows/`:
 
 ### Implemented
 - Argon2id password hashing
-- JWT with short-lived access tokens
-- Rate limiting
-- CORS configuration
+- JWT with short-lived access tokens (15m) and refresh tokens (7d)
+- Rate limiting (per-IP)
+- CORS configuration (strict origin whitelisting)
 - Helmet security headers
 - Request validation with Zod
 - SQL injection prevention (Prisma)
+- Audit logging for all mutations
+- CI secrets guard (fails if .env committed)
 
 ### Required Before Production
 - [ ] Enable HTTPS/TLS
