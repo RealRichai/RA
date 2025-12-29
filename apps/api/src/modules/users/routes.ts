@@ -1,8 +1,8 @@
+import { prisma } from '@realriches/database';
+import type { Role } from '@realriches/types';
+import { NotFoundError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '@realriches/database';
-import { NotFoundError } from '@realriches/utils';
-import type { Role } from '@realriches/types';
 
 const UpdateUserSchema = z.object({
   firstName: z.string().min(1).max(100).optional(),

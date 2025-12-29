@@ -1,8 +1,8 @@
+import { getConfig } from '@realriches/config';
+import { logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyPluginCallback } from 'fastify';
 import fp from 'fastify-plugin';
 import Redis from 'ioredis';
-import { getConfig } from '@realriches/config';
-import { logger } from '@realriches/utils';
 
 declare module 'fastify' {
   interface FastifyInstance {

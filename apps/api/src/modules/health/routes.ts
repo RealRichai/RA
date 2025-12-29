@@ -1,5 +1,5 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { prisma, checkConnection } from '@realriches/database';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 interface HealthStatus {
   status: 'healthy' | 'unhealthy' | 'degraded';

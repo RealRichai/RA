@@ -1,11 +1,11 @@
-import Fastify from 'fastify';
 import { getConfig } from '@realriches/config';
-import { logger } from '@realriches/utils';
 import { prisma, checkConnection } from '@realriches/database';
+import { logger } from '@realriches/utils';
+import Fastify from 'fastify';
 
-import { registerPlugins } from './plugins';
-import { registerModules } from './modules';
 import { setupGracefulShutdown } from './lib/shutdown';
+import { registerModules } from './modules';
+import { registerPlugins } from './plugins';
 
 async function main() {
   const config = getConfig();

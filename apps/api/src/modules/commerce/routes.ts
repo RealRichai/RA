@@ -1,7 +1,7 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import { prisma } from '@realriches/database';
 import { generateId, NotFoundError, ForbiddenError } from '@realriches/utils';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 const UtilitySetupSchema = z.object({
   leaseId: z.string(),

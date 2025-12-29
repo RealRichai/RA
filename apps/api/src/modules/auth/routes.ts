@@ -1,6 +1,7 @@
+import { RegisterRequestSchema, LoginRequestSchema } from '@realriches/types';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { RegisterRequestSchema, LoginRequestSchema } from '@realriches/types';
+
 import { AuthService } from './service';
 
 const RefreshSchema = z.object({

@@ -1,5 +1,3 @@
-import type { FastifyError, FastifyRequest, FastifyReply } from 'fastify';
-import { ZodError } from 'zod';
 import { Prisma } from '@realriches/database';
 import {
   AppError,
@@ -9,6 +7,8 @@ import {
   ConflictError,
 } from '@realriches/utils';
 import { generateId } from '@realriches/utils';
+import type { FastifyError, FastifyRequest, FastifyReply } from 'fastify';
+import { ZodError } from 'zod';
 
 interface ErrorResponse {
   success: false;

@@ -7,10 +7,10 @@
  * - Captures: actor, action, entity, changes, metadata, request context
  */
 
-import type { FastifyInstance, FastifyRequest, FastifyReply, FastifyPluginCallback } from 'fastify';
-import fp from 'fastify-plugin';
 import { prisma } from '@realriches/database';
 import { logger } from '@realriches/utils';
+import type { FastifyInstance, FastifyRequest, FastifyReply, FastifyPluginCallback } from 'fastify';
+import fp from 'fastify-plugin';
 
 export interface AuditContext {
   entityType: string;

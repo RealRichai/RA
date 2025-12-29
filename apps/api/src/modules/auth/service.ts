@@ -1,6 +1,7 @@
-import { hash, verify } from 'argon2';
-import { prisma } from '@realriches/database';
 import { getConfig } from '@realriches/config';
+import { prisma } from '@realriches/database';
+import type { Role, Permission } from '@realriches/types';
+import { RolePermissionsMap } from '@realriches/types';
 import {
   generateId,
   generateToken,
@@ -10,8 +11,7 @@ import {
   ValidationError,
   ConflictError,
 } from '@realriches/utils';
-import type { Role, Permission } from '@realriches/types';
-import { RolePermissionsMap } from '@realriches/types';
+import { hash, verify } from 'argon2';
 import type { FastifyInstance } from 'fastify';
 
 export interface TokenPair {

@@ -1,7 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
-import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError, ValidationError, logger } from '@realriches/utils';
 import {
   gateRentIncrease,
   gateLeaseCreation,
@@ -11,6 +7,10 @@ import {
   type ComplianceDecision,
   type FCHAStage,
 } from '@realriches/compliance-engine';
+import { prisma } from '@realriches/database';
+import { generateId, NotFoundError, ForbiddenError, ValidationError, logger } from '@realriches/utils';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 const CreateLeaseSchema = z.object({
   unitId: z.string(),
@@ -730,8 +730,8 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       const gateResult = await gateFCHAStageTransition({
         applicationId: application.id,
         marketId,
-        currentStage: currentStage as FCHAStage,
-        targetStage: data.targetStage as FCHAStage,
+        currentStage: currentStage,
+        targetStage: data.targetStage,
       });
 
       // Store compliance check
@@ -858,7 +858,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       const gateResult = await gateFCHABackgroundCheck({
         applicationId: application.id,
         marketId,
-        currentStage: currentStage as FCHAStage,
+        currentStage: currentStage,
         checkType: data.checkType,
       });
 

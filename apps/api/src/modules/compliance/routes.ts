@@ -1,7 +1,7 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import { prisma } from '@realriches/database';
 import { generateId, NotFoundError, ForbiddenError } from '@realriches/utils';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 const ComplianceCheckSchema = z.object({
   entityType: z.enum(['LISTING', 'LEASE', 'PROPERTY', 'UNIT']),
@@ -423,7 +423,7 @@ async function getMarketConfigForEntity(
   entityId: string
 ): Promise<Record<string, unknown> | null> {
   // Determine market based on entity location
-  let marketId = 'NYC'; // Default to NYC
+  const marketId = 'NYC'; // Default to NYC
 
   // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Implement proper market detection based on entity address
 

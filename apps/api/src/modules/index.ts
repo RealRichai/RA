@@ -1,21 +1,21 @@
-import type { FastifyInstance } from 'fastify';
 import { getConfig } from '@realriches/config';
+import type { FastifyInstance } from 'fastify';
 
-import { authRoutes } from './auth/routes';
-import { userRoutes } from './users/routes';
-import { propertyRoutes } from './properties/routes';
-import { listingRoutes } from './listings/routes';
-import { leaseRoutes } from './leases/routes';
-import { complianceRoutes } from './compliance/routes';
 import { aiRoutes } from './ai/routes';
-import { paymentRoutes } from './payments/routes';
+import { analyticsRoutes } from './analytics/routes';
+import { authRoutes } from './auth/routes';
+import { commerceRoutes } from './commerce/routes';
+import { commercialRoutes } from './commercial/routes';
+import { complianceRoutes } from './compliance/routes';
 import { documentRoutes } from './documents/routes';
+import { healthRoutes } from './health/routes';
+import { leaseRoutes } from './leases/routes';
+import { listingRoutes } from './listings/routes';
 import { maintenanceRoutes } from './maintenance/routes';
 import { marketingRoutes } from './marketing/routes';
-import { commerceRoutes } from './commerce/routes';
-import { analyticsRoutes } from './analytics/routes';
-import { commercialRoutes } from './commercial/routes';
-import { healthRoutes } from './health/routes';
+import { paymentRoutes } from './payments/routes';
+import { propertyRoutes } from './properties/routes';
+import { userRoutes } from './users/routes';
 
 export async function registerModules(app: FastifyInstance): Promise<void> {
   const config = getConfig();

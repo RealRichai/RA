@@ -1,6 +1,6 @@
-import type { FastifyInstance } from 'fastify';
 import { prisma } from '@realriches/database';
 import { logger } from '@realriches/utils';
+import type { FastifyInstance } from 'fastify';
 
 export function setupGracefulShutdown(app: FastifyInstance): void {
   const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGQUIT'];

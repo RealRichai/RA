@@ -4,7 +4,7 @@
  * Tests for file upload, content-type detection, and size validation.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 import { SIZE_LIMITS, ALLOWED_MIME_TYPES } from '../types';
 import {

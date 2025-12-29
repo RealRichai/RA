@@ -1,7 +1,7 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply, FastifyPluginCallback } from 'fastify';
-import fp from 'fastify-plugin';
 import type { Permission, Role } from '@realriches/types';
 import { RolePermissionsMap } from '@realriches/types';
+import type { FastifyInstance, FastifyRequest, FastifyReply, FastifyPluginCallback } from 'fastify';
+import fp from 'fastify-plugin';
 
 // Extend FastifyRequest to include user
 declare module 'fastify' {

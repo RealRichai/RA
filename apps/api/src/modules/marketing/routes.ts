@@ -1,7 +1,7 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import { prisma } from '@realriches/database';
 import { generateId, NotFoundError, ForbiddenError } from '@realriches/utils';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 const CreateMarketingAssetSchema = z.object({
   listingId: z.string(),
@@ -224,7 +224,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
       const parts = request.parts();
       let fileUrl = '';
       let thumbnailUrl = '';
-      let metadata: Record<string, unknown> = {};
+      const metadata: Record<string, unknown> = {};
 
       for await (const part of parts) {
         if (part.type === 'file') {

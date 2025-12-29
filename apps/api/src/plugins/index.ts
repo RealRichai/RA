@@ -1,18 +1,18 @@
-import type { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import jwt from '@fastify/jwt';
+import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
 import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
-import jwt from '@fastify/jwt';
-import multipart from '@fastify/multipart';
 import { getConfig } from '@realriches/config';
+import type { FastifyInstance } from 'fastify';
 
-import { redisPlugin } from './redis';
-import { authPlugin } from './auth';
 import { auditPlugin } from './audit';
+import { authPlugin } from './auth';
 import { errorHandler } from './error-handler';
+import { redisPlugin } from './redis';
 
 export async function registerPlugins(app: FastifyInstance): Promise<void> {
   const config = getConfig();
