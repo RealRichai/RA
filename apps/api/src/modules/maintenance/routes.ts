@@ -8,22 +8,22 @@ const CreateWorkOrderSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string(),
   category: z.enum([
-    'PLUMBING',
-    'ELECTRICAL',
-    'HVAC',
-    'APPLIANCE',
-    'STRUCTURAL',
-    'PEST',
-    'GENERAL',
-    'EMERGENCY',
+    'plumbing',
+    'electrical',
+    'hvac',
+    'appliance',
+    'structural',
+    'pest',
+    'other',
+    'safety',
   ]),
-  priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'EMERGENCY']).default('MEDIUM'),
+  priority: z.enum(['low', 'normal', 'high', 'emergency']).default('normal'),
   images: z.array(z.string()).optional(),
   preferredSchedule: z.string().optional(),
 });
 
 const UpdateWorkOrderSchema = z.object({
-  status: z.enum(['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']).optional(),
+  status: z.enum(['submitted', 'acknowledged', 'in_progress', 'completed', 'cancelled']).optional(),
   vendorId: z.string().optional(),
   scheduledDate: z.string().datetime().optional(),
   notes: z.string().optional(),
@@ -93,9 +93,9 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       if (propertyId) where.unit = { propertyId };
 
       // Filter by role
-      if (request.user.role === 'TENANT') {
+      if (request.user.role === 'tenant') {
         where.reportedById = request.user.id;
-      } else if (request.user.role === 'LANDLORD') {
+      } else if (request.user.role === 'landlord') {
         where.unit = { property: { ownerId: request.user.id } };
       }
 
@@ -191,14 +191,14 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
         data: {
           id: generateId('wo'),
           ...data,
-          status: 'OPEN',
+          status: 'submitted',
           reportedById: request.user.id,
         },
         include: { unit: { include: { property: true } } },
       });
 
       // Auto-escalate emergencies
-      if (data.priority === 'EMERGENCY') {
+      if (data.priority === 'emergency') {
         // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Send emergency notifications
         // await sendEmergencyAlert(workOrder);
       }
@@ -219,7 +219,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'admin'] });
       },
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
@@ -239,7 +239,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Work order not found');
       }
 
-      if (workOrder.unit.property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (workOrder.unit.property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -250,7 +250,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
         data: {
           ...data,
           scheduledDate: data.scheduledDate ? new Date(data.scheduledDate) : undefined,
-          completedAt: data.status === 'COMPLETED' ? new Date() : undefined,
+          completedAt: data.status === 'completed' ? new Date() : undefined,
           actualCost: data.actualCost,
         },
       });
@@ -276,7 +276,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'admin'] });
       },
     },
     async (
@@ -291,7 +291,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const propertyFilter =
-        request.user.role === 'ADMIN'
+        request.user.role === 'admin'
           ? {}
           : { property: { ownerId: request.user.id } };
 
@@ -317,8 +317,8 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       const urgentOrders = await prisma.workOrder.findMany({
         where: {
           unit: propertyFilter,
-          status: { in: ['OPEN', 'ASSIGNED'] },
-          priority: { in: ['EMERGENCY', 'HIGH'] },
+          status: { in: ['submitted', 'acknowledged'] },
+          priority: { in: ['emergency', 'high'] },
         },
         include: {
           unit: { include: { property: { select: { name: true, address: true } } } },
@@ -331,7 +331,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       const overdueOrders = await prisma.workOrder.findMany({
         where: {
           unit: propertyFilter,
-          status: { in: ['OPEN', 'ASSIGNED', 'IN_PROGRESS'] },
+          status: { in: ['submitted', 'acknowledged', 'in_progress'] },
           scheduledDate: { lt: new Date() },
         },
         include: {
@@ -344,7 +344,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       const recentCompletions = await prisma.workOrder.findMany({
         where: {
           unit: propertyFilter,
-          status: 'COMPLETED',
+          status: 'completed',
           completedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
         },
         orderBy: { completedAt: 'desc' },
@@ -352,9 +352,9 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       });
 
       // Calculate metrics
-      const totalOpen = statusCounts.find((s) => s.status === 'OPEN')?._count || 0;
-      const totalInProgress = statusCounts.find((s) => s.status === 'IN_PROGRESS')?._count || 0;
-      const totalCompleted = statusCounts.find((s) => s.status === 'COMPLETED')?._count || 0;
+      const totalOpen = statusCounts.find((s) => s.status === 'submitted')?._count || 0;
+      const totalInProgress = statusCounts.find((s) => s.status === 'in_progress')?._count || 0;
+      const totalCompleted = statusCounts.find((s) => s.status === 'completed')?._count || 0;
 
       return reply.send({
         success: true,
@@ -394,7 +394,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'admin'] });
       },
     },
     async (
@@ -429,7 +429,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -462,7 +462,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -489,7 +489,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Unit not found');
       }
 
-      if (unit.property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (unit.property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -500,7 +500,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
           type,
           scheduledDate: new Date(scheduledDate),
           notes,
-          status: 'SCHEDULED',
+          status: 'scheduled',
           inspectorId: request.user.id,
         },
       });
@@ -544,11 +544,11 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
 
       // Escalate priority
       const newPriority =
-        workOrder.priority === 'LOW'
-          ? 'MEDIUM'
-          : workOrder.priority === 'MEDIUM'
-            ? 'HIGH'
-            : 'EMERGENCY';
+        workOrder.priority === 'low'
+          ? 'normal'
+          : workOrder.priority === 'normal'
+            ? 'high'
+            : 'emergency';
 
       const updated = await prisma.workOrder.update({
         where: { id: workOrder.id },

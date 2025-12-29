@@ -20,7 +20,7 @@ const ComplianceCheckSchema = z.object({
 const DisclosureRecordSchema = z.object({
   disclosureId: z.string(),
   recipientId: z.string(),
-  recipientType: z.enum(['TENANT', 'APPLICANT', 'BUYER']),
+  recipientType: z.enum(['tenant', 'APPLICANT', 'BUYER']),
   deliveryMethod: z.enum(['EMAIL', 'IN_APP', 'PHYSICAL', 'ESIGN']),
   metadata: z.record(z.unknown()).optional(),
 });

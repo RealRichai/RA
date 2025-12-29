@@ -34,7 +34,7 @@ const RequestSignatureSchema = z.object({
 
 const GenerateDocumentSchema = z.object({
   variables: z.record(z.union([z.string(), z.number(), z.boolean()])),
-  entityType: z.enum(['PROPERTY', 'UNIT', 'LEASE', 'APPLICATION']),
+  entityType: z.enum(['property', 'unit', 'lease', 'application']),
   entityId: z.string(),
   format: z.enum(['pdf', 'docx', 'html']).default('pdf'),
 });
@@ -82,7 +82,7 @@ async function getEntityOwnership(
     }
   }
 
-  if (entityType === 'PROPERTY' && entityId) {
+  if (entityType === 'property' && entityId) {
     const property = await prisma.property.findUnique({
       where: { id: entityId },
       select: { ownerId: true, managerId: true },
@@ -93,7 +93,7 @@ async function getEntityOwnership(
     }
   }
 
-  if (entityType === 'LEASE' && entityId) {
+  if (entityType === 'lease' && entityId) {
     const lease = await prisma.lease.findUnique({
       where: { id: entityId },
       select: {
@@ -110,7 +110,7 @@ async function getEntityOwnership(
     }
   }
 
-  if (entityType === 'APPLICATION' && entityId) {
+  if (entityType === 'application' && entityId) {
     const application = await prisma.tenantApplication.findUnique({
       where: { id: entityId },
       select: {

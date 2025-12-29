@@ -6,13 +6,13 @@ import { z } from 'zod';
 // High-Fidelity Context Transfer System (HF-CTS) schemas
 const CreateConversationSchema = z.object({
   contextType: z.enum([
-    'LEASING_INQUIRY',
-    'MAINTENANCE_REQUEST',
-    'GENERAL_SUPPORT',
-    'PROPERTY_TOUR',
-    'APPLICATION_HELP',
+    'leasing_inquiry',
+    'maintenance_request',
+    'general_support',
+    'property_tour',
+    'application_help',
   ]),
-  entityType: z.enum(['LISTING', 'PROPERTY', 'UNIT', 'LEASE', 'WORK_ORDER']).optional(),
+  entityType: z.enum(['listing', 'property', 'unit', 'lease', 'work_order']).optional(),
   entityId: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
@@ -26,7 +26,7 @@ const MaintenanceTriageSchema = z.object({
   description: z.string().min(1),
   unitId: z.string(),
   images: z.array(z.string()).optional(),
-  urgencyHint: z.enum(['LOW', 'MEDIUM', 'HIGH', 'EMERGENCY']).optional(),
+  urgencyHint: z.enum(['low', 'normal', 'high', 'emergency']).optional(),
 });
 
 export async function aiRoutes(app: FastifyInstance): Promise<void> {
@@ -237,7 +237,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
 
       // Auto-create work order if urgent
       let workOrder = null;
-      if (triageResult.urgency === 'EMERGENCY' || triageResult.urgency === 'HIGH') {
+      if (triageResult.urgency === 'emergency' || triageResult.urgency === 'high') {
         workOrder = await prisma.workOrder.create({
           data: {
             id: generateId('wo'),
@@ -245,9 +245,9 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
             reportedById: request.user.id,
             title: triageResult.suggestedTitle,
             description: data.description,
-            category: triageResult.category,
-            priority: triageResult.urgency,
-            status: 'OPEN',
+            category: triageResult.category as any,
+            priority: triageResult.urgency as any,
+            status: 'submitted',
           },
         });
       }

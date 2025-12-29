@@ -81,7 +81,7 @@ async function checkCommercialAccess(app: FastifyInstance, request: FastifyReque
     throw new AppError('Authentication required', 'AUTH_REQUIRED', 401);
   }
 
-  const allowedRoles = ['INVESTOR', 'ADMIN'];
+  const allowedRoles = ['investor', 'admin'];
   if (!allowedRoles.includes(request.user.role)) {
     throw new ForbiddenError('Commercial features require investor or admin access');
   }
@@ -160,7 +160,7 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
         data: {
           id: generateId('prp'),
           name: data.name,
-          type: 'COMMERCIAL',
+          type: 'commercial',
           address: data.address,
           totalUnits: 1, // Commercial properties use square footage instead
           squareFeet: data.totalSquareFeet,
@@ -255,7 +255,7 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Property not found');
       }
 
-      if (property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -469,7 +469,7 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
         await checkCommercialAccess(app, request);
-        app.authorize(request, reply, { roles: ['ADMIN'] });
+        app.authorize(request, reply, { roles: ['admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {

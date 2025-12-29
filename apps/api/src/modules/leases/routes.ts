@@ -19,7 +19,7 @@ const CreateLeaseSchema = z.object({
   endDate: z.string().datetime(),
   monthlyRent: z.number().min(0),
   securityDeposit: z.number().min(0).optional(),
-  leaseType: z.enum(['STANDARD', 'REBNY', 'CUSTOM']).default('STANDARD'),
+  leaseType: z.enum(['standard', 'rebny', 'custom']).default('standard'),
   terms: z.record(z.unknown()).optional(),
   isRentStabilized: z.boolean().default(false),
   legalRentAmount: z.number().optional(),
@@ -127,7 +127,7 @@ async function storeComplianceAuditLog(
 }
 
 const CreateAmendmentSchema = z.object({
-  type: z.enum(['RENT_CHANGE', 'TERM_EXTENSION', 'RIDER', 'OTHER']),
+  type: z.enum(['rent_change', 'term_extension', 'rider', 'other']),
   description: z.string(),
   changes: z.record(z.unknown()),
   effectiveDate: z.string().datetime(),
@@ -203,11 +203,11 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
 
       const where: Record<string, unknown> = {};
 
-      if (role === 'LANDLORD') {
+      if (role === 'landlord') {
         where.unit = { property: { ownerId: request.user.id } };
-      } else if (role === 'TENANT') {
+      } else if (role === 'tenant') {
         where.tenantId = request.user.id;
-      } else if (role === 'AGENT') {
+      } else if (role === 'agent') {
         where.createdById = request.user.id;
       }
 
@@ -274,7 +274,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       // Check access
       const isOwner = lease.unit.property.ownerId === request.user.id;
       const isTenant = lease.tenantId === request.user.id;
-      const isAdmin = request.user.role === 'ADMIN';
+      const isAdmin = request.user.role === 'admin';
 
       if (!isOwner && !isTenant && !isAdmin) {
         throw new ForbiddenError('Access denied');
@@ -295,7 +295,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -318,7 +318,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Unit not found');
       }
 
-      if (unit.property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (unit.property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -334,7 +334,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       const existingLease = await prisma.lease.findFirst({
         where: {
           unitId: data.unitId,
-          status: { in: ['ACTIVE', 'PENDING'] },
+          status: { in: ['active', 'pending_signatures'] },
           OR: [
             { startDate: { lte: endDate }, endDate: { gte: startDate } },
           ],
@@ -353,7 +353,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
           securityDeposit: data.securityDeposit,
           startDate,
           endDate,
-          status: 'PENDING',
+          status: 'pending_signatures',
           createdById: request.user.id,
         },
         include: {
@@ -365,7 +365,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       // Update unit status
       await prisma.unit.update({
         where: { id: data.unitId },
-        data: { status: 'OCCUPIED' },
+        data: { status: 'occupied' },
       });
 
       return reply.status(201).send({ success: true, data: lease });
@@ -403,7 +403,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Lease not found');
       }
 
-      if (lease.unit.property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (lease.unit.property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -415,7 +415,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
           leaseId: lease.id,
           ...data,
           effectiveDate: new Date(data.effectiveDate),
-          status: 'PENDING',
+          status: 'pending',
         },
       });
 
@@ -460,7 +460,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
           id: generateId('app'),
           listingId: data.listingId,
           applicantId: request.user.id,
-          status: 'SUBMITTED',
+          status: 'submitted',
           employmentInfo: data.employmentInfo,
           references: data.references,
           emergencyContact: data.emergencyContact,
@@ -491,7 +491,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin'] });
       },
     },
     async (
@@ -512,7 +512,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       if (status) where.status = status;
 
       // Filter by ownership if not admin
-      if (request.user.role !== 'ADMIN') {
+      if (request.user.role !== 'admin') {
         where.listing = {
           unit: { property: { ownerId: request.user.id } },
         };
@@ -546,7 +546,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'admin'] });
       },
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
@@ -566,7 +566,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Lease not found');
       }
 
-      if (lease.unit.property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (lease.unit.property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -632,7 +632,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
         data: {
           id: generateId('amd'),
           leaseId: lease.id,
-          type: 'RENT_CHANGE',
+          type: 'rent_change',
           description: data.reason || `Rent increase from $${lease.monthlyRent} to $${data.newMonthlyRent}`,
           changes: {
             previousRent: lease.monthlyRent,
@@ -641,7 +641,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
             noticeDays: data.noticeDays,
           },
           effectiveDate: new Date(data.effectiveDate),
-          status: 'APPROVED',
+          status: 'approved',
         },
       });
 
@@ -690,7 +690,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin'] });
       },
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
@@ -717,12 +717,12 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
 
       // Get current stage from application status (map to FCHA stages)
       const statusToStageMap: Record<string, FCHAStage> = {
-        'SUBMITTED': 'application_submitted',
-        'UNDER_REVIEW': 'application_review',
-        'CONDITIONAL_OFFER': 'conditional_offer',
-        'BACKGROUND_CHECK': 'background_check',
-        'APPROVED': 'final_approval',
-        'LEASE_PENDING': 'lease_signing',
+        'submitted': 'application_submitted',
+        'under_review': 'application_review',
+        'conditional_offer': 'conditional_offer',
+        'background_check': 'background_check',
+        'approved': 'final_approval',
+        'lease_pending': 'lease_signing',
       };
       const currentStage = statusToStageMap[application.status] || 'initial_inquiry';
 
@@ -778,12 +778,12 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
 
       // Map target stage back to application status
       const stageToStatusMap: Record<string, string> = {
-        'application_submitted': 'SUBMITTED',
-        'application_review': 'UNDER_REVIEW',
-        'conditional_offer': 'CONDITIONAL_OFFER',
-        'background_check': 'BACKGROUND_CHECK',
-        'final_approval': 'APPROVED',
-        'lease_signing': 'LEASE_PENDING',
+        'application_submitted': 'submitted',
+        'application_review': 'under_review',
+        'conditional_offer': 'conditional_offer',
+        'background_check': 'background_check',
+        'final_approval': 'approved',
+        'lease_signing': 'lease_pending',
       };
 
       const updated = await prisma.tenantApplication.update({
@@ -820,7 +820,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin'] });
       },
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
@@ -847,10 +847,10 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
 
       // Map status to FCHA stage
       const statusToStageMap: Record<string, FCHAStage> = {
-        'SUBMITTED': 'application_submitted',
-        'UNDER_REVIEW': 'application_review',
-        'CONDITIONAL_OFFER': 'conditional_offer',
-        'BACKGROUND_CHECK': 'background_check',
+        'submitted': 'application_submitted',
+        'under_review': 'application_review',
+        'conditional_offer': 'conditional_offer',
+        'background_check': 'background_check',
       };
       const currentStage = statusToStageMap[application.status] || 'initial_inquiry';
 

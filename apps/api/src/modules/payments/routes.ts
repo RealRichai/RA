@@ -6,7 +6,7 @@ import { z } from 'zod';
 const CreatePaymentSchema = z.object({
   leaseId: z.string(),
   amount: z.number().min(0),
-  type: z.enum(['RENT', 'SECURITY_DEPOSIT', 'FEE', 'OTHER']),
+  type: z.enum(['rent', 'security_deposit', 'late_fee', 'other']),
   dueDate: z.string().datetime(),
   description: z.string().optional(),
 });
@@ -16,14 +16,14 @@ const ProcessPaymentSchema = z.object({
 });
 
 const AddPaymentMethodSchema = z.object({
-  type: z.enum(['CARD', 'BANK_ACCOUNT']),
+  type: z.enum(['card', 'bank_account']),
   token: z.string(), // Stripe/Plaid token
   isDefault: z.boolean().default(false),
 });
 
 const DepositAlternativeSchema = z.object({
   leaseId: z.string(),
-  provider: z.enum(['LEASELOCK', 'RHINO', 'JETTY']),
+  provider: z.enum(['leaselock', 'rhino', 'jetty']),
   coverageAmount: z.number().min(0),
 });
 
@@ -70,9 +70,9 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       if (status) where.status = status;
 
       // Filter by user role
-      if (request.user.role === 'TENANT') {
+      if (request.user.role === 'tenant') {
         where.lease = { tenantId: request.user.id };
-      } else if (request.user.role === 'LANDLORD') {
+      } else if (request.user.role === 'landlord') {
         where.lease = { unit: { property: { ownerId: request.user.id } } };
       }
 
@@ -148,7 +148,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -171,7 +171,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Lease not found');
       }
 
-      if (lease.unit.property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (lease.unit.property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -181,7 +181,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           ...data,
           amount: data.amount,
           dueDate: new Date(data.dueDate),
-          status: 'PENDING',
+          status: 'pending',
         },
       });
 
@@ -226,7 +226,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
         throw new ForbiddenError('Access denied');
       }
 
-      if (payment.status !== 'PENDING') {
+      if (payment.status !== 'pending') {
         throw new ValidationError('Payment is not in pending status');
       }
 
@@ -246,7 +246,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       const updatedPayment = await prisma.payment.update({
         where: { id: payment.id },
         data: {
-          status: 'COMPLETED',
+          status: 'completed',
           paidAt: new Date(),
           paymentMethodId,
           transactionId: generateId('txn'),
@@ -326,7 +326,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           id: generateId('pm'),
           userId: request.user.id,
           type: data.type,
-          provider: 'STRIPE',
+          provider: 'stripe',
           externalId: data.token,
           last4: '4242', // Would come from Stripe
           isDefault: data.isDefault,
@@ -379,7 +379,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           leaseId,
           paymentMethodId,
           amount: Number(lease.monthlyRent),
-          frequency: 'MONTHLY',
+          frequency: 'monthly',
           dayOfMonth: dayOfMonth || 1,
           isActive: true,
           nextPaymentDate: getNextPaymentDate(dayOfMonth || 1),
@@ -432,7 +432,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           provider: data.provider,
           coverageAmount: data.coverageAmount,
           monthlyPremium: data.coverageAmount * 0.02, // ~2% monthly premium estimate
-          status: 'PENDING',
+          status: 'pending',
         },
       });
 
@@ -479,7 +479,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
             userId: request.user.id,
             pointsBalance: 0,
             lifetimePoints: 0,
-            tier: 'BRONZE',
+            tier: 'bronze',
           },
           include: {
             transactions: { orderBy: { createdAt: 'desc' }, take: 10 },

@@ -70,7 +70,7 @@ export class AuthService {
         role: input.role,
         phone: input.phone,
         emailVerified: false,
-        status: 'ACTIVE',
+        status: 'active',
       },
       select: {
         id: true,

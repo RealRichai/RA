@@ -21,7 +21,7 @@ const CreateListingSchema = z.object({
   brokerFeePaidBy: z.enum(['tenant', 'landlord']).optional(),
   availableDate: z.string().datetime(),
   leaseTermMonths: z.number().int().min(1).default(12),
-  petPolicy: z.enum(['ALLOWED', 'CASE_BY_CASE', 'NOT_ALLOWED']).default('NOT_ALLOWED'),
+  petPolicy: z.enum(['allowed', 'case_by_case', 'not_allowed']).default('not_allowed'),
   utilitiesIncluded: z.array(z.string()).optional(),
   incomeRequirementMultiplier: z.number().optional(),
   creditScoreThreshold: z.number().optional(),
@@ -149,7 +149,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
       const params = SearchListingsSchema.parse(request.query);
       const { page, limit, ...filters } = params;
 
-      const where: Record<string, unknown> = { status: 'ACTIVE' };
+      const where: Record<string, unknown> = { status: 'active' };
 
       if (filters.minRent || filters.maxRent) {
         where.rent = {};
@@ -162,7 +162,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
       }
 
       if (filters.petFriendly) {
-        where.petPolicy = { in: ['ALLOWED', 'CASE_BY_CASE'] };
+        where.petPolicy = { in: ['allowed', 'case_by_case'] };
       }
 
       if (filters.bedrooms !== undefined) {
@@ -248,7 +248,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -271,7 +271,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Unit not found');
       }
 
-      if (unit.property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (unit.property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -301,8 +301,8 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
           securityDeposit: data.securityDeposit,
           brokerFee: data.hasBrokerFee ? data.brokerFee : null,
           availableDate: new Date(data.availableDate),
-          status: 'DRAFT', // Start as DRAFT, require publish gate to activate
-          agentId: request.user.role === 'AGENT' ? request.user.id : null,
+          status: 'draft', // Start as draft, require publish gate to activate
+          agentId: request.user.role === 'agent' ? request.user.id : null,
           marketId: unit.property.marketId || 'US_STANDARD',
         },
         include: { unit: { include: { property: true } } },
@@ -324,7 +324,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin'] });
       },
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
@@ -347,12 +347,12 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
       if (
         listing.unit.property.ownerId !== request.user.id &&
         listing.agentId !== request.user.id &&
-        request.user.role !== 'ADMIN'
+        request.user.role !== 'admin'
       ) {
         throw new ForbiddenError('Access denied');
       }
 
-      if (listing.status !== 'DRAFT') {
+      if (listing.status !== 'draft') {
         throw new ValidationError(`Cannot publish listing with status: ${listing.status}`);
       }
 
@@ -425,7 +425,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
       const published = await prisma.listing.update({
         where: { id: listing.id },
         data: {
-          status: 'ACTIVE',
+          status: 'active',
           isCompliant: true,
           complianceIssues: [],
           fareActCompliant: true,
@@ -486,7 +486,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
       if (
         listing.unit.property.ownerId !== request.user.id &&
         listing.agentId !== request.user.id &&
-        request.user.role !== 'ADMIN'
+        request.user.role !== 'admin'
       ) {
         throw new ForbiddenError('Access denied');
       }
@@ -542,7 +542,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
           email: email || request.user?.email || '',
           phone,
           message,
-          status: 'NEW',
+          status: 'new',
         },
       });
 
@@ -595,7 +595,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
           userId: request.user.id,
           scheduledAt: new Date(scheduledAt),
           notes,
-          status: 'SCHEDULED',
+          status: 'scheduled',
         },
       });
 

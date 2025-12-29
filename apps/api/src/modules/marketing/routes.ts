@@ -5,14 +5,14 @@ import { z } from 'zod';
 
 const CreateMarketingAssetSchema = z.object({
   listingId: z.string(),
-  type: z.enum(['FLYER', 'BROCHURE', 'SOCIAL_POST', 'EMAIL', 'VIDEO', 'DECK']),
+  type: z.enum(['flyer', 'brochure', 'social_post', 'email', 'video', 'deck']),
   templateId: z.string().optional(),
   customizations: z.record(z.unknown()).optional(),
 });
 
 const UploadMediaSchema = z.object({
   propertyId: z.string(),
-  type: z.enum(['PHOTO', 'VIDEO', 'VIRTUAL_TOUR', 'FLOOR_PLAN', '3D_MODEL']),
+  type: z.enum(['photo', 'video', 'virtual_tour', 'floor_plan', '3d_model']),
   title: z.string().optional(),
   description: z.string().optional(),
   order: z.number().int().optional(),
@@ -71,7 +71,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -115,7 +115,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
           listingId: data.listingId,
           type: data.type,
           templateId: data.templateId,
-          status: 'GENERATING',
+          status: 'generating',
           fileUrl: null,
           metadata: {
             customizations: data.customizations,
@@ -132,7 +132,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
         await prisma.marketingAsset.update({
           where: { id: asset.id },
           data: {
-            status: 'COMPLETED',
+            status: 'completed',
             fileUrl: `https://storage.example.com/marketing/${asset.id}.pdf`,
           },
         });
@@ -247,7 +247,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Property not found');
       }
 
-      if (property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -304,7 +304,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -324,14 +324,14 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
 
       const property = await prisma.property.findUnique({
         where: { id: propertyId },
-        include: { media: { where: { type: { in: ['PHOTO', 'VIDEO'] } } } },
+        include: { media: { where: { type: { in: ['photo', 'video'] } } } },
       });
 
       if (!property) {
         throw new NotFoundError('Property not found');
       }
 
-      if (property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -342,12 +342,12 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
         data: {
           id: generateId('med'),
           propertyId,
-          type: 'VIDEO',
+          type: 'video',
           url: '', // Will be populated when generation completes
           title: 'AI-Generated Video Tour',
           description: `Style: ${style || 'cinematic'}`,
           metadata: {
-            status: 'GENERATING',
+            status: 'generating',
             style,
             musicTrack,
             voiceoverScript,
@@ -375,7 +375,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -398,11 +398,11 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
         data: {
           id: generateId('med'),
           propertyId,
-          type: 'VIRTUAL_TOUR',
+          type: 'virtual_tour',
           url: '', // Will be populated when processing completes
           title: '3D Virtual Tour',
           metadata: {
-            status: 'PROCESSING',
+            status: 'processing',
             sourceImageCount: sourceImages?.length || 0,
             technology: '3DGS',
           },

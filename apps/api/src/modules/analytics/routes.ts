@@ -21,7 +21,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'INVESTOR', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'investor', 'admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -32,7 +32,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      const ownerFilter = request.user.role === 'ADMIN' ? {} : { ownerId: request.user.id };
+      const ownerFilter = request.user.role === 'admin' ? {} : { ownerId: request.user.id };
 
       // Get properties and units
       const properties = await prisma.property.findMany({
@@ -41,7 +41,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
           units: {
             include: {
               leases: {
-                where: { status: 'ACTIVE' },
+                where: { status: 'active' },
                 take: 1,
               },
             },
@@ -58,7 +58,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       properties.forEach((property) => {
         property.units.forEach((unit) => {
           totalUnits++;
-          if (unit.status === 'OCCUPIED' && unit.leases.length > 0) {
+          if (unit.status === 'occupied' && unit.leases.length > 0) {
             occupiedUnits++;
             totalMonthlyRent += Number(unit.rent);
           }
@@ -72,8 +72,8 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
 
       const payments = await prisma.payment.aggregate({
         where: {
-          status: 'COMPLETED',
-          type: 'RENT',
+          status: 'completed',
+          type: 'rent',
           paidAt: { gte: startOfMonth },
           lease: {
             unit: {
@@ -89,7 +89,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       // Get work order stats
       const openWorkOrders = await prisma.workOrder.count({
         where: {
-          status: { in: ['OPEN', 'ASSIGNED', 'IN_PROGRESS'] },
+          status: { in: ['submitted', 'acknowledged', 'in_progress'] },
           unit: { property: ownerFilter },
         },
       });
@@ -140,7 +140,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'INVESTOR', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'investor', 'admin'] });
       },
     },
     async (
@@ -163,7 +163,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
 
       const { startDate, endDate, propertyId } = request.query;
 
-      const ownerFilter = request.user.role === 'ADMIN' ? {} : { ownerId: request.user.id };
+      const ownerFilter = request.user.role === 'admin' ? {} : { ownerId: request.user.id };
       const propertyFilter = propertyId ? { propertyId } : {};
 
       // Default to last 12 months
@@ -173,7 +173,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       // Get payments by month
       const payments = await prisma.payment.findMany({
         where: {
-          status: 'COMPLETED',
+          status: 'completed',
           paidAt: { gte: start, lte: end },
           lease: {
             unit: {
@@ -198,9 +198,9 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
           monthlyData[monthKey] = { rent: 0, fees: 0, other: 0 };
         }
         const amount = Number(payment.amount);
-        if (payment.type === 'RENT') {
+        if (payment.type === 'rent') {
           monthlyData[monthKey].rent += amount;
-        } else if (payment.type === 'FEE') {
+        } else if (payment.type === 'late_fee') {
           monthlyData[monthKey].fees += amount;
         } else {
           monthlyData[monthKey].other += amount;
@@ -251,7 +251,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin'] });
       },
     },
     async (
@@ -268,9 +268,9 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       const { propertyId } = request.query;
 
       const ownerFilter =
-        request.user.role === 'ADMIN'
+        request.user.role === 'admin'
           ? {}
-          : request.user.role === 'AGENT'
+          : request.user.role === 'agent'
             ? { agentId: request.user.id }
             : { unit: { property: { ownerId: request.user.id } } };
 
@@ -350,7 +350,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'admin'] });
       },
     },
     async (
@@ -368,7 +368,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
 
       const { propertyId, startDate, endDate } = request.query;
 
-      const ownerFilter = request.user.role === 'ADMIN' ? {} : { ownerId: request.user.id };
+      const ownerFilter = request.user.role === 'admin' ? {} : { ownerId: request.user.id };
       const propertyFilter = propertyId ? { propertyId } : {};
 
       const start = startDate ? new Date(startDate) : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
@@ -416,7 +416,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
         {} as Record<string, number>
       );
 
-      const completedOrders = workOrders.filter((wo) => wo.status === 'COMPLETED' && wo.completedAt);
+      const completedOrders = workOrders.filter((wo) => wo.status === 'completed' && wo.completedAt);
 
       // Average resolution time in days
       const avgResolutionTime =
@@ -526,7 +526,7 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'INVESTOR', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'investor', 'admin'] });
       },
     },
     async (

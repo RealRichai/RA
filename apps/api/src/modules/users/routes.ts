@@ -142,7 +142,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       let profile;
 
       switch (role) {
-        case 'LANDLORD':
+        case 'landlord':
           profile = await prisma.landlordProfile.upsert({
             where: { userId: request.user.id },
             update: data,
@@ -150,7 +150,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
           });
           break;
 
-        case 'AGENT':
+        case 'agent':
           profile = await prisma.agentProfile.upsert({
             where: { userId: request.user.id },
             update: data,
@@ -158,7 +158,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
           });
           break;
 
-        case 'TENANT':
+        case 'tenant':
           profile = await prisma.tenantProfile.upsert({
             where: { userId: request.user.id },
             update: data,
@@ -166,7 +166,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
           });
           break;
 
-        case 'INVESTOR':
+        case 'investor':
           profile = await prisma.investorProfile.upsert({
             where: { userId: request.user.id },
             update: data,
@@ -205,7 +205,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['ADMIN'] });
+        app.authorize(request, reply, { roles: ['admin'] });
       },
     },
     async (

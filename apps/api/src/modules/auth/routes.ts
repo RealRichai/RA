@@ -40,7 +40,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
             password: { type: 'string', minLength: 8 },
             firstName: { type: 'string' },
             lastName: { type: 'string' },
-            role: { type: 'string', enum: ['LANDLORD', 'AGENT', 'TENANT', 'INVESTOR'] },
+            role: { type: 'string', enum: ['landlord', 'agent', 'tenant', 'investor'] },
             phone: { type: 'string' },
           },
         },

@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 const CreatePropertySchema = z.object({
   name: z.string().min(1).max(200),
-  type: z.enum(['RESIDENTIAL', 'COMMERCIAL', 'MIXED_USE']),
+  type: z.enum(['single_family', 'multi_family', 'condo', 'townhouse', 'apartment', 'commercial', 'mixed_use']),
   address: z.object({
     street: z.string(),
     unit: z.string().optional(),
@@ -26,7 +26,7 @@ const CreateUnitSchema = z.object({
   bathrooms: z.number().min(0),
   squareFeet: z.number().int().optional(),
   rent: z.number().min(0),
-  status: z.enum(['VACANT', 'OCCUPIED', 'MAINTENANCE', 'OFF_MARKET']).default('VACANT'),
+  status: z.enum(['vacant', 'occupied', 'under_renovation', 'off_market']).default('vacant'),
   features: z.array(z.string()).optional(),
   isRentStabilized: z.boolean().default(false),
   legalRent: z.number().optional(),
@@ -129,7 +129,7 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Check ownership or admin access
-      if (property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -148,7 +148,7 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
-        app.authorize(request, reply, { roles: ['LANDLORD', 'ADMIN'] });
+        app.authorize(request, reply, { roles: ['landlord', 'admin'] });
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -205,7 +205,7 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Property not found');
       }
 
-      if (property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -251,7 +251,7 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Property not found');
       }
 
-      if (property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -291,7 +291,7 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Property not found');
       }
 
-      if (property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
@@ -342,7 +342,7 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Property not found');
       }
 
-      if (property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+      if (property.ownerId !== request.user.id && request.user.role !== 'admin') {
         throw new ForbiddenError('Access denied');
       }
 
