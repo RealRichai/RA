@@ -1,5 +1,5 @@
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -163,7 +163,7 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
 
       const property = await prisma.property.create({
         data: {
-          id: generateId('prp'),
+          id: generatePrefixedId('prp'),
           ...data,
           address: data.address,
           ownerId: request.user.id,
@@ -299,7 +299,7 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
 
       const unit = await prisma.unit.create({
         data: {
-          id: generateId('unt'),
+          id: generatePrefixedId('unt'),
           ...data,
           rent: data.rent,
           legalRent: data.legalRent,

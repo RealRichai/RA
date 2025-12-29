@@ -1,5 +1,5 @@
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError, ValidationError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError, ValidationError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -177,7 +177,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
 
       const payment = await prisma.payment.create({
         data: {
-          id: generateId('pay'),
+          id: generatePrefixedId('pay'),
           ...data,
           amount: data.amount,
           dueDate: new Date(data.dueDate),
@@ -249,7 +249,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           status: 'completed',
           paidAt: new Date(),
           paymentMethodId,
-          transactionId: generateId('txn'),
+          transactionId: generatePrefixedId('txn'),
         },
       });
 
@@ -323,7 +323,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
 
       const method = await prisma.paymentMethod.create({
         data: {
-          id: generateId('pm'),
+          id: generatePrefixedId('pm'),
           userId: request.user.id,
           type: data.type,
           provider: 'stripe',
@@ -375,7 +375,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
 
       const recurring = await prisma.recurringPayment.create({
         data: {
-          id: generateId('rp'),
+          id: generatePrefixedId('rp'),
           leaseId,
           paymentMethodId,
           amount: Number(lease.monthlyRent),
@@ -426,7 +426,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
 
       const depositAlt = await prisma.depositAlternative.create({
         data: {
-          id: generateId('da'),
+          id: generatePrefixedId('da'),
           leaseId: data.leaseId,
           userId: request.user.id,
           provider: data.provider,
@@ -475,7 +475,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       if (!account) {
         account = await prisma.rentRewardsAccount.create({
           data: {
-            id: generateId('rra'),
+            id: generatePrefixedId('rra'),
             userId: request.user.id,
             pointsBalance: 0,
             lifetimePoints: 0,

@@ -6,7 +6,7 @@ import {
   type ComplianceDecision,
 } from '@realriches/compliance-engine';
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError, ValidationError, logger } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError, ValidationError, logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -43,7 +43,7 @@ async function storeComplianceCheck(
 ): Promise<string> {
   const check = await prisma.complianceCheck.create({
     data: {
-      id: generateId('cck'),
+      id: generatePrefixedId('cck'),
       entityType,
       entityId,
       marketId,
@@ -85,7 +85,7 @@ async function storeComplianceAuditLog(
 ): Promise<void> {
   await prisma.auditLog.create({
     data: {
-      id: generateId('aud'),
+      id: generatePrefixedId('aud'),
       actorId: userId || null,
       actorEmail: userId || 'system',
       action,
@@ -295,7 +295,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
 
       const listing = await prisma.listing.create({
         data: {
-          id: generateId('lst'),
+          id: generatePrefixedId('lst'),
           ...data,
           rent: data.rent,
           securityDeposit: data.securityDeposit,
@@ -535,7 +535,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
 
       const inquiry = await prisma.listingInquiry.create({
         data: {
-          id: generateId('inq'),
+          id: generatePrefixedId('inq'),
           listingId: listing.id,
           userId: request.user?.id,
           name: name || request.user?.email?.split('@')[0],
@@ -590,7 +590,7 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
 
       const showing = await prisma.showing.create({
         data: {
-          id: generateId('shw'),
+          id: generatePrefixedId('shw'),
           listingId: listing.id,
           userId: request.user.id,
           scheduledAt: new Date(scheduledAt),

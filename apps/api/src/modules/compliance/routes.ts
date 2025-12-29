@@ -1,5 +1,5 @@
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -58,7 +58,7 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
       // Store the compliance check result
       const check = await prisma.complianceCheck.create({
         data: {
-          id: generateId('cpl'),
+          id: generatePrefixedId('cpl'),
           entityType: data.entityType,
           entityId: data.entityId,
           checkType: data.checkType,
@@ -192,7 +192,7 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
 
       const record = await prisma.disclosureRecord.create({
         data: {
-          id: generateId('dsr'),
+          id: generatePrefixedId('dsr'),
           disclosureId: data.disclosureId,
           recipientId: data.recipientId,
           recipientType: data.recipientType,
@@ -291,7 +291,7 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
       // Store compliance check
       await prisma.complianceCheck.create({
         data: {
-          id: generateId('cpl'),
+          id: generatePrefixedId('cpl'),
           entityType: 'LISTING',
           entityId: listingId,
           checkType: 'FARE_ACT',
@@ -392,7 +392,7 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
 
       await prisma.complianceCheck.create({
         data: {
-          id: generateId('cpl'),
+          id: generatePrefixedId('cpl'),
           entityType: 'LEASE',
           entityId: leaseId,
           checkType: 'GOOD_CAUSE',

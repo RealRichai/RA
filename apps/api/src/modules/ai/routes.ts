@@ -1,5 +1,6 @@
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError } from '@realriches/utils';
+import type { Prisma } from '@realriches/database';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -47,16 +48,20 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       const data = CreateConversationSchema.parse(request.body);
 
       // Build initial context for HF-CTS
-      const context = await buildContext(data);
+      const context = await buildContext({
+        contextType: data.contextType,
+        entityType: data.entityType,
+        entityId: data.entityId,
+      });
 
       const conversation = await prisma.aIConversation.create({
         data: {
-          id: generateId('conv'),
+          id: generatePrefixedId('conv'),
           userId: request.user?.id,
           contextType: data.contextType,
           entityType: data.entityType,
           entityId: data.entityId,
-          context: context,
+          context: context as Prisma.InputJsonValue,
           status: 'ACTIVE',
         },
       });
@@ -64,7 +69,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       // Create system message with context
       await prisma.aIMessage.create({
         data: {
-          id: generateId('msg'),
+          id: generatePrefixedId('msg'),
           conversationId: conversation.id,
           role: 'SYSTEM',
           content: generateSystemPrompt(data.contextType, context),
@@ -115,7 +120,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       // Store user message
       const userMessage = await prisma.aIMessage.create({
         data: {
-          id: generateId('msg'),
+          id: generatePrefixedId('msg'),
           conversationId: conversation.id,
           role: 'USER',
           content,
@@ -129,11 +134,11 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       // Store AI response
       const assistantMessage = await prisma.aIMessage.create({
         data: {
-          id: generateId('msg'),
+          id: generatePrefixedId('msg'),
           conversationId: conversation.id,
           role: 'ASSISTANT',
           content: aiResponse.content,
-          metadata: aiResponse.metadata,
+          metadata: (aiResponse.metadata ?? {}) as Prisma.InputJsonValue,
         },
       });
 
@@ -222,7 +227,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       // Store triage result
       const triage = await prisma.maintenanceTriage.create({
         data: {
-          id: generateId('trg'),
+          id: generatePrefixedId('trg'),
           unitId: data.unitId,
           reportedById: request.user.id,
           description: data.description,
@@ -240,7 +245,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       if (triageResult.urgency === 'emergency' || triageResult.urgency === 'high') {
         workOrder = await prisma.workOrder.create({
           data: {
-            id: generateId('wo'),
+            id: generatePrefixedId('wo'),
             unitId: data.unitId,
             reportedById: request.user.id,
             title: triageResult.suggestedTitle,
@@ -300,11 +305,11 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       // Create handoff message
       await prisma.aIMessage.create({
         data: {
-          id: generateId('msg'),
+          id: generatePrefixedId('msg'),
           conversationId: conversation.id,
           role: 'SYSTEM',
           content: `Handoff requested: ${reason || 'User requested human assistance'}`,
-          metadata: { handoffReason: reason },
+          metadata: { handoffReason: reason } as Prisma.InputJsonValue,
         },
       });
 
@@ -338,7 +343,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({
         success: true,
         data: {
-          sessionId: generateId('vcs'),
+          sessionId: generatePrefixedId('vcs'),
           message: 'Voice AI feature coming soon',
           status: 'NOT_IMPLEMENTED',
         },

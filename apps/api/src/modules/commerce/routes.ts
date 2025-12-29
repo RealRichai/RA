@@ -1,5 +1,5 @@
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -137,7 +137,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       // Create utility setup request
       const utilitySetup = await prisma.utilitySetup.create({
         data: {
-          id: generateId('utl'),
+          id: generatePrefixedId('utl'),
           leaseId: data.leaseId,
           userId: request.user.id,
           utilityType: data.utilityType,
@@ -204,7 +204,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
 
       const quotes = [
         {
-          id: generateId('mvq'),
+          id: generatePrefixedId('mvq'),
           company: 'City Movers',
           price: basePrice * 1.0,
           duration: '3-4 hours',
@@ -213,7 +213,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
           includes: ['Loading', 'Unloading', 'Basic protection'],
         },
         {
-          id: generateId('mvq'),
+          id: generatePrefixedId('mvq'),
           company: 'Quick Move NYC',
           price: basePrice * 1.15,
           duration: '3-5 hours',
@@ -222,7 +222,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
           includes: ['Loading', 'Unloading', 'Basic protection', 'Furniture disassembly'],
         },
         {
-          id: generateId('mvq'),
+          id: generatePrefixedId('mvq'),
           company: 'Premium Relocations',
           price: basePrice * 1.4,
           duration: '4-5 hours',
@@ -279,7 +279,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Process booking with moving company
 
       const booking = {
-        id: generateId('mvb'),
+        id: generatePrefixedId('mvb'),
         quoteId,
         status: 'CONFIRMED',
         confirmationCode: `MV-${Date.now().toString(36).toUpperCase()}`,
@@ -434,7 +434,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       // Create order in database and process payment
 
       const order = {
-        id: generateId('ord'),
+        id: generatePrefixedId('ord'),
         vendorId: data.vendorId,
         productId: data.productId,
         quantity: data.quantity,
@@ -496,7 +496,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
 
       const quotes = [
         {
-          id: generateId('ins'),
+          id: generatePrefixedId('ins'),
           provider: 'Lemonade',
           monthlyPremium: Math.round(monthlyPremium * 100) / 100,
           coverageAmount,
@@ -505,7 +505,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
           rating: 4.9,
         },
         {
-          id: generateId('ins'),
+          id: generatePrefixedId('ins'),
           provider: 'State Farm',
           monthlyPremium: Math.round(monthlyPremium * 1.1 * 100) / 100,
           coverageAmount,
@@ -550,7 +550,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
 
       const policy = await prisma.rentersInsurance.create({
         data: {
-          id: generateId('rip'),
+          id: generatePrefixedId('rip'),
           leaseId,
           userId: request.user.id,
           provider: 'Lemonade',
@@ -652,7 +652,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
 
       const application = await prisma.guarantorProduct.create({
         data: {
-          id: generateId('gua'),
+          id: generatePrefixedId('gua'),
           userId: request.user.id,
           applicationId,
           provider: optionId.startsWith('tg') ? 'THE_GUARANTORS' : 'INSURENT',

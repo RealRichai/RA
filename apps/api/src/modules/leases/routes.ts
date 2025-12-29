@@ -8,7 +8,7 @@ import {
   type FCHAStage,
 } from '@realriches/compliance-engine';
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError, ValidationError, logger } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError, ValidationError, logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -62,7 +62,7 @@ async function storeComplianceCheck(
 ): Promise<string> {
   const check = await prisma.complianceCheck.create({
     data: {
-      id: generateId('cck'),
+      id: generatePrefixedId('cck'),
       entityType,
       entityId,
       marketId,
@@ -104,7 +104,7 @@ async function storeComplianceAuditLog(
 ): Promise<void> {
   await prisma.auditLog.create({
     data: {
-      id: generateId('aud'),
+      id: generatePrefixedId('aud'),
       actorId: userId || null,
       actorEmail: userId || 'system',
       action,
@@ -347,7 +347,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
 
       const lease = await prisma.lease.create({
         data: {
-          id: generateId('lse'),
+          id: generatePrefixedId('lse'),
           ...data,
           monthlyRent: data.monthlyRent,
           securityDeposit: data.securityDeposit,
@@ -411,7 +411,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
 
       const amendment = await prisma.leaseAmendment.create({
         data: {
-          id: generateId('amd'),
+          id: generatePrefixedId('amd'),
           leaseId: lease.id,
           ...data,
           effectiveDate: new Date(data.effectiveDate),
@@ -457,7 +457,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
 
       const application = await prisma.tenantApplication.create({
         data: {
-          id: generateId('app'),
+          id: generatePrefixedId('app'),
           listingId: data.listingId,
           applicantId: request.user.id,
           status: 'submitted',
@@ -630,7 +630,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       // Create rent change amendment
       const amendment = await prisma.leaseAmendment.create({
         data: {
-          id: generateId('amd'),
+          id: generatePrefixedId('amd'),
           leaseId: lease.id,
           type: 'rent_change',
           description: data.reason || `Rent increase from $${lease.monthlyRent} to $${data.newMonthlyRent}`,

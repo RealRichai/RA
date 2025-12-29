@@ -1,5 +1,5 @@
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -111,7 +111,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
 
       const asset = await prisma.marketingAsset.create({
         data: {
-          id: generateId('mkt'),
+          id: generatePrefixedId('mkt'),
           listingId: data.listingId,
           type: data.type,
           templateId: data.templateId,
@@ -229,7 +229,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
       for await (const part of parts) {
         if (part.type === 'file') {
           // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Upload to S3/MinIO
-          fileUrl = `https://storage.example.com/media/${generateId('med')}-${part.filename}`;
+          fileUrl = `https://storage.example.com/media/${generatePrefixedId('med')}-${part.filename}`;
           thumbnailUrl = fileUrl.replace('.', '-thumb.');
         } else {
           metadata[part.fieldname] = part.value;
@@ -253,7 +253,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
 
       const media = await prisma.propertyMedia.create({
         data: {
-          id: generateId('med'),
+          id: generatePrefixedId('med'),
           propertyId: data.propertyId,
           type: data.type,
           url: fileUrl,
@@ -340,7 +340,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
 
       const videoTour = await prisma.propertyMedia.create({
         data: {
-          id: generateId('med'),
+          id: generatePrefixedId('med'),
           propertyId,
           type: 'video',
           url: '', // Will be populated when generation completes
@@ -396,7 +396,7 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
 
       const tour = await prisma.propertyMedia.create({
         data: {
-          id: generateId('med'),
+          id: generatePrefixedId('med'),
           propertyId,
           type: 'virtual_tour',
           url: '', // Will be populated when processing completes

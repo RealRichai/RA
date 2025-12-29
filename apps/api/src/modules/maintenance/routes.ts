@@ -1,5 +1,5 @@
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -189,7 +189,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
 
       const workOrder = await prisma.workOrder.create({
         data: {
-          id: generateId('wo'),
+          id: generatePrefixedId('wo'),
           ...data,
           status: 'submitted',
           reportedById: request.user.id,
@@ -437,7 +437,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
 
       const vendor = await prisma.vendor.create({
         data: {
-          id: generateId('vnd'),
+          id: generatePrefixedId('vnd'),
           ...data,
           hourlyRate: data.hourlyRate,
           insuranceExpiry: data.insuranceExpiry ? new Date(data.insuranceExpiry) : null,
@@ -495,7 +495,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
 
       const inspection = await prisma.inspection.create({
         data: {
-          id: generateId('ins'),
+          id: generatePrefixedId('ins'),
           unitId,
           type,
           scheduledDate: new Date(scheduledDate),

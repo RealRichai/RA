@@ -3,7 +3,7 @@ import { prisma } from '@realriches/database';
 import type { Role, Permission } from '@realriches/types';
 import { RolePermissionsMap } from '@realriches/types';
 import {
-  generateId,
+  generatePrefixedId,
   generateToken,
   sha256,
   AppError,
@@ -62,7 +62,7 @@ export class AuthService {
     // Create user
     const user = await prisma.user.create({
       data: {
-        id: generateId('usr'),
+        id: generatePrefixedId('usr'),
         email: input.email.toLowerCase(),
         passwordHash,
         firstName: input.firstName,
@@ -188,7 +188,7 @@ export class AuthService {
 
     await prisma.refreshToken.create({
       data: {
-        id: generateId('rtk'),
+        id: generatePrefixedId('rtk'),
         token: newRefreshToken,
         userId: storedToken.userId,
         sessionId: storedToken.sessionId,

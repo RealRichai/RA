@@ -1,5 +1,5 @@
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError, AppError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError, AppError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -158,7 +158,7 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
 
       const property = await prisma.property.create({
         data: {
-          id: generateId('prp'),
+          id: generatePrefixedId('prp'),
           name: data.name,
           type: 'commercial',
           address: data.address,
@@ -494,7 +494,7 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
       // Would need regulatory compliance checks (SEC, etc.)
 
       const offering = {
-        id: generateId('frac'),
+        id: generatePrefixedId('frac'),
         ...data,
         property: {
           id: property.id,
@@ -551,7 +551,7 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
       // - Share issuance
 
       const investment = {
-        id: generateId('inv'),
+        id: generatePrefixedId('inv'),
         offeringId: request.params.id,
         investorId: request.user.id,
         shares,
