@@ -4,15 +4,6 @@
  * Enforcement gates that block operations when compliance requirements aren't met.
  */
 
-import type {
-  ComplianceDecision,
-  GateResult,
-  EnforcementContext,
-  MarketPack,
-  Violation,
-  RecommendedFix,
-  FCHAStage,
-} from './types';
 import { getMarketPack, getMarketPackVersion, getMarketPackIdFromMarket } from './market-packs';
 import {
   checkFAREActRules,
@@ -23,6 +14,13 @@ import {
   checkGoodCauseRules,
   checkRentStabilizationRules,
 } from './rules';
+import type {
+  ComplianceDecision,
+  GateResult,
+  Violation,
+  RecommendedFix,
+  FCHAStage,
+} from './types';
 
 const POLICY_VERSION = '1.0.0';
 

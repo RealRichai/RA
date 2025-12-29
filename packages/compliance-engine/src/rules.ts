@@ -4,6 +4,7 @@
  * Individual rule implementations for each compliance requirement.
  */
 
+import { getCPIProvider } from './providers';
 import type {
   Violation,
   RecommendedFix,
@@ -11,7 +12,6 @@ import type {
   FCHAStage,
   ICPIProvider,
 } from './types';
-import { getCPIProvider } from './providers';
 
 // ============================================================================
 // Rule Result Type

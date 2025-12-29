@@ -4,7 +4,8 @@
  * Tests for compliance gates that block/allow operations.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
+
 import {
   gateListingPublish,
   gateBrokerFeeChange,

@@ -126,14 +126,15 @@ export class FallbackCPIProvider implements ICPIProvider {
  */
 export class ExternalCPIProvider implements ICPIProvider {
   private fallbackProvider: FallbackCPIProvider;
-  private apiKey?: string;
+  // API key for external CPI provider (when integrated)
+  private _apiKey?: string;
   private logger: (message: string, data?: Record<string, unknown>) => void;
 
   constructor(
     apiKey?: string,
     logger?: (message: string, data?: Record<string, unknown>) => void
   ) {
-    this.apiKey = apiKey;
+    this._apiKey = apiKey;
     this.logger = logger || console.warn.bind(console);
     this.fallbackProvider = new FallbackCPIProvider(logger);
   }

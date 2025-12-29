@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [],
+  "references": [
+    { "path": "./apps/api" },
+    { "path": "./apps/web" },
+    { "path": "./packages/compliance-engine" },
+    { "path": "./packages/config" },
+    { "path": "./packages/database" },
+    { "path": "./packages/document-storage" },
+    { "path": "./packages/types" },
+    { "path": "./packages/utils" }
+  ]
+}

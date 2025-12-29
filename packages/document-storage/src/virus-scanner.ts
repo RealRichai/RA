@@ -5,8 +5,9 @@
  */
 
 import { Socket } from 'net';
-import type { ClamAVConfig, ScanResult, ScanJob } from './types';
+
 import { getStorageClient } from './s3-client';
+import type { ClamAVConfig, ScanResult, ScanJob } from './types';
 
 // =============================================================================
 // Configuration

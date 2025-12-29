@@ -5,6 +5,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+import { NYC_STRICT_V1, US_STANDARD_V1 } from '../market-packs';
+import { FallbackCPIProvider } from '../providers';
 import {
   checkFAREActRules,
   checkFCHARules,
@@ -14,8 +17,6 @@ import {
   checkRentStabilizationRules,
   checkDisclosureRules,
 } from '../rules';
-import { NYC_STRICT_V1, US_STANDARD_V1 } from '../market-packs';
-import { FallbackCPIProvider } from '../providers';
 
 describe('FARE Act Rules (NYC)', () => {
   const pack = NYC_STRICT_V1;
@@ -32,10 +33,10 @@ describe('FARE Act Rules (NYC)', () => {
       );
 
       expect(result.violations).toHaveLength(1);
-      expect(result.violations[0].code).toBe('FARE_BROKER_FEE_PROHIBITED');
-      expect(result.violations[0].severity).toBe('critical');
+      expect(result.violations[0]!.code).toBe('FARE_BROKER_FEE_PROHIBITED');
+      expect(result.violations[0]!.severity).toBe('critical');
       expect(result.fixes).toHaveLength(1);
-      expect(result.fixes[0].action).toBe('remove_broker_fee');
+      expect(result.fixes[0]!.action).toBe('remove_broker_fee');
     });
 
     it('should pass when no broker fee', () => {
@@ -122,8 +123,8 @@ describe('FCHA Rules (NYC)', () => {
       );
 
       expect(result.violations).toHaveLength(1);
-      expect(result.violations[0].code).toBe('FCHA_CRIMINAL_CHECK_BEFORE_OFFER');
-      expect(result.violations[0].severity).toBe('critical');
+      expect(result.violations[0]!.code).toBe('FCHA_CRIMINAL_CHECK_BEFORE_OFFER');
+      expect(result.violations[0]!.severity).toBe('critical');
     });
 
     it('should block credit check before conditional offer', () => {
@@ -338,7 +339,7 @@ describe('Security Deposit Rules', () => {
       );
 
       expect(result.violations).toHaveLength(1);
-      expect(result.violations[0].code).toBe('SECURITY_DEPOSIT_EXCESSIVE');
+      expect(result.violations[0]!.code).toBe('SECURITY_DEPOSIT_EXCESSIVE');
     });
 
     it('should pass deposit at 1 month', () => {
@@ -367,7 +368,7 @@ describe('Security Deposit Rules', () => {
       );
 
       expect(result.violations).toHaveLength(1);
-      expect(result.violations[0].code).toBe('SECURITY_DEPOSIT_EXCESSIVE');
+      expect(result.violations[0]!.code).toBe('SECURITY_DEPOSIT_EXCESSIVE');
     });
 
     it('should pass deposit at 2 months', () => {

@@ -6,6 +6,9 @@
  */
 
 import { createHash } from 'crypto';
+
+import { getDocumentACL, DocumentACL } from './acl';
+import { getStorageClient, StorageClient } from './s3-client';
 import {
   type UploadResult,
   type PresignedUploadRequest,
@@ -15,9 +18,7 @@ import {
   ALLOWED_MIME_TYPES,
   UploadRequestSchema,
 } from './types';
-import { getStorageClient, StorageClient } from './s3-client';
 import { getVirusScanner, VirusScanner, ScanQueue } from './virus-scanner';
-import { getDocumentACL, DocumentACL } from './acl';
 
 // =============================================================================
 // Content Type Detection

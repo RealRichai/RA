@@ -5,8 +5,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { DocumentACL, getDocumentACL, canAccessDocumentType } from '../acl';
-import type { ACLContext, EntityOwnership, DocumentAction, UserRole } from '../types';
+
+import { getDocumentACL, canAccessDocumentType } from '../acl';
+import type { ACLContext, EntityOwnership, DocumentAction } from '../types';
 
 describe('Document ACL', () => {
   const acl = getDocumentACL();

@@ -5,12 +5,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+import { SIZE_LIMITS, ALLOWED_MIME_TYPES } from '../types';
 import {
   detectContentType,
   validateFileSize,
   validateMimeType,
 } from '../upload-service';
-import { SIZE_LIMITS, ALLOWED_MIME_TYPES } from '../types';
 
 describe('Content Type Detection', () => {
   describe('Extension-based detection', () => {
