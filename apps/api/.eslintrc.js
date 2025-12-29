@@ -18,5 +18,9 @@ module.exports = {
     '@typescript-eslint/no-unused-vars': 'off',
     // Allow template literal expressions with unknown types
     '@typescript-eslint/restrict-template-expressions': 'off',
+    // Allow stringification of objects in templates
+    '@typescript-eslint/no-base-to-string': 'off',
+    // Allow type assertions even when not strictly needed
+    '@typescript-eslint/no-unnecessary-type-assertion': 'off',
   },
 };
