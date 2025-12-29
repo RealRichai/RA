@@ -1,8 +1,10 @@
 name: Deploy
 
+# Only run manually until AWS infrastructure is configured
+# To enable automatic deploys, uncomment the push trigger below
 on:
-  push:
-    branches: [main]
+  # push:
+  #   branches: [main]
   workflow_dispatch:
     inputs:
       environment:
