@@ -1,0 +1,30 @@
+{
+  "name": "@realriches/revenue-engine",
+  "version": "1.0.0",
+  "description": "Revenue engine with ledger, partner integrations, and payment processing",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "ioredis": "^5.3.2",
+    "stripe": "^14.11.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^1.6.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.6.0"
+  },
+  "peerDependencies": {
+    "@realriches/database": "workspace:*",
+    "@realriches/types": "workspace:*",
+    "@realriches/config": "workspace:*"
+  }
+}

@@ -11,6 +11,7 @@
     { "path": "./packages/config" },
     { "path": "./packages/database" },
     { "path": "./packages/document-storage" },
+    { "path": "./packages/revenue-engine" },
     { "path": "./packages/types" },
     { "path": "./packages/utils" }
   ]
