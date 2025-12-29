@@ -27,8 +27,8 @@
     "@fastify/swagger-ui": "^2.1.0",
     "@realriches/compliance-engine": "workspace:*",
     "@realriches/config": "workspace:*",
-    "@realriches/document-storage": "workspace:*",
     "@realriches/database": "workspace:*",
+    "@realriches/document-storage": "workspace:*",
     "@realriches/types": "workspace:*",
     "@realriches/utils": "workspace:*",
     "argon2": "^0.31.2",
@@ -43,6 +43,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "@vitest/coverage-v8": "1.6.1",
     "pino-pretty": "^10.3.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",

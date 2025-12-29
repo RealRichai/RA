@@ -8,19 +8,21 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.500.0",
-    "@aws-sdk/s3-request-presigner": "^3.500.0",
     "@aws-sdk/lib-storage": "^3.500.0",
+    "@aws-sdk/s3-request-presigner": "^3.500.0",
     "clamdjs": "^1.0.2",
-    "file-type": "^19.0.0",
     "crypto": "^1.0.1",
+    "file-type": "^19.0.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^1.6.1",
     "typescript": "^5.3.0",
     "vitest": "^1.6.0"
   },
