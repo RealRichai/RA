@@ -73,7 +73,7 @@ export class IdempotencyManager {
     // Check if record exists
     const existing = await this.redis.get(redisKey);
     if (existing) {
-      const record: IdempotencyRecord = JSON.parse(existing);
+      const record = JSON.parse(existing) as IdempotencyRecord;
       return { isNew: false, existingRecord: record };
     }
 
@@ -92,7 +92,7 @@ export class IdempotencyManager {
       await new Promise((resolve) => setTimeout(resolve, 100));
       const retryExisting = await this.redis.get(redisKey);
       if (retryExisting) {
-        const record: IdempotencyRecord = JSON.parse(retryExisting);
+        const record = JSON.parse(retryExisting) as IdempotencyRecord;
         return { isNew: false, existingRecord: record };
       }
 
@@ -192,7 +192,7 @@ export class IdempotencyManager {
 
     if (!existing) return null;
 
-    return JSON.parse(existing);
+    return JSON.parse(existing) as IdempotencyRecord;
   }
 
   /**
@@ -264,19 +264,19 @@ export class MockRedis {
   private store: Map<string, { value: string; expiresAt: number }> = new Map();
   private locks: Set<string> = new Set();
 
-  async get(key: string): Promise<string | null> {
+  get(key: string): Promise<string | null> {
     const entry = this.store.get(key);
-    if (!entry) return null;
+    if (!entry) return Promise.resolve(null);
 
     if (Date.now() > entry.expiresAt) {
       this.store.delete(key);
-      return null;
+      return Promise.resolve(null);
     }
 
-    return entry.value;
+    return Promise.resolve(entry.value);
   }
 
-  async set(
+  set(
     key: string,
     value: string,
     exMode?: string,
@@ -284,7 +284,7 @@ export class MockRedis {
     nxMode?: string
   ): Promise<string | null> {
     if (nxMode === 'NX' && this.store.has(key)) {
-      return null;
+      return Promise.resolve(null);
     }
 
     const expiresAt = exMode === 'EX' && exValue
@@ -292,23 +292,23 @@ export class MockRedis {
       : Date.now() + 86400000;
 
     this.store.set(key, { value, expiresAt });
-    return 'OK';
+    return Promise.resolve('OK');
   }
 
-  async setex(key: string, seconds: number, value: string): Promise<string> {
+  setex(key: string, seconds: number, value: string): Promise<string> {
     this.store.set(key, {
       value,
       expiresAt: Date.now() + seconds * 1000,
     });
-    return 'OK';
+    return Promise.resolve('OK');
   }
 
-  async del(...keys: string[]): Promise<number> {
+  del(...keys: string[]): Promise<number> {
     let deleted = 0;
     for (const key of keys) {
       if (this.store.delete(key)) deleted++;
     }
-    return deleted;
+    return Promise.resolve(deleted);
   }
 
   // For testing

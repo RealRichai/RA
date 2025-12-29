@@ -238,6 +238,9 @@ export class LemonadeProvider extends BasePartnerProvider {
   async renew(request: RenewRequest): Promise<QuoteResponse> {
     this.log('Renewing policy', { policyId: request.policyId });
 
+    // Lemonade renewal returns same coverage terms
+    await this.isAvailable();
+
     return {
       quoteId: `quote_${randomUUID()}`,
       provider: this.providerId,

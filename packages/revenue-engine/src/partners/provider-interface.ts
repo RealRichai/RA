@@ -100,17 +100,17 @@ export abstract class BasePartnerProvider implements IPartnerProvider {
   /**
    * Check if the provider is available (has valid config).
    */
-  async isAvailable(): Promise<boolean> {
-    return this.isConfigured;
+  isAvailable(): Promise<boolean> {
+    return Promise.resolve(this.isConfigured);
   }
 
   /**
    * Validate credentials by making a test API call.
    */
-  async validateCredentials(): Promise<boolean> {
-    if (!this.isConfigured) return false;
+  validateCredentials(): Promise<boolean> {
+    if (!this.isConfigured) return Promise.resolve(false);
     // Subclasses should override with actual validation
-    return true;
+    return Promise.resolve(true);
   }
 
   /**

@@ -6,14 +6,13 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import { LeaseLockProvider } from '../partners/adapters/leaselock';
-import { RhinoProvider } from '../partners/adapters/rhino';
 import { JettyProvider } from '../partners/adapters/jetty';
+import { LeaseLockProvider } from '../partners/adapters/leaselock';
 import { LemonadeProvider } from '../partners/adapters/lemonade';
+import { RhinoProvider } from '../partners/adapters/rhino';
+import { ProviderUnavailableError } from '../partners/provider-interface';
 import { ProviderRegistry, getProviderRegistry, resetProviderRegistry } from '../partners/registry';
-import { ProviderUnavailableError, QuoteDeclinedError } from '../partners/provider-interface';
-
-import type { QuoteRequest, BindRequest } from '../types';
+import type { QuoteRequest, BindRequest, PartnerProvider } from '../types';
 
 // =============================================================================
 // Test Data
@@ -265,7 +264,7 @@ describe('Provider Registry', () => {
   it('should throw for unknown provider', () => {
     const registry = new ProviderRegistry();
 
-    expect(() => registry.getProviderOrThrow('unknown' as any)).toThrow(ProviderUnavailableError);
+    expect(() => registry.getProviderOrThrow('unknown' as PartnerProvider)).toThrow(ProviderUnavailableError);
   });
 
   it('should get multi-provider quotes', async () => {

@@ -4,9 +4,14 @@
  * Tests for Stripe webhook signature verification and event processing.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
 import { createHmac } from 'crypto';
 
+import { describe, it, expect, beforeEach } from 'vitest';
+
+import {
+  createMockIdempotencyManager,
+  IdempotencyManager,
+} from '../ledger/idempotency';
 import {
   verifyWebhookSignature,
   handlePaymentIntentSucceeded,
@@ -14,13 +19,6 @@ import {
   WebhookProcessor,
   createWebhookProcessor,
 } from '../stripe/webhook-handler';
-
-import {
-  createMockIdempotencyManager,
-  MockRedis,
-  IdempotencyManager,
-} from '../ledger/idempotency';
-
 import type { WebhookEvent } from '../types';
 
 // =============================================================================

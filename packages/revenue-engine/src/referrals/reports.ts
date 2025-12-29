@@ -5,6 +5,7 @@
  */
 
 import type { PartnerProductType, Referral } from '../types';
+
 import { getReferralTracker } from './tracker';
 
 // =============================================================================

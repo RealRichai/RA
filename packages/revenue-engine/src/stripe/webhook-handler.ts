@@ -6,18 +6,18 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 
-import type { StripeEventType, WebhookEvent } from '../types';
+import {
+  IdempotencyManager,
+  generateWebhookIdempotencyKey,
+  createMockIdempotencyManager,
+} from '../ledger/idempotency';
 import {
   createTransaction,
   buildPaymentReceivedEntries,
   buildRefundEntries,
   postTransaction,
 } from '../ledger/transactions';
-import {
-  IdempotencyManager,
-  generateWebhookIdempotencyKey,
-  createMockIdempotencyManager,
-} from '../ledger/idempotency';
+import type { StripeEventType, WebhookEvent } from '../types';
 
 // =============================================================================
 // Webhook Verification
@@ -104,7 +104,13 @@ export function verifyWebhookSignature(
     }
 
     // Parse the event
-    const eventData = JSON.parse(payloadString);
+    const eventData = JSON.parse(payloadString) as {
+      id: string;
+      type: string;
+      data: { object: Record<string, unknown> };
+      created: number;
+      livemode: boolean;
+    };
 
     const event: WebhookEvent = {
       id: eventData.id,

@@ -204,6 +204,9 @@ export class JettyProvider extends BasePartnerProvider {
   async renew(request: RenewRequest): Promise<QuoteResponse> {
     this.log('Renewing policy', { policyId: request.policyId });
 
+    // Jetty does not currently support renewals via API
+    await this.isAvailable();
+
     return {
       quoteId: `quote_${randomUUID()}`,
       provider: this.providerId,

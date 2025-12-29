@@ -167,7 +167,7 @@ export function createDefaultFeatureFlagChecker(): (key: string) => Promise<bool
     'VENDOR_MARKETPLACE_ENABLED',
   ]);
 
-  return async (key: string) => enabledFlags.has(key);
+  return (key: string): Promise<boolean> => Promise.resolve(enabledFlags.has(key));
 }
 
 // =============================================================================

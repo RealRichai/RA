@@ -6,6 +6,8 @@
 
 import { randomUUID } from 'crypto';
 
+import { getCommissionAccountForProduct } from '../ledger/accounts';
+import { createTransaction, buildCommissionEntries } from '../ledger/transactions';
 import type {
   LedgerEntry,
   LedgerTransaction,
@@ -15,8 +17,6 @@ import type {
   Referral,
   ReferralSource,
 } from '../types';
-import { createTransaction, buildCommissionEntries } from '../ledger/transactions';
-import { getCommissionAccountForProduct } from '../ledger/accounts';
 
 // =============================================================================
 // Referral Tracker

@@ -16,7 +16,15 @@ import {
   initializeChartOfAccounts,
   getCommissionAccountForProduct,
 } from '../ledger/accounts';
-
+import {
+  DEFAULT_ALLOCATION_RULES,
+  sortRulesByPriority,
+  ruleApplies,
+  calculateRuleAllocation,
+  runAllocationWaterfall,
+  calculatePartnerRevShare,
+  calculateCommissionSplit,
+} from '../ledger/allocations';
 import {
   validateTransaction,
   createTransaction,
@@ -30,17 +38,6 @@ import {
   calculateAccountBalances,
   generateReconciliationRef,
 } from '../ledger/transactions';
-
-import {
-  DEFAULT_ALLOCATION_RULES,
-  sortRulesByPriority,
-  ruleApplies,
-  calculateRuleAllocation,
-  runAllocationWaterfall,
-  calculatePartnerRevShare,
-  calculateCommissionSplit,
-} from '../ledger/allocations';
-
 import type { LedgerEntry, LedgerTransaction } from '../types';
 
 // =============================================================================
