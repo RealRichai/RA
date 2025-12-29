@@ -53,6 +53,15 @@ export const ViolationCodeSchema = z.enum([
   'DISCLOSURE_NOT_ACKNOWLEDGED',
   'DISCLOSURE_EXPIRED',
 
+  // GDPR violations (UK)
+  'GDPR_CONSENT_MISSING',
+  'GDPR_DATA_RETENTION_EXCEEDED',
+  'GDPR_LAWFUL_BASIS_MISSING',
+  'GDPR_PRIVACY_NOTICE_MISSING',
+  'GDPR_DATA_SUBJECT_REQUEST_OVERDUE',
+  'GDPR_PERSONAL_DATA_UNPROTECTED',
+  'GDPR_REDACTION_REQUIRED',
+
   // General
   'MARKET_RULE_VIOLATION',
   'FEATURE_DISABLED',
@@ -112,6 +121,7 @@ export const MarketPackIdSchema = z.enum([
   'US_STANDARD',
   'CA_STANDARD',
   'TX_STANDARD',
+  'UK_GDPR',
 ]);
 
 export type MarketPackId = z.infer<typeof MarketPackIdSchema>;
@@ -176,6 +186,34 @@ export const FCHARuleSchema = z.object({
   stageOrder: z.array(FCHAStageSchema),
 });
 
+export const GDPRRuleSchema = z.object({
+  enabled: z.boolean(),
+  dataRetentionDays: z.number().default(2555), // ~7 years default
+  consentRequired: z.boolean().default(true),
+  lawfulBases: z.array(z.enum([
+    'consent',
+    'contract',
+    'legal_obligation',
+    'vital_interests',
+    'public_task',
+    'legitimate_interests',
+  ])).default(['contract', 'legal_obligation']),
+  dataSubjectRequestDays: z.number().default(30), // 30 days to respond
+  privacyNoticeRequired: z.boolean().default(true),
+  redactionPolicies: z.object({
+    enabled: z.boolean().default(true),
+    autoRedactAfterDays: z.number().optional(),
+    fieldsToRedact: z.array(z.string()).default([
+      'nationalInsuranceNumber',
+      'bankAccountDetails',
+      'passportNumber',
+      'dateOfBirth',
+    ]),
+  }).optional(),
+});
+
+export type GDPRRule = z.infer<typeof GDPRRuleSchema>;
+
 export const MarketPackRulesSchema = z.object({
   brokerFee: BrokerFeeRuleSchema,
   securityDeposit: SecurityDepositRuleSchema,
@@ -196,6 +234,7 @@ export const MarketPackRulesSchema = z.object({
     enabled: z.boolean(),
     rgbBoardUrl: z.string().optional(),
   }).optional(),
+  gdpr: GDPRRuleSchema.optional(),
 });
 
 export type MarketPackRules = z.infer<typeof MarketPackRulesSchema>;

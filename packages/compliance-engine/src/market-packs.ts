@@ -180,6 +180,99 @@ export const US_STANDARD_V1: MarketPack = {
 };
 
 // ============================================================================
+// UK_GDPR v1.0.0 - United Kingdom GDPR Compliance Pack
+// ============================================================================
+
+export const UK_GDPR_V1: MarketPack = {
+  id: 'UK_GDPR',
+  name: 'UK GDPR Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'UK GDPR compliance with privacy defaults and redaction policies for rental operations',
+  jurisdiction: 'United Kingdom',
+  rules: {
+    brokerFee: {
+      enabled: false, // UK allows letting agent fees with tenant fee ban caveats
+      paidBy: 'landlord', // Tenant Fee Act 2019
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 5, // UK allows up to 5 weeks for annual rent < £50k
+      interestRequired: false,
+      separateAccountRequired: true, // Deposit protection scheme required
+    },
+    rentIncrease: {
+      enabled: true,
+      noticeRequired: true,
+      noticeDays: 30, // Minimum 1 month notice
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'privacy_notice',
+        requiredBefore: 'application',
+        signatureRequired: false,
+      },
+      {
+        type: 'data_processing_agreement',
+        requiredBefore: 'application',
+        signatureRequired: true,
+      },
+      {
+        type: 'how_to_rent_guide',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'epc_certificate',
+        requiredBefore: 'listing_publish',
+        signatureRequired: false,
+      },
+      {
+        type: 'gas_safety_certificate',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'deposit_protection_info',
+        requiredBefore: 'move_in',
+        signatureRequired: true,
+        expirationDays: 30, // Must provide within 30 days of deposit
+      },
+    ],
+    gdpr: {
+      enabled: true,
+      dataRetentionDays: 2555, // ~7 years for tax/legal purposes
+      consentRequired: true,
+      lawfulBases: ['contract', 'legal_obligation', 'legitimate_interests'],
+      dataSubjectRequestDays: 30,
+      privacyNoticeRequired: true,
+      redactionPolicies: {
+        enabled: true,
+        autoRedactAfterDays: 2920, // 8 years
+        fieldsToRedact: [
+          'nationalInsuranceNumber',
+          'bankAccountDetails',
+          'passportNumber',
+          'dateOfBirth',
+          'rightToRentCheckDetails',
+        ],
+      },
+    },
+  },
+  metadata: {
+    gdprEffectiveDate: '2018-05-25',
+    tenantFeeActEffectiveDate: '2019-06-01',
+    legislativeReferences: [
+      'UK GDPR (Data Protection Act 2018)',
+      'Tenant Fees Act 2019',
+      'Housing Act 2004',
+      'Deregulation Act 2015',
+    ],
+  },
+};
+
+// ============================================================================
 // Market Pack Registry
 // ============================================================================
 
@@ -188,6 +281,7 @@ export const MARKET_PACKS: Record<MarketPackId, MarketPack> = {
   US_STANDARD: US_STANDARD_V1,
   CA_STANDARD: US_STANDARD_V1, // TODO: Implement CA-specific pack
   TX_STANDARD: US_STANDARD_V1, // TODO: Implement TX-specific pack
+  UK_GDPR: UK_GDPR_V1,
 };
 
 /**
@@ -213,6 +307,7 @@ export function getMarketPackVersion(pack: MarketPack): string {
  */
 export function getMarketPackIdFromMarket(marketId: string): MarketPackId {
   const marketToPackMap: Record<string, MarketPackId> = {
+    // NYC markets
     'nyc': 'NYC_STRICT',
     'new_york': 'NYC_STRICT',
     'manhattan': 'NYC_STRICT',
@@ -220,7 +315,20 @@ export function getMarketPackIdFromMarket(marketId: string): MarketPackId {
     'queens': 'NYC_STRICT',
     'bronx': 'NYC_STRICT',
     'staten_island': 'NYC_STRICT',
-    // Add more market mappings as needed
+    // UK markets
+    'uk': 'UK_GDPR',
+    'united_kingdom': 'UK_GDPR',
+    'london': 'UK_GDPR',
+    'manchester': 'UK_GDPR',
+    'birmingham': 'UK_GDPR',
+    'leeds': 'UK_GDPR',
+    'glasgow': 'UK_GDPR',
+    'edinburgh': 'UK_GDPR',
+    'bristol': 'UK_GDPR',
+    'liverpool': 'UK_GDPR',
+    'england': 'UK_GDPR',
+    'scotland': 'UK_GDPR',
+    'wales': 'UK_GDPR',
   };
 
   const normalizedMarketId = marketId.toLowerCase().replace(/[^a-z]/g, '_');

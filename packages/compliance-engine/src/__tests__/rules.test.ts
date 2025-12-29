@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-import { NYC_STRICT_V1, US_STANDARD_V1 } from '../market-packs';
+import { NYC_STRICT_V1, US_STANDARD_V1, UK_GDPR_V1, getMarketPackIdFromMarket } from '../market-packs';
 import { FallbackCPIProvider } from '../providers';
 import {
   checkFAREActRules,
@@ -16,6 +16,7 @@ import {
   checkBrokerFeeRules,
   checkRentStabilizationRules,
   checkDisclosureRules,
+  checkGDPRRules,
 } from '../rules';
 
 describe('FARE Act Rules (NYC)', () => {
@@ -499,5 +500,160 @@ describe('Broker Fee Rules', () => {
     );
 
     expect(result.violations.some((v) => v.code === 'FARE_BROKER_FEE_PROHIBITED')).toBe(false);
+  });
+});
+
+describe('GDPR Rules (UK)', () => {
+  const pack = UK_GDPR_V1;
+
+  describe('Consent Requirements', () => {
+    it('should flag missing consent', () => {
+      const result = checkGDPRRules(
+        {
+          checkType: 'consent',
+          hasConsent: false,
+        },
+        pack
+      );
+
+      expect(result.violations.some((v) => v.code === 'GDPR_CONSENT_MISSING')).toBe(true);
+      expect(result.violations.find((v) => v.code === 'GDPR_CONSENT_MISSING')?.severity).toBe('critical');
+    });
+
+    it('should flag missing lawful basis', () => {
+      const result = checkGDPRRules(
+        {
+          checkType: 'consent',
+          hasConsent: true,
+          lawfulBasis: undefined,
+        },
+        pack
+      );
+
+      expect(result.violations.some((v) => v.code === 'GDPR_LAWFUL_BASIS_MISSING')).toBe(true);
+    });
+
+    it('should pass when consent and lawful basis provided', () => {
+      const result = checkGDPRRules(
+        {
+          checkType: 'consent',
+          hasConsent: true,
+          lawfulBasis: 'contract',
+        },
+        pack
+      );
+
+      expect(result.violations.some((v) => v.code === 'GDPR_CONSENT_MISSING')).toBe(false);
+      expect(result.violations.some((v) => v.code === 'GDPR_LAWFUL_BASIS_MISSING')).toBe(false);
+    });
+  });
+
+  describe('Privacy Notice Requirements', () => {
+    it('should flag missing privacy notice', () => {
+      const result = checkGDPRRules(
+        {
+          checkType: 'privacy_notice',
+          hasPrivacyNotice: false,
+        },
+        pack
+      );
+
+      expect(result.violations.some((v) => v.code === 'GDPR_PRIVACY_NOTICE_MISSING')).toBe(true);
+    });
+
+    it('should pass when privacy notice provided', () => {
+      const result = checkGDPRRules(
+        {
+          checkType: 'privacy_notice',
+          hasPrivacyNotice: true,
+        },
+        pack
+      );
+
+      expect(result.violations.some((v) => v.code === 'GDPR_PRIVACY_NOTICE_MISSING')).toBe(false);
+    });
+  });
+
+  describe('Data Subject Request Timing', () => {
+    it('should flag overdue data subject request', () => {
+      const thirtyFiveDaysAgo = new Date();
+      thirtyFiveDaysAgo.setDate(thirtyFiveDaysAgo.getDate() - 35);
+
+      const result = checkGDPRRules(
+        {
+          checkType: 'data_subject_request',
+          requestReceivedAt: thirtyFiveDaysAgo.toISOString(),
+        },
+        pack
+      );
+
+      expect(result.violations.some((v) => v.code === 'GDPR_DATA_SUBJECT_REQUEST_OVERDUE')).toBe(true);
+    });
+
+    it('should pass when request is within timeframe', () => {
+      const tenDaysAgo = new Date();
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+
+      const result = checkGDPRRules(
+        {
+          checkType: 'data_subject_request',
+          requestReceivedAt: tenDaysAgo.toISOString(),
+        },
+        pack
+      );
+
+      expect(result.violations.some((v) => v.code === 'GDPR_DATA_SUBJECT_REQUEST_OVERDUE')).toBe(false);
+    });
+  });
+
+  describe('Redaction Policies', () => {
+    it('should flag unredacted sensitive fields', () => {
+      const result = checkGDPRRules(
+        {
+          checkType: 'redaction',
+          personalDataFields: ['nationalInsuranceNumber', 'bankAccountDetails'],
+        },
+        pack
+      );
+
+      expect(result.violations.some((v) => v.code === 'GDPR_REDACTION_REQUIRED')).toBe(true);
+    });
+
+    it('should pass when no sensitive fields present', () => {
+      const result = checkGDPRRules(
+        {
+          checkType: 'redaction',
+          personalDataFields: ['name', 'email'],
+        },
+        pack
+      );
+
+      expect(result.violations.some((v) => v.code === 'GDPR_REDACTION_REQUIRED')).toBe(false);
+    });
+  });
+});
+
+describe('UK_GDPR Market Pack', () => {
+  it('should be correctly identified for UK markets', () => {
+    expect(getMarketPackIdFromMarket('london')).toBe('UK_GDPR');
+    expect(getMarketPackIdFromMarket('manchester')).toBe('UK_GDPR');
+    expect(getMarketPackIdFromMarket('uk')).toBe('UK_GDPR');
+    expect(getMarketPackIdFromMarket('england')).toBe('UK_GDPR');
+  });
+
+  it('should have GDPR rules enabled', () => {
+    expect(UK_GDPR_V1.rules.gdpr?.enabled).toBe(true);
+    expect(UK_GDPR_V1.rules.gdpr?.dataRetentionDays).toBe(2555);
+    expect(UK_GDPR_V1.rules.gdpr?.dataSubjectRequestDays).toBe(30);
+  });
+
+  it('should have UK-specific disclosures', () => {
+    const disclosureTypes = UK_GDPR_V1.rules.disclosures.map((d) => d.type);
+
+    expect(disclosureTypes).toContain('privacy_notice');
+    expect(disclosureTypes).toContain('data_processing_agreement');
+    expect(disclosureTypes).toContain('how_to_rent_guide');
+    expect(disclosureTypes).toContain('epc_certificate');
+    expect(disclosureTypes).toContain('deposit_protection_info');
   });
 });

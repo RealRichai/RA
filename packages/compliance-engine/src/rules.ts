@@ -595,3 +595,183 @@ export function checkDisclosureRules(
 
   return { violations, fixes };
 }
+
+// ============================================================================
+// GDPR Rules (UK)
+// ============================================================================
+
+export interface GDPRCheckInput {
+  checkType: 'consent' | 'data_retention' | 'privacy_notice' | 'data_subject_request' | 'redaction';
+  hasConsent?: boolean;
+  consentDate?: string;
+  dataCreatedAt?: string;
+  hasPrivacyNotice?: boolean;
+  requestReceivedAt?: string;
+  requestResolvedAt?: string;
+  personalDataFields?: string[];
+  lawfulBasis?: string;
+}
+
+export function checkGDPRRules(
+  input: GDPRCheckInput,
+  pack: MarketPack
+): RuleResult {
+  const violations: Violation[] = [];
+  const fixes: RecommendedFix[] = [];
+
+  const gdprRules = pack.rules.gdpr;
+  if (!gdprRules?.enabled) {
+    return { violations, fixes };
+  }
+
+  // Check consent
+  if (input.checkType === 'consent' && gdprRules.consentRequired) {
+    if (!input.hasConsent) {
+      violations.push({
+        code: 'GDPR_CONSENT_MISSING',
+        message: 'GDPR requires explicit consent for personal data processing',
+        severity: 'critical',
+        evidence: {
+          consentRequired: true,
+          hasConsent: false,
+        },
+        ruleReference: 'UK GDPR Article 6 - Lawfulness of processing',
+      });
+      fixes.push({
+        action: 'obtain_consent',
+        description: 'Obtain explicit consent from the data subject before processing',
+        autoFixAvailable: false,
+        priority: 'critical',
+      });
+    }
+
+    if (!input.lawfulBasis) {
+      violations.push({
+        code: 'GDPR_LAWFUL_BASIS_MISSING',
+        message: 'No lawful basis specified for data processing',
+        severity: 'critical',
+        evidence: {
+          validBases: gdprRules.lawfulBases,
+        },
+        ruleReference: 'UK GDPR Article 6 - Lawful basis',
+      });
+      fixes.push({
+        action: 'specify_lawful_basis',
+        description: `Specify lawful basis for processing: ${gdprRules.lawfulBases.join(', ')}`,
+        autoFixAvailable: false,
+        priority: 'critical',
+      });
+    }
+  }
+
+  // Check data retention
+  if (input.checkType === 'data_retention' && input.dataCreatedAt) {
+    const createdAt = new Date(input.dataCreatedAt);
+    const now = new Date();
+    const daysSinceCreation = Math.floor(
+      (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    if (daysSinceCreation > gdprRules.dataRetentionDays) {
+      violations.push({
+        code: 'GDPR_DATA_RETENTION_EXCEEDED',
+        message: `Data retention period of ${gdprRules.dataRetentionDays} days exceeded (${daysSinceCreation} days old)`,
+        severity: 'violation',
+        evidence: {
+          dataCreatedAt: input.dataCreatedAt,
+          daysSinceCreation,
+          maxRetentionDays: gdprRules.dataRetentionDays,
+        },
+        ruleReference: 'UK GDPR Article 5(1)(e) - Storage limitation',
+      });
+      fixes.push({
+        action: 'delete_or_anonymize_data',
+        description: 'Delete or anonymize personal data that has exceeded retention period',
+        autoFixAvailable: true,
+        autoFixAction: 'anonymize_data',
+        priority: 'high',
+      });
+    }
+  }
+
+  // Check privacy notice
+  if (input.checkType === 'privacy_notice' && gdprRules.privacyNoticeRequired) {
+    if (!input.hasPrivacyNotice) {
+      violations.push({
+        code: 'GDPR_PRIVACY_NOTICE_MISSING',
+        message: 'Privacy notice must be provided to data subjects',
+        severity: 'critical',
+        evidence: {
+          privacyNoticeRequired: true,
+          hasPrivacyNotice: false,
+        },
+        ruleReference: 'UK GDPR Articles 13 & 14 - Information to be provided',
+      });
+      fixes.push({
+        action: 'provide_privacy_notice',
+        description: 'Provide privacy notice explaining data collection and processing',
+        autoFixAvailable: false,
+        priority: 'critical',
+      });
+    }
+  }
+
+  // Check data subject request response time
+  if (input.checkType === 'data_subject_request' && input.requestReceivedAt) {
+    const receivedAt = new Date(input.requestReceivedAt);
+    const now = input.requestResolvedAt ? new Date(input.requestResolvedAt) : new Date();
+    const daysSinceRequest = Math.floor(
+      (now.getTime() - receivedAt.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    if (daysSinceRequest > gdprRules.dataSubjectRequestDays && !input.requestResolvedAt) {
+      violations.push({
+        code: 'GDPR_DATA_SUBJECT_REQUEST_OVERDUE',
+        message: `Data subject request overdue (${daysSinceRequest} days, limit is ${gdprRules.dataSubjectRequestDays} days)`,
+        severity: 'critical',
+        evidence: {
+          requestReceivedAt: input.requestReceivedAt,
+          daysSinceRequest,
+          maxResponseDays: gdprRules.dataSubjectRequestDays,
+        },
+        ruleReference: 'UK GDPR Article 12(3) - Time limit for response',
+      });
+      fixes.push({
+        action: 'respond_to_request',
+        description: 'Respond to data subject request immediately',
+        autoFixAvailable: false,
+        priority: 'critical',
+      });
+    }
+  }
+
+  // Check redaction requirements
+  if (input.checkType === 'redaction' && gdprRules.redactionPolicies?.enabled) {
+    const fieldsToRedact = gdprRules.redactionPolicies.fieldsToRedact || [];
+    const unredactedFields = input.personalDataFields?.filter(
+      (field) => fieldsToRedact.includes(field)
+    ) || [];
+
+    if (unredactedFields.length > 0) {
+      violations.push({
+        code: 'GDPR_REDACTION_REQUIRED',
+        message: `Sensitive personal data fields require redaction: ${unredactedFields.join(', ')}`,
+        severity: 'warning',
+        evidence: {
+          unredactedFields,
+          redactionPolicy: gdprRules.redactionPolicies,
+        },
+        ruleReference: 'UK GDPR Article 5(1)(c) - Data minimisation',
+      });
+      fixes.push({
+        action: 'redact_sensitive_fields',
+        description: `Redact sensitive fields: ${unredactedFields.join(', ')}`,
+        autoFixAvailable: true,
+        autoFixAction: 'auto_redact_fields',
+        priority: 'medium',
+      });
+    }
+  }
+
+  return { violations, fixes };
+}
