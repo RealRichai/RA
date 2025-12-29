@@ -1,7 +1,14 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError, ValidationError } from '@realriches/utils';
+import { generateId, NotFoundError, ForbiddenError, ValidationError, logger } from '@realriches/utils';
+import {
+  gateListingPublish,
+  gateBrokerFeeChange,
+  gateSecurityDepositChange,
+  getMarketPackIdFromMarket,
+  type ComplianceDecision,
+} from '@realriches/compliance-engine';
 
 const CreateListingSchema = z.object({
   unitId: z.string(),
@@ -11,11 +18,94 @@ const CreateListingSchema = z.object({
   securityDeposit: z.number().min(0).optional(),
   brokerFee: z.number().min(0).optional(),
   hasBrokerFee: z.boolean().default(false),
+  brokerFeePaidBy: z.enum(['tenant', 'landlord']).optional(),
   availableDate: z.string().datetime(),
   leaseTermMonths: z.number().int().min(1).default(12),
   petPolicy: z.enum(['ALLOWED', 'CASE_BY_CASE', 'NOT_ALLOWED']).default('NOT_ALLOWED'),
   utilitiesIncluded: z.array(z.string()).optional(),
+  incomeRequirementMultiplier: z.number().optional(),
+  creditScoreThreshold: z.number().optional(),
 });
+
+const PublishListingSchema = z.object({
+  deliveredDisclosures: z.array(z.string()).default([]),
+  acknowledgedDisclosures: z.array(z.string()).default([]),
+});
+
+/**
+ * Store compliance check in database
+ */
+async function storeComplianceCheck(
+  entityType: string,
+  entityId: string,
+  marketId: string,
+  decision: ComplianceDecision
+): Promise<string> {
+  const check = await prisma.complianceCheck.create({
+    data: {
+      id: generateId('cck'),
+      entityType,
+      entityId,
+      marketId,
+      checkType: decision.checksPerformed.join(','),
+      status: decision.passed ? 'passed' : 'failed',
+      severity: decision.violations.length > 0
+        ? decision.violations.reduce((worst, v) => {
+            const order = ['info', 'warning', 'violation', 'critical'];
+            return order.indexOf(v.severity) > order.indexOf(worst) ? v.severity : worst;
+          }, 'info')
+        : 'info',
+      title: decision.passed
+        ? 'Compliance check passed'
+        : `${decision.violations.length} compliance violation(s) found`,
+      description: decision.violations.map((v) => v.message).join('; ') || 'All checks passed',
+      details: {
+        policyVersion: decision.policyVersion,
+        marketPack: decision.marketPack,
+        marketPackVersion: decision.marketPackVersion,
+        violations: decision.violations,
+        recommendedFixes: decision.recommendedFixes,
+      },
+      recommendation: decision.recommendedFixes.map((f) => f.description).join('; ') || null,
+    },
+  });
+  return check.id;
+}
+
+/**
+ * Store audit log for compliance-related actions
+ */
+async function storeComplianceAuditLog(
+  userId: string | undefined,
+  action: string,
+  entityType: string,
+  entityId: string,
+  decision: ComplianceDecision,
+  requestId: string
+): Promise<void> {
+  await prisma.auditLog.create({
+    data: {
+      id: generateId('aud'),
+      actorId: userId || null,
+      actorEmail: userId || 'system',
+      action,
+      entityType,
+      entityId,
+      changes: {
+        checksPerformed: decision.checksPerformed,
+        passed: decision.passed,
+        violationCount: decision.violations.length,
+      },
+      metadata: {
+        policyVersion: decision.policyVersion,
+        marketPack: decision.marketPack,
+        marketPackVersion: decision.marketPackVersion,
+        violations: decision.violations,
+      },
+      requestId,
+    },
+  });
+}
 
 const SearchListingsSchema = z.object({
   minRent: z.number().optional(),
@@ -211,13 +301,154 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
           securityDeposit: data.securityDeposit,
           brokerFee: data.hasBrokerFee ? data.brokerFee : null,
           availableDate: new Date(data.availableDate),
-          status: 'ACTIVE',
+          status: 'DRAFT', // Start as DRAFT, require publish gate to activate
           agentId: request.user.role === 'AGENT' ? request.user.id : null,
+          marketId: unit.property.marketId || 'US_STANDARD',
         },
         include: { unit: { include: { property: true } } },
       });
 
       return reply.status(201).send({ success: true, data: listing });
+    }
+  );
+
+  // Publish listing (DRAFT -> ACTIVE) with compliance gate
+  app.post(
+    '/:id/publish',
+    {
+      schema: {
+        description: 'Publish a listing (DRAFT -> ACTIVE) with compliance enforcement',
+        tags: ['Listings'],
+        security: [{ bearerAuth: [] }],
+        params: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+      },
+    },
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
+      const listing = await prisma.listing.findUnique({
+        where: { id: request.params.id },
+        include: { unit: { include: { property: true } } },
+      });
+
+      if (!listing) {
+        throw new NotFoundError('Listing not found');
+      }
+
+      if (
+        listing.unit.property.ownerId !== request.user.id &&
+        listing.agentId !== request.user.id &&
+        request.user.role !== 'ADMIN'
+      ) {
+        throw new ForbiddenError('Access denied');
+      }
+
+      if (listing.status !== 'DRAFT') {
+        throw new ValidationError(`Cannot publish listing with status: ${listing.status}`);
+      }
+
+      // Parse disclosure data from request body
+      const publishData = PublishListingSchema.parse(request.body || {});
+
+      // Get market ID from property
+      const marketId = listing.unit.property.marketId || listing.marketId || 'US_STANDARD';
+
+      // Run compliance gate
+      const gateResult = await gateListingPublish({
+        listingId: listing.id,
+        marketId,
+        status: listing.status,
+        hasBrokerFee: listing.hasBrokerFee || false,
+        brokerFeeAmount: listing.brokerFee || undefined,
+        brokerFeePaidBy: (listing as any).brokerFeePaidBy || 'tenant',
+        monthlyRent: listing.rent,
+        securityDepositAmount: listing.securityDeposit || undefined,
+        incomeRequirementMultiplier: (listing as any).incomeRequirementMultiplier,
+        creditScoreThreshold: (listing as any).creditScoreThreshold,
+        deliveredDisclosures: publishData.deliveredDisclosures,
+        acknowledgedDisclosures: publishData.acknowledgedDisclosures,
+      });
+
+      // Store compliance check
+      const complianceCheckId = await storeComplianceCheck(
+        'listing',
+        listing.id,
+        marketId,
+        gateResult.decision
+      );
+
+      // Store audit log
+      await storeComplianceAuditLog(
+        request.user.id,
+        gateResult.allowed ? 'listing_publish_approved' : 'listing_publish_blocked',
+        'listing',
+        listing.id,
+        gateResult.decision,
+        request.id
+      );
+
+      // If blocked, return error with violations
+      if (!gateResult.allowed) {
+        logger.warn({
+          msg: 'listing_publish_blocked',
+          listingId: listing.id,
+          violations: gateResult.decision.violations,
+          complianceCheckId,
+        });
+
+        return reply.status(422).send({
+          success: false,
+          error: {
+            code: 'COMPLIANCE_VIOLATION',
+            message: gateResult.blockedReason || 'Listing cannot be published due to compliance violations',
+            details: {
+              violations: gateResult.decision.violations,
+              recommendedFixes: gateResult.decision.recommendedFixes,
+              complianceCheckId,
+              policyVersion: gateResult.decision.policyVersion,
+              marketPack: gateResult.decision.marketPack,
+            },
+          },
+        });
+      }
+
+      // Publish the listing
+      const published = await prisma.listing.update({
+        where: { id: listing.id },
+        data: {
+          status: 'ACTIVE',
+          isCompliant: true,
+          complianceIssues: [],
+          fareActCompliant: true,
+          publishedAt: new Date(),
+        },
+        include: { unit: { include: { property: true } } },
+      });
+
+      logger.info({
+        msg: 'listing_published',
+        listingId: listing.id,
+        marketPack: gateResult.decision.marketPack,
+        complianceCheckId,
+      });
+
+      return reply.send({
+        success: true,
+        data: published,
+        meta: {
+          complianceCheckId,
+          checksPerformed: gateResult.decision.checksPerformed,
+        },
+      });
     }
   );
 

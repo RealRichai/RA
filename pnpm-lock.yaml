@@ -59,6 +59,9 @@ importers:
       '@fastify/swagger-ui':
         specifier: ^2.1.0
         version: 2.1.0
+      '@realriches/compliance-engine':
+        specifier: workspace:*
+        version: link:../../packages/compliance-engine
       '@realriches/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -256,6 +259,25 @@ importers:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+
+  packages/compliance-engine:
+    dependencies:
+      '@realriches/database':
+        specifier: workspace:*
+        version: link:../database
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.27
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.2.0
+        version: 1.6.1(@types/node@20.19.27)
 
   packages/config:
     dependencies:

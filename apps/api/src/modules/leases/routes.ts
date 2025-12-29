@@ -1,7 +1,16 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '@realriches/database';
-import { generateId, NotFoundError, ForbiddenError, ValidationError } from '@realriches/utils';
+import { generateId, NotFoundError, ForbiddenError, ValidationError, logger } from '@realriches/utils';
+import {
+  gateRentIncrease,
+  gateLeaseCreation,
+  gateFCHAStageTransition,
+  gateFCHABackgroundCheck,
+  gateDisclosureRequirement,
+  type ComplianceDecision,
+  type FCHAStage,
+} from '@realriches/compliance-engine';
 
 const CreateLeaseSchema = z.object({
   unitId: z.string(),
@@ -12,7 +21,110 @@ const CreateLeaseSchema = z.object({
   securityDeposit: z.number().min(0).optional(),
   leaseType: z.enum(['STANDARD', 'REBNY', 'CUSTOM']).default('STANDARD'),
   terms: z.record(z.unknown()).optional(),
+  isRentStabilized: z.boolean().default(false),
+  legalRentAmount: z.number().optional(),
+  preferentialRentAmount: z.number().optional(),
+  deliveredDisclosures: z.array(z.string()).default([]),
+  acknowledgedDisclosures: z.array(z.string()).default([]),
 });
+
+const RentIncreaseSchema = z.object({
+  newMonthlyRent: z.number().min(0),
+  effectiveDate: z.string().datetime(),
+  noticeDays: z.number().int().min(0),
+  reason: z.string().optional(),
+});
+
+const ApplicationStageTransitionSchema = z.object({
+  targetStage: z.enum([
+    'initial_inquiry',
+    'application_submitted',
+    'application_review',
+    'conditional_offer',
+    'background_check',
+    'final_approval',
+    'lease_signing',
+  ]),
+});
+
+const BackgroundCheckSchema = z.object({
+  checkType: z.enum(['criminal_background_check', 'credit_check', 'eviction_history']),
+});
+
+/**
+ * Store compliance check in database
+ */
+async function storeComplianceCheck(
+  entityType: string,
+  entityId: string,
+  marketId: string,
+  decision: ComplianceDecision
+): Promise<string> {
+  const check = await prisma.complianceCheck.create({
+    data: {
+      id: generateId('cck'),
+      entityType,
+      entityId,
+      marketId,
+      checkType: decision.checksPerformed.join(','),
+      status: decision.passed ? 'passed' : 'failed',
+      severity: decision.violations.length > 0
+        ? decision.violations.reduce((worst, v) => {
+            const order = ['info', 'warning', 'violation', 'critical'];
+            return order.indexOf(v.severity) > order.indexOf(worst) ? v.severity : worst;
+          }, 'info')
+        : 'info',
+      title: decision.passed
+        ? 'Compliance check passed'
+        : `${decision.violations.length} compliance violation(s) found`,
+      description: decision.violations.map((v) => v.message).join('; ') || 'All checks passed',
+      details: {
+        policyVersion: decision.policyVersion,
+        marketPack: decision.marketPack,
+        marketPackVersion: decision.marketPackVersion,
+        violations: decision.violations,
+        recommendedFixes: decision.recommendedFixes,
+      },
+      recommendation: decision.recommendedFixes.map((f) => f.description).join('; ') || null,
+    },
+  });
+  return check.id;
+}
+
+/**
+ * Store audit log for compliance-related actions
+ */
+async function storeComplianceAuditLog(
+  userId: string | undefined,
+  action: string,
+  entityType: string,
+  entityId: string,
+  decision: ComplianceDecision,
+  requestId: string
+): Promise<void> {
+  await prisma.auditLog.create({
+    data: {
+      id: generateId('aud'),
+      actorId: userId || null,
+      actorEmail: userId || 'system',
+      action,
+      entityType,
+      entityId,
+      changes: {
+        checksPerformed: decision.checksPerformed,
+        passed: decision.passed,
+        violationCount: decision.violations.length,
+      },
+      metadata: {
+        policyVersion: decision.policyVersion,
+        marketPack: decision.marketPack,
+        marketPackVersion: decision.marketPackVersion,
+        violations: decision.violations,
+      },
+      requestId,
+    },
+  });
+}
 
 const CreateAmendmentSchema = z.object({
   type: z.enum(['RENT_CHANGE', 'TERM_EXTENSION', 'RIDER', 'OTHER']),
@@ -416,6 +528,402 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       });
 
       return reply.send({ success: true, data: applications });
+    }
+  );
+
+  // ============================================================================
+  // Rent Increase with Good Cause Compliance Gate
+  // ============================================================================
+
+  app.post(
+    '/:id/rent-increase',
+    {
+      schema: {
+        description: 'Request rent increase with Good Cause compliance enforcement',
+        tags: ['Leases'],
+        security: [{ bearerAuth: [] }],
+        params: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+        app.authorize(request, reply, { roles: ['LANDLORD', 'ADMIN'] });
+      },
+    },
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
+      const lease = await prisma.lease.findUnique({
+        where: { id: request.params.id },
+        include: { unit: { include: { property: true } } },
+      });
+
+      if (!lease) {
+        throw new NotFoundError('Lease not found');
+      }
+
+      if (lease.unit.property.ownerId !== request.user.id && request.user.role !== 'ADMIN') {
+        throw new ForbiddenError('Access denied');
+      }
+
+      const data = RentIncreaseSchema.parse(request.body);
+      const marketId = lease.unit.property.marketId || 'US_STANDARD';
+
+      // Run Good Cause compliance gate
+      const gateResult = await gateRentIncrease({
+        leaseId: lease.id,
+        marketId,
+        currentRent: lease.monthlyRent,
+        proposedRent: data.newMonthlyRent,
+        noticeDays: data.noticeDays,
+      });
+
+      // Store compliance check
+      const complianceCheckId = await storeComplianceCheck(
+        'lease',
+        lease.id,
+        marketId,
+        gateResult.decision
+      );
+
+      // Store audit log
+      await storeComplianceAuditLog(
+        request.user.id,
+        gateResult.allowed ? 'rent_increase_approved' : 'rent_increase_blocked',
+        'lease',
+        lease.id,
+        gateResult.decision,
+        request.id
+      );
+
+      // If blocked, return error with violations
+      if (!gateResult.allowed) {
+        logger.warn({
+          msg: 'rent_increase_blocked',
+          leaseId: lease.id,
+          currentRent: lease.monthlyRent,
+          proposedRent: data.newMonthlyRent,
+          violations: gateResult.decision.violations,
+          complianceCheckId,
+        });
+
+        return reply.status(422).send({
+          success: false,
+          error: {
+            code: 'COMPLIANCE_VIOLATION',
+            message: gateResult.blockedReason || 'Rent increase not permitted',
+            details: {
+              violations: gateResult.decision.violations,
+              recommendedFixes: gateResult.decision.recommendedFixes,
+              complianceCheckId,
+              policyVersion: gateResult.decision.policyVersion,
+              marketPack: gateResult.decision.marketPack,
+            },
+          },
+        });
+      }
+
+      // Create rent change amendment
+      const amendment = await prisma.leaseAmendment.create({
+        data: {
+          id: generateId('amd'),
+          leaseId: lease.id,
+          type: 'RENT_CHANGE',
+          description: data.reason || `Rent increase from $${lease.monthlyRent} to $${data.newMonthlyRent}`,
+          changes: {
+            previousRent: lease.monthlyRent,
+            newRent: data.newMonthlyRent,
+            increasePercent: ((data.newMonthlyRent - lease.monthlyRent) / lease.monthlyRent * 100).toFixed(2),
+            noticeDays: data.noticeDays,
+          },
+          effectiveDate: new Date(data.effectiveDate),
+          status: 'APPROVED',
+        },
+      });
+
+      // Update lease with new rent (effective on the date)
+      await prisma.lease.update({
+        where: { id: lease.id },
+        data: {
+          monthlyRent: data.newMonthlyRent,
+        },
+      });
+
+      logger.info({
+        msg: 'rent_increase_approved',
+        leaseId: lease.id,
+        previousRent: lease.monthlyRent,
+        newRent: data.newMonthlyRent,
+        complianceCheckId,
+      });
+
+      return reply.send({
+        success: true,
+        data: amendment,
+        meta: {
+          complianceCheckId,
+          checksPerformed: gateResult.decision.checksPerformed,
+          cpiFallbackUsed: gateResult.decision.violations.some(
+            (v) => v.code === 'GOOD_CAUSE_CPI_FALLBACK_USED'
+          ),
+        },
+      });
+    }
+  );
+
+  // ============================================================================
+  // FCHA Stage Transition with Compliance Gate
+  // ============================================================================
+
+  app.post(
+    '/applications/:id/transition',
+    {
+      schema: {
+        description: 'Transition application stage with FCHA compliance enforcement',
+        tags: ['Leases'],
+        security: [{ bearerAuth: [] }],
+        params: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+      },
+    },
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
+      const application = await prisma.tenantApplication.findUnique({
+        where: { id: request.params.id },
+        include: {
+          listing: { include: { unit: { include: { property: true } } } },
+        },
+      });
+
+      if (!application) {
+        throw new NotFoundError('Application not found');
+      }
+
+      const data = ApplicationStageTransitionSchema.parse(request.body);
+      const marketId = application.listing.unit.property.marketId || 'US_STANDARD';
+
+      // Get current stage from application status (map to FCHA stages)
+      const statusToStageMap: Record<string, FCHAStage> = {
+        'SUBMITTED': 'application_submitted',
+        'UNDER_REVIEW': 'application_review',
+        'CONDITIONAL_OFFER': 'conditional_offer',
+        'BACKGROUND_CHECK': 'background_check',
+        'APPROVED': 'final_approval',
+        'LEASE_PENDING': 'lease_signing',
+      };
+      const currentStage = statusToStageMap[application.status] || 'initial_inquiry';
+
+      // Run FCHA compliance gate
+      const gateResult = await gateFCHAStageTransition({
+        applicationId: application.id,
+        marketId,
+        currentStage: currentStage as FCHAStage,
+        targetStage: data.targetStage as FCHAStage,
+      });
+
+      // Store compliance check
+      const complianceCheckId = await storeComplianceCheck(
+        'application',
+        application.id,
+        marketId,
+        gateResult.decision
+      );
+
+      // Store audit log
+      await storeComplianceAuditLog(
+        request.user.id,
+        gateResult.allowed ? 'stage_transition_approved' : 'stage_transition_blocked',
+        'application',
+        application.id,
+        gateResult.decision,
+        request.id
+      );
+
+      if (!gateResult.allowed) {
+        logger.warn({
+          msg: 'fcha_stage_transition_blocked',
+          applicationId: application.id,
+          currentStage,
+          targetStage: data.targetStage,
+          violations: gateResult.decision.violations,
+          complianceCheckId,
+        });
+
+        return reply.status(422).send({
+          success: false,
+          error: {
+            code: 'COMPLIANCE_VIOLATION',
+            message: gateResult.blockedReason || 'Stage transition not permitted',
+            details: {
+              violations: gateResult.decision.violations,
+              recommendedFixes: gateResult.decision.recommendedFixes,
+              complianceCheckId,
+            },
+          },
+        });
+      }
+
+      // Map target stage back to application status
+      const stageToStatusMap: Record<string, string> = {
+        'application_submitted': 'SUBMITTED',
+        'application_review': 'UNDER_REVIEW',
+        'conditional_offer': 'CONDITIONAL_OFFER',
+        'background_check': 'BACKGROUND_CHECK',
+        'final_approval': 'APPROVED',
+        'lease_signing': 'LEASE_PENDING',
+      };
+
+      const updated = await prisma.tenantApplication.update({
+        where: { id: application.id },
+        data: {
+          status: stageToStatusMap[data.targetStage] || application.status,
+        },
+        include: {
+          applicant: { select: { id: true, firstName: true, lastName: true, email: true } },
+          listing: { select: { id: true, title: true } },
+        },
+      });
+
+      return reply.send({
+        success: true,
+        data: updated,
+        meta: { complianceCheckId },
+      });
+    }
+  );
+
+  // ============================================================================
+  // FCHA Background Check Gate
+  // ============================================================================
+
+  app.post(
+    '/applications/:id/background-check',
+    {
+      schema: {
+        description: 'Request background check with FCHA compliance enforcement',
+        tags: ['Leases'],
+        security: [{ bearerAuth: [] }],
+        params: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+        app.authorize(request, reply, { roles: ['LANDLORD', 'AGENT', 'ADMIN'] });
+      },
+    },
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
+      const application = await prisma.tenantApplication.findUnique({
+        where: { id: request.params.id },
+        include: {
+          listing: { include: { unit: { include: { property: true } } } },
+        },
+      });
+
+      if (!application) {
+        throw new NotFoundError('Application not found');
+      }
+
+      const data = BackgroundCheckSchema.parse(request.body);
+      const marketId = application.listing.unit.property.marketId || 'US_STANDARD';
+
+      // Map status to FCHA stage
+      const statusToStageMap: Record<string, FCHAStage> = {
+        'SUBMITTED': 'application_submitted',
+        'UNDER_REVIEW': 'application_review',
+        'CONDITIONAL_OFFER': 'conditional_offer',
+        'BACKGROUND_CHECK': 'background_check',
+      };
+      const currentStage = statusToStageMap[application.status] || 'initial_inquiry';
+
+      // Run FCHA background check gate
+      const gateResult = await gateFCHABackgroundCheck({
+        applicationId: application.id,
+        marketId,
+        currentStage: currentStage as FCHAStage,
+        checkType: data.checkType,
+      });
+
+      // Store compliance check
+      const complianceCheckId = await storeComplianceCheck(
+        'application',
+        application.id,
+        marketId,
+        gateResult.decision
+      );
+
+      // Store audit log
+      await storeComplianceAuditLog(
+        request.user.id,
+        gateResult.allowed ? 'background_check_approved' : 'background_check_blocked',
+        'application',
+        application.id,
+        gateResult.decision,
+        request.id
+      );
+
+      if (!gateResult.allowed) {
+        logger.warn({
+          msg: 'fcha_background_check_blocked',
+          applicationId: application.id,
+          currentStage,
+          checkType: data.checkType,
+          violations: gateResult.decision.violations,
+          complianceCheckId,
+        });
+
+        return reply.status(422).send({
+          success: false,
+          error: {
+            code: 'COMPLIANCE_VIOLATION',
+            message: gateResult.blockedReason || 'Background check not permitted at this stage',
+            details: {
+              violations: gateResult.decision.violations,
+              recommendedFixes: gateResult.decision.recommendedFixes,
+              complianceCheckId,
+              currentStage,
+              requiredStage: 'conditional_offer',
+            },
+          },
+        });
+      }
+
+      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with actual background check provider
+      logger.info({
+        msg: 'background_check_initiated',
+        applicationId: application.id,
+        checkType: data.checkType,
+        complianceCheckId,
+      });
+
+      return reply.send({
+        success: true,
+        data: {
+          applicationId: application.id,
+          checkType: data.checkType,
+          status: 'initiated',
+          message: 'Background check has been initiated. Results will be available shortly.',
+        },
+        meta: { complianceCheckId },
+      });
     }
   );
 }
