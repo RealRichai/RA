@@ -1,0 +1,67 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# Caches
+.turbo/
+.cache/
+.eslintcache
+.prettiercache
+
+# Database
+*.db
+*.sqlite
+
+# Secrets
+*.pem
+*.key
+secrets/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Generated files
+generated/
+prisma/generated/
+
+# Sentry
+.sentryclirc
+
+# Docker
+docker-compose.override.yml

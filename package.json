@@ -1,0 +1,52 @@
+{
+  "name": "realriches",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RealRiches - AI-Powered Real Estate Platform",
+  "license": "UNLICENSED",
+  "author": "RealRiches Team",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "dev:api": "turbo dev --filter=@realriches/api",
+    "dev:web": "turbo dev --filter=@realriches/web",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "test:coverage": "turbo test:coverage",
+    "test:e2e": "turbo test:e2e",
+    "typecheck": "turbo typecheck",
+    "clean": "turbo clean && rm -rf node_modules",
+    "db:generate": "turbo db:generate",
+    "db:migrate": "turbo db:migrate",
+    "db:push": "turbo db:push",
+    "db:seed": "turbo db:seed",
+    "db:studio": "pnpm --filter @realriches/database exec prisma studio",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "prepare": "husky install",
+    "changeset": "changeset",
+    "release": "turbo build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.1",
+    "@types/node": "^20.11.0",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0",
+    "prettier": "^3.2.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.3.3"
+  },
+  "packageManager": "pnpm@8.14.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
+  }
+}

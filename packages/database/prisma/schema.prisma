@@ -1,0 +1,1735 @@
+// =============================================================================
+// RealRiches Prisma Schema
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pg_trgm, postgis]
+}
+
+// =============================================================================
+// Authentication & Users
+// =============================================================================
+
+enum Role {
+  super_admin
+  admin
+  landlord
+  property_manager
+  agent
+  tenant
+  investor
+  vendor
+  support
+}
+
+enum UserStatus {
+  active
+  pending_verification
+  suspended
+  deactivated
+}
+
+model User {
+  id                String     @id @default(uuid()) @db.Uuid
+  email             String     @unique
+  passwordHash      String     @map("password_hash")
+  firstName         String     @map("first_name")
+  lastName          String     @map("last_name")
+  phone             String?
+  avatarUrl         String?    @map("avatar_url")
+  role              Role       @default(tenant)
+  status            UserStatus @default(pending_verification)
+  emailVerified     Boolean    @default(false) @map("email_verified")
+  phoneVerified     Boolean    @default(false) @map("phone_verified")
+  mfaEnabled        Boolean    @default(false) @map("mfa_enabled")
+  mfaSecret         String?    @map("mfa_secret")
+  lastLoginAt       DateTime?  @map("last_login_at")
+  passwordChangedAt DateTime?  @map("password_changed_at")
+  metadata          Json?
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  sessions               Session[]
+  landlordProfile        LandlordProfile?
+  agentProfile           AgentProfile?
+  tenantProfile          TenantProfile?
+  investorProfile        InvestorProfile?
+  ownedProperties        Property[]            @relation("PropertyOwner")
+  managedProperties      Property[]            @relation("PropertyManager")
+  listings               Listing[]
+  leasesAsLandlord       Lease[]               @relation("LeaseLandlord")
+  leasesAsTenant         Lease[]               @relation("LeasePrimaryTenant")
+  applications           TenantApplication[]
+  paymentsAsPayer        Payment[]             @relation("PaymentPayer")
+  paymentsAsPayee        Payment[]             @relation("PaymentPayee")
+  workOrdersReported     WorkOrder[]           @relation("WorkOrderReporter")
+  workOrdersAssigned     WorkOrder[]           @relation("WorkOrderAssignee")
+  documents              Document[]
+  aiConversations        AIConversation[]
+  notifications          Notification[]
+  auditLogs              AuditLog[]            @relation("AuditLogActor")
+  refreshTokens          RefreshToken[]
+  apiKeys                ApiKey[]
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+model Session {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  ipAddress   String   @map("ip_address")
+  userAgent   String   @map("user_agent")
+  isValid     Boolean  @default(true) @map("is_valid")
+  createdAt   DateTime @default(now()) @map("created_at")
+  expiresAt   DateTime @map("expires_at")
+  lastActiveAt DateTime @default(now()) @map("last_active_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model ApiKey {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  name        String
+  keyPrefix   String   @map("key_prefix")
+  hashedKey   String   @unique @map("hashed_key")
+  scopes      String[]
+  isActive    Boolean  @default(true) @map("is_active")
+  lastUsedAt  DateTime? @map("last_used_at")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([hashedKey])
+  @@map("api_keys")
+}
+
+// =============================================================================
+// User Profiles
+// =============================================================================
+
+model LandlordProfile {
+  id                      String   @id @default(uuid()) @db.Uuid
+  userId                  String   @unique @map("user_id") @db.Uuid
+  companyName             String?  @map("company_name")
+  taxId                   String?  @map("tax_id") // Encrypted
+  businessLicense         String?  @map("business_license")
+  preferredPaymentMethod  String   @default("ach") @map("preferred_payment_method")
+  billingEmail            String?  @map("billing_email")
+  notificationPreferences Json     @default("{}") @map("notification_preferences")
+  verificationStatus      String   @default("pending") @map("verification_status")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("landlord_profiles")
+}
+
+model AgentProfile {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @unique @map("user_id") @db.Uuid
+  licenseNumber     String   @map("license_number")
+  licenseState      String   @map("license_state")
+  licenseExpiry     DateTime @map("license_expiry")
+  brokerageName     String   @map("brokerage_name")
+  bio               String?
+  specializations   String[] @default([])
+  serviceAreas      String[] @default([]) @map("service_areas")
+  yearsExperience   Int?     @map("years_experience")
+  totalDeals        Int      @default(0) @map("total_deals")
+  averageRating     Float?   @map("average_rating")
+  reviewCount       Int      @default(0) @map("review_count")
+  socialLinks       Json?    @map("social_links")
+  verificationStatus String  @default("pending") @map("verification_status")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("agent_profiles")
+}
+
+model TenantProfile {
+  id                    String   @id @default(uuid()) @db.Uuid
+  userId                String   @unique @map("user_id") @db.Uuid
+  employmentStatus      String?  @map("employment_status")
+  annualIncome          Int?     @map("annual_income") // Encrypted
+  creditScore           Int?     @map("credit_score") // Encrypted
+  creditScoreLastUpdated DateTime? @map("credit_score_last_updated")
+  hasRentersInsurance   Boolean  @default(false) @map("has_renters_insurance")
+  pets                  Json     @default("[]")
+  vehicles              Json     @default("[]")
+  emergencyContact      Json?    @map("emergency_contact")
+  applicationStatus     String   @default("not_started") @map("application_status")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_profiles")
+}
+
+model InvestorProfile {
+  id                   String   @id @default(uuid()) @db.Uuid
+  userId               String   @unique @map("user_id") @db.Uuid
+  investorType         String   @map("investor_type")
+  accreditationStatus  String?  @map("accreditation_status")
+  accreditationExpiry  DateTime? @map("accreditation_expiry")
+  investmentPreferences Json    @default("{}") @map("investment_preferences")
+  totalInvested        Int      @default(0) @map("total_invested")
+  portfolioValue       Int      @default(0) @map("portfolio_value")
+  kycStatus            String   @default("pending") @map("kyc_status")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("investor_profiles")
+}
+
+// =============================================================================
+// Properties & Units
+// =============================================================================
+
+enum PropertyType {
+  single_family
+  multi_family
+  condo
+  townhouse
+  apartment
+  studio
+  loft
+  duplex
+  triplex
+  fourplex
+  commercial
+  mixed_use
+  land
+  industrial
+  retail
+  office
+  warehouse
+  hotel
+  special_purpose
+}
+
+enum PropertyStatus {
+  active
+  inactive
+  pending
+  under_renovation
+  sold
+  archived
+}
+
+model Property {
+  id                 String         @id @default(uuid()) @db.Uuid
+  ownerId            String         @map("owner_id") @db.Uuid
+  managerId          String?        @map("manager_id") @db.Uuid
+  name               String
+  street1            String
+  street2            String?
+  city               String
+  state              String
+  postalCode         String         @map("postal_code")
+  country            String         @default("US")
+  latitude           Float?
+  longitude          Float?
+  type               PropertyType
+  status             PropertyStatus @default(active)
+  yearBuilt          Int?           @map("year_built")
+  totalUnits         Int            @default(1) @map("total_units")
+  totalSquareFeet    Int?           @map("total_square_feet")
+  lotSize            Float?         @map("lot_size")
+  stories            Int?
+  parkingSpaces      Int            @default(0) @map("parking_spaces")
+  amenities          String[]       @default([])
+  description        String?
+  notes              String?
+  taxParcelId        String?        @map("tax_parcel_id")
+  zoningCode         String?        @map("zoning_code")
+  insurancePolicy    String?        @map("insurance_policy")
+  insuranceExpiry    DateTime?      @map("insurance_expiry")
+  acquisitionDate    DateTime?      @map("acquisition_date")
+  acquisitionPriceAmount Int?       @map("acquisition_price_amount")
+  currentValueAmount Int?           @map("current_value_amount")
+  complianceStatus   String         @default("pending_review") @map("compliance_status")
+  marketId           String         @map("market_id")
+  metadata           Json?
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  owner              User         @relation("PropertyOwner", fields: [ownerId], references: [id])
+  manager            User?        @relation("PropertyManager", fields: [managerId], references: [id])
+  units              Unit[]
+  listings           Listing[]
+  leases             Lease[]
+  workOrders         WorkOrder[]
+  documents          Document[]   @relation("PropertyDocuments")
+  propertyMedia      PropertyMedia[]
+  complianceChecks   ComplianceCheck[]
+
+  @@index([ownerId])
+  @@index([managerId])
+  @@index([marketId])
+  @@index([type])
+  @@index([status])
+  @@index([city, state])
+  @@map("properties")
+}
+
+enum UnitStatus {
+  vacant
+  occupied
+  pending
+  off_market
+  under_renovation
+}
+
+model Unit {
+  id                 String     @id @default(uuid()) @db.Uuid
+  propertyId         String     @map("property_id") @db.Uuid
+  unitNumber         String     @map("unit_number")
+  floor              Int?
+  type               String
+  bedrooms           Int
+  bathrooms          Float
+  squareFeet         Int?       @map("square_feet")
+  marketRentAmount   Int        @map("market_rent_amount")
+  currentRentAmount  Int?       @map("current_rent_amount")
+  status             UnitStatus @default(vacant)
+  amenities          String[]   @default([])
+  features           String[]   @default([])
+  description        String?
+  floorPlanUrl       String?    @map("floor_plan_url")
+  virtualTourUrl     String?    @map("virtual_tour_url")
+  lastRenovationDate DateTime?  @map("last_renovation_date")
+  moveInReady        Boolean    @default(true) @map("move_in_ready")
+  availableDate      DateTime?  @map("available_date")
+  isRentStabilized   Boolean    @default(false) @map("is_rent_stabilized")
+  legalRentAmount    Int?       @map("legal_rent_amount")
+  preferentialRentAmount Int?   @map("preferential_rent_amount")
+  metadata           Json?
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  property           Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  listings           Listing[]
+  leases             Lease[]
+  workOrders         WorkOrder[]
+
+  @@unique([propertyId, unitNumber])
+  @@index([propertyId])
+  @@index([status])
+  @@map("units")
+}
+
+// =============================================================================
+// Listings
+// =============================================================================
+
+enum ListingStatus {
+  draft
+  pending_review
+  active
+  paused
+  rented
+  expired
+  archived
+}
+
+enum ListingType {
+  rental
+  sale
+  sublease
+  roommate
+}
+
+model Listing {
+  id                 String        @id @default(uuid()) @db.Uuid
+  propertyId         String        @map("property_id") @db.Uuid
+  unitId             String?       @map("unit_id") @db.Uuid
+  agentId            String?       @map("agent_id") @db.Uuid
+  landlordId         String        @map("landlord_id") @db.Uuid
+  title              String
+  description        String
+  type               ListingType
+  status             ListingStatus @default(draft)
+  priceAmount        Int           @map("price_amount")
+  securityDepositAmount Int?       @map("security_deposit_amount")
+  applicationFeeAmount Int?        @map("application_fee_amount")
+  brokerFeeAmount    Int?          @map("broker_fee_amount")
+  hasBrokerFee       Boolean       @default(false) @map("has_broker_fee")
+  isNoFee            Boolean       @default(false) @map("is_no_fee")
+  street1            String
+  street2            String?
+  city               String
+  state              String
+  postalCode         String        @map("postal_code")
+  propertyType       PropertyType  @map("property_type")
+  bedrooms           Int
+  bathrooms          Float
+  squareFeet         Int?          @map("square_feet")
+  floor              Int?
+  availableDate      DateTime      @map("available_date")
+  leaseTerm          String        @map("lease_term")
+  amenities          String[]      @default([])
+  highlights         String[]      @default([])
+  includedUtilities  String[]      @default([]) @map("included_utilities")
+  petsAllowed        Boolean       @default(false) @map("pets_allowed")
+  petPolicy          Json?         @map("pet_policy")
+  requirements       Json          @default("{}")
+  isPublished        Boolean       @default(false) @map("is_published")
+  publishedAt        DateTime?     @map("published_at")
+  expiresAt          DateTime?     @map("expires_at")
+  syndicateTo        String[]      @default([]) @map("syndicate_to")
+  syndicationStatus  Json?         @map("syndication_status")
+  viewCount          Int           @default(0) @map("view_count")
+  inquiryCount       Int           @default(0) @map("inquiry_count")
+  applicationCount   Int           @default(0) @map("application_count")
+  saveCount          Int           @default(0) @map("save_count")
+  marketId           String        @map("market_id")
+  neighborhood       String?
+  isCompliant        Boolean       @default(true) @map("is_compliant")
+  complianceIssues   String[]      @default([]) @map("compliance_issues")
+  fareActCompliant   Boolean       @default(true) @map("fare_act_compliant")
+  isFeatured         Boolean       @default(false) @map("is_featured")
+  metadata           Json?
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  property           Property           @relation(fields: [propertyId], references: [id])
+  unit               Unit?              @relation(fields: [unitId], references: [id])
+  agent              User?              @relation(fields: [agentId], references: [id])
+  inquiries          ListingInquiry[]
+  showings           Showing[]
+  applications       TenantApplication[]
+  media              ListingMedia[]
+
+  @@index([propertyId])
+  @@index([landlordId])
+  @@index([status])
+  @@index([type])
+  @@index([marketId])
+  @@index([city, state])
+  @@index([bedrooms])
+  @@index([priceAmount])
+  @@index([availableDate])
+  @@map("listings")
+}
+
+model ListingInquiry {
+  id                     String   @id @default(uuid()) @db.Uuid
+  listingId              String   @map("listing_id") @db.Uuid
+  userId                 String?  @map("user_id") @db.Uuid
+  name                   String
+  email                  String
+  phone                  String?
+  message                String
+  preferredContactMethod String   @default("email") @map("preferred_contact_method")
+  moveInDate             DateTime? @map("move_in_date")
+  prequalified           Boolean  @default(false)
+  status                 String   @default("new")
+  source                 String?
+  assignedTo             String?  @map("assigned_to") @db.Uuid
+  notes                  String?
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([status])
+  @@map("listing_inquiries")
+}
+
+model Showing {
+  id               String   @id @default(uuid()) @db.Uuid
+  listingId        String   @map("listing_id") @db.Uuid
+  inquiryId        String?  @map("inquiry_id") @db.Uuid
+  agentId          String?  @map("agent_id") @db.Uuid
+  prospectName     String   @map("prospect_name")
+  prospectEmail    String   @map("prospect_email")
+  prospectPhone    String?  @map("prospect_phone")
+  scheduledAt      DateTime @map("scheduled_at")
+  duration         Int      @default(30)
+  type             String   @default("in_person")
+  status           String   @default("scheduled")
+  confirmationCode String?  @map("confirmation_code")
+  accessInstructions String? @map("access_instructions")
+  feedback         Json?
+  remindersSent    Int      @default(0) @map("reminders_sent")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([scheduledAt])
+  @@index([status])
+  @@map("showings")
+}
+
+model ListingMedia {
+  id          String   @id @default(uuid()) @db.Uuid
+  listingId   String   @map("listing_id") @db.Uuid
+  url         String
+  type        String
+  caption     String?
+  isPrimary   Boolean  @default(false) @map("is_primary")
+  order       Int      @default(0)
+  roomType    String?  @map("room_type")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@map("listing_media")
+}
+
+// =============================================================================
+// Leases
+// =============================================================================
+
+enum LeaseStatus {
+  draft
+  pending_signatures
+  partially_signed
+  fully_signed
+  active
+  expired
+  terminated
+  renewed
+  cancelled
+}
+
+enum LeaseType {
+  standard
+  rebny
+  rent_stabilized
+  rent_controlled
+  month_to_month
+  commercial
+  sublease
+  custom
+}
+
+model Lease {
+  id                    String      @id @default(uuid()) @db.Uuid
+  propertyId            String      @map("property_id") @db.Uuid
+  unitId                String      @map("unit_id") @db.Uuid
+  landlordId            String      @map("landlord_id") @db.Uuid
+  primaryTenantId       String      @map("primary_tenant_id") @db.Uuid
+  agentId               String?     @map("agent_id") @db.Uuid
+  leaseNumber           String      @unique @map("lease_number")
+  type                  LeaseType
+  status                LeaseStatus @default(draft)
+  version               Int         @default(1)
+  previousLeaseId       String?     @map("previous_lease_id") @db.Uuid
+  startDate             DateTime    @map("start_date")
+  endDate               DateTime    @map("end_date")
+  monthlyRentAmount     Int         @map("monthly_rent_amount")
+  securityDepositAmount Int         @map("security_deposit_amount")
+  lastMonthDepositAmount Int?       @map("last_month_deposit_amount")
+  petDepositAmount      Int?        @map("pet_deposit_amount")
+  isRentStabilized      Boolean     @default(false) @map("is_rent_stabilized")
+  legalRentAmount       Int?        @map("legal_rent_amount")
+  preferentialRentAmount Int?       @map("preferential_rent_amount")
+  paymentDueDay         Int         @default(1) @map("payment_due_day")
+  lateFeeGracePeriod    Int         @default(5) @map("late_fee_grace_period")
+  lateFeeAmount         Int?        @map("late_fee_amount")
+  lateFeePercentage     Float?      @map("late_fee_percentage")
+  concessions           Json        @default("[]")
+  includedUtilities     String[]    @default([]) @map("included_utilities")
+  maxOccupants          Int         @map("max_occupants")
+  occupants             Json        @default("[]")
+  petsAllowed           Boolean     @default(false) @map("pets_allowed")
+  approvedPets          Json        @default("[]") @map("approved_pets")
+  parkingSpaces         Int         @default(0) @map("parking_spaces")
+  parkingFeeAmount      Int?        @map("parking_fee_amount")
+  specialClauses        Json        @default("[]") @map("special_clauses")
+  riders                Json        @default("[]")
+  signatures            Json        @default("[]")
+  allSignaturesComplete Boolean     @default(false) @map("all_signatures_complete")
+  leaseDocumentId       String?     @map("lease_document_id") @db.Uuid
+  signedDocumentId      String?     @map("signed_document_id") @db.Uuid
+  renewalOffered        Boolean     @default(false) @map("renewal_offered")
+  renewalOfferDate      DateTime?   @map("renewal_offer_date")
+  renewalStatus         String      @default("not_offered") @map("renewal_status")
+  terminationDate       DateTime?   @map("termination_date")
+  terminationReason     String?     @map("termination_reason")
+  moveInDate            DateTime?   @map("move_in_date")
+  moveOutDate           DateTime?   @map("move_out_date")
+  isCompliant           Boolean     @default(true) @map("is_compliant")
+  complianceIssues      String[]    @default([]) @map("compliance_issues")
+  fareActDisclosures    Json        @default("[]") @map("fare_act_disclosures")
+  metadata              Json?
+  createdAt             DateTime    @default(now()) @map("created_at")
+  updatedAt             DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  property              Property    @relation(fields: [propertyId], references: [id])
+  unit                  Unit        @relation(fields: [unitId], references: [id])
+  landlord              User        @relation("LeaseLandlord", fields: [landlordId], references: [id])
+  primaryTenant         User        @relation("LeasePrimaryTenant", fields: [primaryTenantId], references: [id])
+  payments              Payment[]
+  recurringPayments     RecurringPayment[]
+  invoices              Invoice[]
+  workOrders            WorkOrder[]
+  amendments            LeaseAmendment[]
+  depositAlternatives   DepositAlternative[]
+  rentersInsurance      RentersInsurance[]
+  guarantorProducts     GuarantorProduct[]
+
+  @@index([propertyId])
+  @@index([landlordId])
+  @@index([primaryTenantId])
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
+  @@map("leases")
+}
+
+model LeaseAmendment {
+  id              String   @id @default(uuid()) @db.Uuid
+  leaseId         String   @map("lease_id") @db.Uuid
+  amendmentNumber Int      @map("amendment_number")
+  effectiveDate   DateTime @map("effective_date")
+  description     String
+  changes         Json
+  signatures      Json     @default("[]")
+  documentId      String?  @map("document_id") @db.Uuid
+  status          String   @default("draft")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  lease Lease @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+
+  @@index([leaseId])
+  @@map("lease_amendments")
+}
+
+model TenantApplication {
+  id                     String   @id @default(uuid()) @db.Uuid
+  listingId              String   @map("listing_id") @db.Uuid
+  applicantId            String   @map("applicant_id") @db.Uuid
+  status                 String   @default("draft")
+  personalInfo           Json     @default("{}") @map("personal_info") // Encrypted
+  currentAddress         Json?    @map("current_address")
+  currentRentAmount      Int?     @map("current_rent_amount")
+  residenceHistory       Json     @default("[]") @map("residence_history")
+  employmentInfo         Json     @default("{}") @map("employment_info")
+  additionalIncome       Json     @default("[]") @map("additional_income")
+  bankAccounts           Json     @default("[]") @map("bank_accounts") // Encrypted
+  references             Json     @default("[]")
+  emergencyContact       Json?    @map("emergency_contact")
+  creditScore            Int?     @map("credit_score")
+  creditReportId         String?  @map("credit_report_id") @db.Uuid
+  backgroundCheckId      String?  @map("background_check_id") @db.Uuid
+  backgroundCheckStatus  String   @default("not_started") @map("background_check_status")
+  evictionHistory        Boolean? @map("eviction_history")
+  documents              Json     @default("[]")
+  hasGuarantor           Boolean  @default(false) @map("has_guarantor")
+  guarantorInfo          Json?    @map("guarantor_info")
+  depositAlternative     Json?    @map("deposit_alternative")
+  rentersInsurance       Json?    @map("renters_insurance")
+  applicationFeeAmount   Int?     @map("application_fee_amount")
+  applicationFeePaid     Boolean  @default(false) @map("application_fee_paid")
+  reviewedBy             String?  @map("reviewed_by") @db.Uuid
+  reviewedAt             DateTime? @map("reviewed_at")
+  reviewNotes            String?  @map("review_notes")
+  denialReason           String?  @map("denial_reason")
+  offerSent              Boolean  @default(false) @map("offer_sent")
+  offerSentAt            DateTime? @map("offer_sent_at")
+  offerTerms             Json?    @map("offer_terms")
+  fareActCompliant       Boolean  @default(true) @map("fare_act_compliant")
+  fchaCompliant          Boolean  @default(true) @map("fcha_compliant")
+  submittedAt            DateTime? @map("submitted_at")
+  expiresAt              DateTime? @map("expires_at")
+  metadata               Json?
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  listing   Listing @relation(fields: [listingId], references: [id])
+  applicant User    @relation(fields: [applicantId], references: [id])
+
+  @@index([listingId])
+  @@index([applicantId])
+  @@index([status])
+  @@map("tenant_applications")
+}
+
+// =============================================================================
+// Payments & Fintech
+// =============================================================================
+
+enum PaymentStatus {
+  pending
+  processing
+  completed
+  failed
+  cancelled
+  refunded
+  partially_refunded
+  disputed
+}
+
+enum PaymentType {
+  rent
+  security_deposit
+  application_fee
+  broker_fee
+  late_fee
+  pet_deposit
+  pet_rent
+  parking
+  utility
+  maintenance
+  move_in
+  move_out
+  other
+}
+
+model Payment {
+  id                    String        @id @default(uuid()) @db.Uuid
+  payerId               String        @map("payer_id") @db.Uuid
+  payeeId               String        @map("payee_id") @db.Uuid
+  leaseId               String?       @map("lease_id") @db.Uuid
+  propertyId            String?       @map("property_id") @db.Uuid
+  invoiceId             String?       @map("invoice_id") @db.Uuid
+  amount                Int
+  currency              String        @default("USD")
+  feeAmount             Int?          @map("fee_amount")
+  netAmount             Int?          @map("net_amount")
+  type                  PaymentType
+  status                PaymentStatus @default(pending)
+  paymentMethodId       String?       @map("payment_method_id") @db.Uuid
+  paymentMethodType     String?       @map("payment_method_type")
+  stripePaymentIntentId String?       @map("stripe_payment_intent_id")
+  stripeChargeId        String?       @map("stripe_charge_id")
+  plaidTransferId       String?       @map("plaid_transfer_id")
+  scheduledDate         DateTime?     @map("scheduled_date")
+  processedAt           DateTime?     @map("processed_at")
+  billingPeriodStart    DateTime?     @map("billing_period_start")
+  billingPeriodEnd      DateTime?     @map("billing_period_end")
+  description           String?
+  internalNotes         String?       @map("internal_notes")
+  receiptUrl            String?       @map("receipt_url")
+  receiptNumber         String?       @map("receipt_number")
+  retryCount            Int           @default(0) @map("retry_count")
+  nextRetryAt           DateTime?     @map("next_retry_at")
+  lastError             String?       @map("last_error")
+  refundedAmount        Int?          @map("refunded_amount")
+  refundedAt            DateTime?     @map("refunded_at")
+  refundReason          String?       @map("refund_reason")
+  metadata              Json?
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+
+  payer  User     @relation("PaymentPayer", fields: [payerId], references: [id])
+  payee  User     @relation("PaymentPayee", fields: [payeeId], references: [id])
+  lease  Lease?   @relation(fields: [leaseId], references: [id])
+  invoice Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@index([payerId])
+  @@index([payeeId])
+  @@index([leaseId])
+  @@index([status])
+  @@index([type])
+  @@index([processedAt])
+  @@map("payments")
+}
+
+model PaymentMethod {
+  id                    String   @id @default(uuid()) @db.Uuid
+  userId                String   @map("user_id") @db.Uuid
+  type                  String
+  isDefault             Boolean  @default(false) @map("is_default")
+  isVerified            Boolean  @default(false) @map("is_verified")
+  stripePaymentMethodId String?  @map("stripe_payment_method_id")
+  plaidAccountId        String?  @map("plaid_account_id")
+  cardBrand             String?  @map("card_brand")
+  cardLast4             String?  @map("card_last4")
+  cardExpMonth          Int?     @map("card_exp_month")
+  cardExpYear           Int?     @map("card_exp_year")
+  bankName              String?  @map("bank_name")
+  bankLast4             String?  @map("bank_last4")
+  bankAccountType       String?  @map("bank_account_type")
+  billingAddress        Json?    @map("billing_address")
+  status                String   @default("active")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("payment_methods")
+}
+
+model RecurringPayment {
+  id                 String   @id @default(uuid()) @db.Uuid
+  payerId            String   @map("payer_id") @db.Uuid
+  payeeId            String   @map("payee_id") @db.Uuid
+  leaseId            String   @map("lease_id") @db.Uuid
+  paymentMethodId    String   @map("payment_method_id") @db.Uuid
+  amount             Int
+  currency           String   @default("USD")
+  type               PaymentType
+  frequency          String
+  dayOfMonth         Int?     @map("day_of_month")
+  startDate          DateTime @map("start_date")
+  endDate            DateTime? @map("end_date")
+  nextPaymentDate    DateTime @map("next_payment_date")
+  status             String   @default("active")
+  totalPayments      Int      @default(0) @map("total_payments")
+  successfulPayments Int      @default(0) @map("successful_payments")
+  failedPayments     Int      @default(0) @map("failed_payments")
+  autoPayEnabled     Boolean  @default(true) @map("auto_pay_enabled")
+  reminderDays       Int      @default(3) @map("reminder_days")
+  metadata           Json?
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  lease Lease @relation(fields: [leaseId], references: [id])
+
+  @@index([leaseId])
+  @@index([status])
+  @@index([nextPaymentDate])
+  @@map("recurring_payments")
+}
+
+model Invoice {
+  id                 String   @id @default(uuid()) @db.Uuid
+  invoiceNumber      String   @unique @map("invoice_number")
+  payerId            String   @map("payer_id") @db.Uuid
+  payeeId            String   @map("payee_id") @db.Uuid
+  leaseId            String?  @map("lease_id") @db.Uuid
+  propertyId         String?  @map("property_id") @db.Uuid
+  status             String   @default("draft")
+  issueDate          DateTime @map("issue_date")
+  dueDate            DateTime @map("due_date")
+  paidDate           DateTime? @map("paid_date")
+  lineItems          Json     @default("[]") @map("line_items")
+  subtotalAmount     Int      @map("subtotal_amount")
+  taxAmount          Int?     @map("tax_amount")
+  discountAmount     Int?     @map("discount_amount")
+  totalAmount        Int      @map("total_amount")
+  amountPaid         Int      @default(0) @map("amount_paid")
+  amountDue          Int      @map("amount_due")
+  lateFeeApplied     Boolean  @default(false) @map("late_fee_applied")
+  lateFeeAmount      Int?     @map("late_fee_amount")
+  pdfUrl             String?  @map("pdf_url")
+  notes              String?
+  memo               String?
+  metadata           Json?
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  lease    Lease?    @relation(fields: [leaseId], references: [id])
+  payments Payment[]
+
+  @@index([payerId])
+  @@index([payeeId])
+  @@index([leaseId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("invoices")
+}
+
+model DepositAlternative {
+  id                    String   @id @default(uuid()) @db.Uuid
+  leaseId               String   @map("lease_id") @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  provider              String
+  policyNumber          String?  @map("policy_number")
+  coverageAmount        Int      @map("coverage_amount")
+  monthlyPremiumAmount  Int      @map("monthly_premium_amount")
+  annualPremiumAmount   Int?     @map("annual_premium_amount")
+  status                String   @default("quote_requested")
+  applicationDate       DateTime? @map("application_date")
+  approvalDate          DateTime? @map("approval_date")
+  effectiveDate         DateTime? @map("effective_date")
+  expirationDate        DateTime? @map("expiration_date")
+  providerApplicationId String?  @map("provider_application_id")
+  providerPolicyId      String?  @map("provider_policy_id")
+  providerData          Json?    @map("provider_data")
+  claimCount            Int      @default(0) @map("claim_count")
+  metadata              Json?
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  lease Lease @relation(fields: [leaseId], references: [id])
+
+  @@index([leaseId])
+  @@index([tenantId])
+  @@map("deposit_alternatives")
+}
+
+model RentersInsurance {
+  id                        String   @id @default(uuid()) @db.Uuid
+  tenantId                  String   @map("tenant_id") @db.Uuid
+  leaseId                   String?  @map("lease_id") @db.Uuid
+  provider                  String
+  policyNumber              String   @map("policy_number")
+  coverageAmount            Int      @map("coverage_amount")
+  liabilityCoverageAmount   Int      @map("liability_coverage_amount")
+  deductibleAmount          Int      @map("deductible_amount")
+  monthlyPremiumAmount      Int      @map("monthly_premium_amount")
+  annualPremiumAmount       Int      @map("annual_premium_amount")
+  status                    String   @default("active")
+  effectiveDate             DateTime @map("effective_date")
+  expirationDate            DateTime @map("expiration_date")
+  certificateUrl            String?  @map("certificate_url")
+  landlordAddedAsInterested Boolean  @default(false) @map("landlord_added_as_interested")
+  autoRenew                 Boolean  @default(true) @map("auto_renew")
+  metadata                  Json?
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  lease Lease? @relation(fields: [leaseId], references: [id])
+
+  @@index([tenantId])
+  @@index([leaseId])
+  @@map("renters_insurance")
+}
+
+model GuarantorProduct {
+  id                    String   @id @default(uuid()) @db.Uuid
+  leaseId               String   @map("lease_id") @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  provider              String
+  guaranteeAmount       Int      @map("guarantee_amount")
+  monthlyPremiumAmount  Int      @map("monthly_premium_amount")
+  oneTimeFeeAmount      Int?     @map("one_time_fee_amount")
+  status                String   @default("application_pending")
+  applicationDate       DateTime? @map("application_date")
+  approvalDate          DateTime? @map("approval_date")
+  effectiveDate         DateTime? @map("effective_date")
+  expirationDate        DateTime? @map("expiration_date")
+  providerApplicationId String?  @map("provider_application_id")
+  providerContractId    String?  @map("provider_contract_id")
+  metadata              Json?
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  lease Lease @relation(fields: [leaseId], references: [id])
+
+  @@index([leaseId])
+  @@index([tenantId])
+  @@map("guarantor_products")
+}
+
+model RentRewardsAccount {
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @unique @map("tenant_id") @db.Uuid
+  pointsBalance         Int      @default(0) @map("points_balance")
+  lifetimePoints        Int      @default(0) @map("lifetime_points")
+  tier                  String   @default("bronze")
+  tierProgress          Float    @default(0) @map("tier_progress")
+  linkedCards           Json     @default("[]") @map("linked_cards")
+  creditReportingEnabled Boolean @default(false) @map("credit_reporting_enabled")
+  metadata              Json?
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  transactions RentRewardsTransaction[]
+
+  @@map("rent_rewards_accounts")
+}
+
+model RentRewardsTransaction {
+  id          String   @id @default(uuid()) @db.Uuid
+  accountId   String   @map("account_id") @db.Uuid
+  type        String
+  points      Int
+  description String
+  sourceType  String   @map("source_type")
+  sourceId    String?  @map("source_id") @db.Uuid
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  account RentRewardsAccount @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@map("rent_rewards_transactions")
+}
+
+// =============================================================================
+// Maintenance
+// =============================================================================
+
+enum MaintenancePriority {
+  emergency
+  urgent
+  high
+  normal
+  low
+  scheduled
+}
+
+enum MaintenanceCategory {
+  plumbing
+  electrical
+  hvac
+  appliance
+  structural
+  pest
+  safety
+  cosmetic
+  common_area
+  exterior
+  flooring
+  windows_doors
+  locks_security
+  fire_safety
+  elevator
+  parking
+  landscaping
+  cleaning
+  other
+}
+
+enum WorkOrderStatus {
+  submitted
+  acknowledged
+  in_progress
+  pending_parts
+  pending_vendor
+  pending_approval
+  scheduled
+  completed
+  cancelled
+  on_hold
+}
+
+model WorkOrder {
+  id                  String              @id @default(uuid()) @db.Uuid
+  orderNumber         String              @unique @map("order_number")
+  propertyId          String              @map("property_id") @db.Uuid
+  unitId              String?             @map("unit_id") @db.Uuid
+  leaseId             String?             @map("lease_id") @db.Uuid
+  reportedBy          String              @map("reported_by") @db.Uuid
+  assignedTo          String?             @map("assigned_to") @db.Uuid
+  vendorId            String?             @map("vendor_id") @db.Uuid
+  title               String
+  description         String
+  category            MaintenanceCategory
+  subcategory         String?
+  priority            MaintenancePriority
+  status              WorkOrderStatus     @default(submitted)
+  statusHistory       Json                @default("[]") @map("status_history")
+  aiTriaged           Boolean             @default(false) @map("ai_triaged")
+  aiTriageId          String?             @map("ai_triage_id") @db.Uuid
+  aiDiagnosis         String?             @map("ai_diagnosis")
+  aiSuggestedPriority MaintenancePriority? @map("ai_suggested_priority")
+  photos              Json                @default("[]")
+  videos              Json                @default("[]")
+  permissionToEnter   Boolean             @default(false) @map("permission_to_enter")
+  preferredSchedule   Json                @default("[]") @map("preferred_schedule")
+  accessInstructions  String?             @map("access_instructions")
+  hasPets             Boolean             @default(false) @map("has_pets")
+  petInstructions     String?             @map("pet_instructions")
+  scheduledDate       DateTime?           @map("scheduled_date")
+  scheduledTimeSlot   String?             @map("scheduled_time_slot")
+  estimatedDuration   Int?                @map("estimated_duration")
+  actualStartTime     DateTime?           @map("actual_start_time")
+  actualEndTime       DateTime?           @map("actual_end_time")
+  workPerformed       String?             @map("work_performed")
+  partsUsed           Json                @default("[]") @map("parts_used")
+  laborHours          Float?              @map("labor_hours")
+  estimatedCostAmount Int?                @map("estimated_cost_amount")
+  actualCostAmount    Int?                @map("actual_cost_amount")
+  costBreakdown       Json?               @map("cost_breakdown")
+  billToTenant        Boolean             @default(false) @map("bill_to_tenant")
+  invoiceId           String?             @map("invoice_id") @db.Uuid
+  resolvedAt          DateTime?           @map("resolved_at")
+  resolutionNotes     String?             @map("resolution_notes")
+  requiresFollowUp    Boolean             @default(false) @map("requires_follow_up")
+  followUpDate        DateTime?           @map("follow_up_date")
+  parentWorkOrderId   String?             @map("parent_work_order_id") @db.Uuid
+  tenantRating        Int?                @map("tenant_rating")
+  tenantFeedback      String?             @map("tenant_feedback")
+  isEmergency         Boolean             @default(false) @map("is_emergency")
+  emergencyResponseTime Int?              @map("emergency_response_time")
+  escalated           Boolean             @default(false)
+  escalatedAt         DateTime?           @map("escalated_at")
+  escalatedTo         String?             @map("escalated_to") @db.Uuid
+  escalationReason    String?             @map("escalation_reason")
+  metadata            Json?
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+
+  property    Property @relation(fields: [propertyId], references: [id])
+  unit        Unit?    @relation(fields: [unitId], references: [id])
+  lease       Lease?   @relation(fields: [leaseId], references: [id])
+  reporter    User     @relation("WorkOrderReporter", fields: [reportedBy], references: [id])
+  assignee    User?    @relation("WorkOrderAssignee", fields: [assignedTo], references: [id])
+  vendor      Vendor?  @relation(fields: [vendorId], references: [id])
+
+  @@index([propertyId])
+  @@index([unitId])
+  @@index([status])
+  @@index([priority])
+  @@index([category])
+  @@index([scheduledDate])
+  @@map("work_orders")
+}
+
+model Vendor {
+  id                  String   @id @default(uuid()) @db.Uuid
+  companyName         String   @map("company_name")
+  contactName         String   @map("contact_name")
+  email               String
+  phone               String
+  website             String?
+  street1             String?
+  street2             String?
+  city                String?
+  state               String?
+  postalCode          String?  @map("postal_code")
+  categories          String[]
+  services            String[]
+  serviceAreas        String[] @map("service_areas")
+  hourlyRateAmount    Int?     @map("hourly_rate_amount")
+  minimumChargeAmount Int?     @map("minimum_charge_amount")
+  emergencyRateAmount Int?     @map("emergency_rate_amount")
+  availability        Json?
+  isLicensed          Boolean  @default(false) @map("is_licensed")
+  licenseNumber       String?  @map("license_number")
+  licenseExpiry       DateTime? @map("license_expiry")
+  isInsured           Boolean  @default(false) @map("is_insured")
+  insuranceExpiry     DateTime? @map("insurance_expiry")
+  isBonded            Boolean  @default(false) @map("is_bonded")
+  totalJobs           Int      @default(0) @map("total_jobs")
+  completedJobs       Int      @default(0) @map("completed_jobs")
+  averageRating       Float?   @map("average_rating")
+  reviewCount         Int      @default(0) @map("review_count")
+  paymentTerms        String   @default("net_30") @map("payment_terms")
+  taxId               String?  @map("tax_id")
+  w9OnFile            Boolean  @default(false) @map("w9_on_file")
+  status              String   @default("active")
+  preferredVendor     Boolean  @default(false) @map("preferred_vendor")
+  notes               String?
+  metadata            Json?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  workOrders WorkOrder[]
+
+  @@index([status])
+  @@map("vendors")
+}
+
+model Inspection {
+  id             String   @id @default(uuid()) @db.Uuid
+  propertyId     String   @map("property_id") @db.Uuid
+  unitId         String?  @map("unit_id") @db.Uuid
+  inspectorId    String   @map("inspector_id") @db.Uuid
+  type           String
+  status         String   @default("scheduled")
+  scheduledDate  DateTime @map("scheduled_date")
+  completedDate  DateTime? @map("completed_date")
+  checklist      Json     @default("[]")
+  overallCondition String? @map("overall_condition")
+  findings       String?
+  tenantId       String?  @map("tenant_id") @db.Uuid
+  leaseId        String?  @map("lease_id") @db.Uuid
+  tenantSignature String? @map("tenant_signature")
+  tenantSignedAt DateTime? @map("tenant_signed_at")
+  landlordSignature String? @map("landlord_signature")
+  landlordSignedAt DateTime? @map("landlord_signed_at")
+  reportDocumentId String? @map("report_document_id") @db.Uuid
+  photos         Json     @default("[]")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([propertyId])
+  @@index([unitId])
+  @@index([scheduledDate])
+  @@map("inspections")
+}
+
+// =============================================================================
+// Documents
+// =============================================================================
+
+model Document {
+  id               String   @id @default(uuid()) @db.Uuid
+  uploadedBy       String   @map("uploaded_by") @db.Uuid
+  ownerId          String?  @map("owner_id") @db.Uuid
+  name             String
+  description      String?
+  type             String
+  status           String   @default("draft")
+  filename         String
+  originalFilename String   @map("original_filename")
+  mimeType         String   @map("mime_type")
+  size             Int
+  extension        String
+  storageProvider  String   @default("s3") @map("storage_provider")
+  bucket           String
+  key              String
+  isEncrypted      Boolean  @default(false) @map("is_encrypted")
+  encryptionKeyId  String?  @map("encryption_key_id")
+  md5              String?
+  sha256           String?
+  entityType       String?  @map("entity_type")
+  entityId         String?  @map("entity_id") @db.Uuid
+  version          Int      @default(1)
+  previousVersionId String? @map("previous_version_id") @db.Uuid
+  isLatestVersion  Boolean  @default(true) @map("is_latest_version")
+  expiresAt        DateTime? @map("expires_at")
+  visibility       String   @default("private")
+  sharedWith       Json     @default("[]") @map("shared_with")
+  aiProcessed      Boolean  @default(false) @map("ai_processed")
+  aiExtractedData  Json?    @map("ai_extracted_data")
+  aiSummary        String?  @map("ai_summary")
+  tags             String[] @default([])
+  downloadCount    Int      @default(0) @map("download_count")
+  lastAccessedAt   DateTime? @map("last_accessed_at")
+  metadata         Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  uploader   User       @relation(fields: [uploadedBy], references: [id])
+  properties Property[] @relation("PropertyDocuments")
+  signatures DocumentSignature[]
+
+  @@index([uploadedBy])
+  @@index([entityType, entityId])
+  @@index([type])
+  @@map("documents")
+}
+
+model DocumentSignature {
+  id            String   @id @default(uuid()) @db.Uuid
+  documentId    String   @map("document_id") @db.Uuid
+  signerId      String?  @map("signer_id") @db.Uuid
+  signerEmail   String   @map("signer_email")
+  signerName    String   @map("signer_name")
+  signerRole    String   @map("signer_role")
+  status        String   @default("pending")
+  signedAt      DateTime? @map("signed_at")
+  declinedAt    DateTime? @map("declined_at")
+  declineReason String?  @map("decline_reason")
+  signatureType String?  @map("signature_type")
+  signatureImageUrl String? @map("signature_image_url")
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  remindersSent Int      @default(0) @map("reminders_sent")
+  order         Int      @default(0)
+  expiresAt     DateTime? @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([signerEmail])
+  @@map("document_signatures")
+}
+
+model DocumentTemplate {
+  id                   String   @id @default(uuid()) @db.Uuid
+  createdBy            String   @map("created_by") @db.Uuid
+  name                 String
+  description          String?
+  type                 String
+  category             String?
+  format               String
+  templateUrl          String   @map("template_url")
+  thumbnailUrl         String?  @map("thumbnail_url")
+  variables            Json     @default("[]")
+  signatureFields      Json     @default("[]") @map("signature_fields")
+  marketId             String?  @map("market_id")
+  isComplianceRequired Boolean  @default(false) @map("is_compliance_required")
+  complianceTypes      String[] @default([]) @map("compliance_types")
+  usageCount           Int      @default(0) @map("usage_count")
+  isPublic             Boolean  @default(false) @map("is_public")
+  isSystem             Boolean  @default(false) @map("is_system")
+  version              String
+  tags                 String[] @default([])
+  metadata             Json?
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@index([type])
+  @@index([marketId])
+  @@map("document_templates")
+}
+
+// =============================================================================
+// Compliance
+// =============================================================================
+
+model ComplianceCheck {
+  id                  String   @id @default(uuid()) @db.Uuid
+  entityType          String   @map("entity_type")
+  entityId            String   @map("entity_id") @db.Uuid
+  marketId            String   @map("market_id")
+  checkType           String   @map("check_type")
+  status              String   @default("pending_review")
+  severity            String   @default("info")
+  title               String
+  description         String
+  details             Json?
+  recommendation      String?
+  documentationUrl    String?  @map("documentation_url")
+  autoFixAvailable    Boolean  @default(false) @map("auto_fix_available")
+  autoFixApplied      Boolean  @default(false) @map("auto_fix_applied")
+  manualReviewRequired Boolean @default(false) @map("manual_review_required")
+  reviewedBy          String?  @map("reviewed_by") @db.Uuid
+  reviewedAt          DateTime? @map("reviewed_at")
+  reviewNotes         String?  @map("review_notes")
+  waivedBy            String?  @map("waived_by") @db.Uuid
+  waivedAt            DateTime? @map("waived_at")
+  waiverReason        String?  @map("waiver_reason")
+  dueDate             DateTime? @map("due_date")
+  resolvedAt          DateTime? @map("resolved_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  property Property? @relation(fields: [entityId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([marketId])
+  @@index([checkType])
+  @@index([status])
+  @@map("compliance_checks")
+}
+
+model Disclosure {
+  id              String   @id @default(uuid()) @db.Uuid
+  type            String
+  name            String
+  description     String
+  marketId        String   @map("market_id")
+  templateId      String?  @map("template_id") @db.Uuid
+  requiredFor     String[] @map("required_for")
+  signatureRequired Boolean @default(false) @map("signature_required")
+  expirationDays  Int?     @map("expiration_days")
+  content         String
+  legalCitation   String?  @map("legal_citation")
+  effectiveDate   DateTime @map("effective_date")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  records DisclosureRecord[]
+
+  @@index([marketId])
+  @@index([type])
+  @@map("disclosures")
+}
+
+model DisclosureRecord {
+  id             String   @id @default(uuid()) @db.Uuid
+  disclosureId   String   @map("disclosure_id") @db.Uuid
+  recipientId    String   @map("recipient_id") @db.Uuid
+  recipientEmail String   @map("recipient_email")
+  entityType     String   @map("entity_type")
+  entityId       String   @map("entity_id") @db.Uuid
+  sentAt         DateTime @map("sent_at")
+  viewedAt       DateTime? @map("viewed_at")
+  acknowledgedAt DateTime? @map("acknowledged_at")
+  signedAt       DateTime? @map("signed_at")
+  signatureUrl   String?  @map("signature_url")
+  ipAddress      String?  @map("ip_address")
+  documentId     String?  @map("document_id") @db.Uuid
+  expiresAt      DateTime? @map("expires_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  disclosure Disclosure @relation(fields: [disclosureId], references: [id])
+
+  @@index([disclosureId])
+  @@index([recipientId])
+  @@index([entityType, entityId])
+  @@map("disclosure_records")
+}
+
+// =============================================================================
+// AI Framework
+// =============================================================================
+
+model AIConversation {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  agentType     String   @map("agent_type")
+  model         String
+  status        String   @default("active")
+  contextId     String?  @map("context_id") @db.Uuid
+  handoffHistory Json    @default("[]") @map("handoff_history")
+  metrics       Json     @default("{}")
+  startedAt     DateTime @default(now()) @map("started_at")
+  lastMessageAt DateTime @default(now()) @map("last_message_at")
+  endedAt       DateTime? @map("ended_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user     User        @relation(fields: [userId], references: [id])
+  messages AIMessage[]
+
+  @@index([userId])
+  @@index([agentType])
+  @@index([status])
+  @@map("ai_conversations")
+}
+
+model AIMessage {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  role           String
+  content        String
+  functionCall   Json?    @map("function_call")
+  attachments    Json     @default("[]")
+  voiceData      Json?    @map("voice_data")
+  processingTime Int?     @map("processing_time")
+  tokensUsed     Json?    @map("tokens_used")
+  model          String?
+  timestamp      DateTime @default(now())
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("ai_messages")
+}
+
+model AIContext {
+  id              String   @id @default(uuid()) @db.Uuid
+  sessionId       String   @map("session_id") @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  globalContext   Json     @map("global_context")
+  domainContext   Json     @map("domain_context")
+  conversationHistory Json @default("[]") @map("conversation_history")
+  referencedEntities Json @default("[]") @map("referenced_entities")
+  currentIntent   Json?    @map("current_intent")
+  contextQuality  Json     @default("{}") @map("context_quality")
+  expiresAt       DateTime @map("expires_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([sessionId])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("ai_contexts")
+}
+
+model MaintenanceTriage {
+  id               String   @id @default(uuid()) @db.Uuid
+  conversationId   String   @map("conversation_id") @db.Uuid
+  reportedBy       String   @map("reported_by") @db.Uuid
+  propertyId       String   @map("property_id") @db.Uuid
+  unitId           String?  @map("unit_id") @db.Uuid
+  issueType        String   @map("issue_type")
+  issueCategory    String   @map("issue_category")
+  urgency          String
+  urgencyReason    String   @map("urgency_reason")
+  issueDescription String   @map("issue_description")
+  symptoms         String[] @default([])
+  affectedAreas    String[] @default([]) @map("affected_areas")
+  photos           Json     @default("[]")
+  videos           Json     @default("[]")
+  aiDiagnosis      String?  @map("ai_diagnosis")
+  suggestedActions Json     @default("[]") @map("suggested_actions")
+  selfHelpProvided Boolean  @default(false) @map("self_help_provided")
+  selfHelpSteps    String[] @default([]) @map("self_help_steps")
+  workOrderCreated Boolean  @default(false) @map("work_order_created")
+  workOrderId      String?  @map("work_order_id") @db.Uuid
+  escalated        Boolean  @default(false)
+  escalationReason String?  @map("escalation_reason")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@index([propertyId])
+  @@index([reportedBy])
+  @@map("maintenance_triages")
+}
+
+// =============================================================================
+// Marketing
+// =============================================================================
+
+model PropertyMedia {
+  id              String   @id @default(uuid()) @db.Uuid
+  propertyId      String   @map("property_id") @db.Uuid
+  unitId          String?  @map("unit_id") @db.Uuid
+  uploadedBy      String   @map("uploaded_by") @db.Uuid
+  type            String
+  format          String
+  url             String
+  thumbnailUrl    String?  @map("thumbnail_url")
+  filename        String
+  originalFilename String  @map("original_filename")
+  size            Int
+  width           Int?
+  height          Int?
+  duration        Float?
+  caption         String?
+  altText         String?  @map("alt_text")
+  roomType        String?  @map("room_type")
+  order           Int      @default(0)
+  isPrimary       Boolean  @default(false) @map("is_primary")
+  isFeatured      Boolean  @default(false) @map("is_featured")
+  tourProvider    String?  @map("tour_provider")
+  tourId          String?  @map("tour_id")
+  embedCode       String?  @map("embed_code")
+  is3DGS          Boolean  @default(false) @map("is_3dgs")
+  model3dUrl      String?  @map("model_3d_url")
+  vrEnabled       Boolean  @default(false) @map("vr_enabled")
+  aiAnalyzed      Boolean  @default(false) @map("ai_analyzed")
+  aiTags          String[] @default([]) @map("ai_tags")
+  aiDescription   String?  @map("ai_description")
+  aiQualityScore  Int?     @map("ai_quality_score")
+  isEnhanced      Boolean  @default(false) @map("is_enhanced")
+  originalUrl     String?  @map("original_url")
+  status          String   @default("processing")
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId])
+  @@index([type])
+  @@map("property_media")
+}
+
+model MarketingAsset {
+  id              String   @id @default(uuid()) @db.Uuid
+  createdBy       String   @map("created_by") @db.Uuid
+  name            String
+  type            String
+  description     String?
+  propertyId      String?  @map("property_id") @db.Uuid
+  listingId       String?  @map("listing_id") @db.Uuid
+  templateId      String?  @map("template_id") @db.Uuid
+  format          String
+  fileUrl         String   @map("file_url")
+  thumbnailUrl    String?  @map("thumbnail_url")
+  width           Int?
+  height          Int?
+  duration        Float?
+  generatedWith   String   @default("manual") @map("generated_with")
+  aiPrompt        String?  @map("ai_prompt")
+  generationParams Json?   @map("generation_params")
+  brandingApplied Boolean  @default(false) @map("branding_applied")
+  status          String   @default("draft")
+  publishedTo     String[] @default([]) @map("published_to")
+  viewCount       Int      @default(0) @map("view_count")
+  downloadCount   Int      @default(0) @map("download_count")
+  tags            String[] @default([])
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([createdBy])
+  @@index([propertyId])
+  @@index([type])
+  @@map("marketing_assets")
+}
+
+model MarketingTemplate {
+  id                     String   @id @default(uuid()) @db.Uuid
+  createdBy              String   @map("created_by") @db.Uuid
+  name                   String
+  description            String?
+  type                   String
+  category               String?
+  format                 String
+  templateUrl            String   @map("template_url")
+  thumbnailUrl           String?  @map("thumbnail_url")
+  width                  Int?
+  height                 Int?
+  editableFields         Json     @default("[]") @map("editable_fields")
+  supportsCustomBranding Boolean  @default(true) @map("supports_custom_branding")
+  isPublic               Boolean  @default(false) @map("is_public")
+  isPremium              Boolean  @default(false) @map("is_premium")
+  priceAmount            Int?     @map("price_amount")
+  purchaseCount          Int      @default(0) @map("purchase_count")
+  usageCount             Int      @default(0) @map("usage_count")
+  rating                 Float?
+  reviewCount            Int      @default(0) @map("review_count")
+  tags                   String[] @default([])
+  metadata               Json?
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  @@index([type])
+  @@index([isPublic])
+  @@map("marketing_templates")
+}
+
+// =============================================================================
+// Feature Flags & Markets
+// =============================================================================
+
+model FeatureFlag {
+  id                   String   @id @default(uuid()) @db.Uuid
+  key                  String   @unique
+  name                 String
+  description          String?
+  type                 String   @default("boolean")
+  enabled              Boolean  @default(false)
+  defaultValue         Json     @map("default_value")
+  rules                Json     @default("[]")
+  variants             Json?
+  targetedUsers        String[] @default([]) @map("targeted_users")
+  excludedUsers        String[] @default([]) @map("excluded_users")
+  targetedOrganizations String[] @default([]) @map("targeted_organizations")
+  targetedMarkets      String[] @default([]) @map("targeted_markets")
+  startDate            DateTime? @map("start_date")
+  endDate              DateTime? @map("end_date")
+  environmentOverrides Json?    @map("environment_overrides")
+  tags                 String[] @default([])
+  category             String?
+  owner                String?
+  lastEvaluatedAt      DateTime? @map("last_evaluated_at")
+  evaluationCount      Int      @default(0) @map("evaluation_count")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@index([key])
+  @@index([enabled])
+  @@map("feature_flags")
+}
+
+model MarketConfig {
+  id                  String   @id @default(uuid()) @db.Uuid
+  marketId            String   @unique @map("market_id")
+  name                String
+  state               String
+  city                String?
+  timezone            String
+  isEnabled           Boolean  @default(true) @map("is_enabled")
+  launchDate          DateTime? @map("launch_date")
+  features            Json     @default("{}")
+  compliance          Json     @default("{}")
+  limits              Json     @default("{}")
+  integrations        Json?
+  metadata            Json?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@index([isEnabled])
+  @@map("market_configs")
+}
+
+// =============================================================================
+// Notifications & Audit
+// =============================================================================
+
+model Notification {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  type       String
+  channel    String
+  title      String
+  body       String
+  data       Json?
+  status     String   @default("pending")
+  sentAt     DateTime? @map("sent_at")
+  readAt     DateTime? @map("read_at")
+  clickedAt  DateTime? @map("clicked_at")
+  expiresAt  DateTime? @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorId      String?  @map("actor_id") @db.Uuid
+  actorEmail   String?  @map("actor_email")
+  action       String
+  entityType   String   @map("entity_type")
+  entityId     String   @map("entity_id") @db.Uuid
+  changes      Json?
+  metadata     Json?
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  requestId    String?  @map("request_id")
+  timestamp    DateTime @default(now())
+
+  actor User? @relation("AuditLogActor", fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
+
+// =============================================================================
+// Background Jobs
+// =============================================================================
+
+model JobRecord {
+  id            String   @id @default(uuid()) @db.Uuid
+  jobId         String   @unique @map("job_id")
+  queueName     String   @map("queue_name")
+  jobName       String   @map("job_name")
+  data          Json
+  status        String   @default("pending")
+  attempts      Int      @default(0)
+  maxAttempts   Int      @default(3) @map("max_attempts")
+  progress      Int      @default(0)
+  result        Json?
+  error         String?
+  stackTrace    String?  @map("stack_trace")
+  processedBy   String?  @map("processed_by")
+  startedAt     DateTime? @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  failedAt      DateTime? @map("failed_at")
+  scheduledFor  DateTime? @map("scheduled_for")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([queueName])
+  @@index([status])
+  @@index([scheduledFor])
+  @@map("job_records")
+}
