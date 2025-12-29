@@ -1,9 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import {
   Building2,
   Home,
@@ -18,8 +14,13 @@ import {
   Users,
   Shield,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
+
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
 
 const navigation = [
@@ -108,7 +109,7 @@ export default function DashboardLayout({
           <Button
             variant="ghost"
             className="w-full justify-start mt-2"
-            onClick={handleLogout}
+            onClick={() => void handleLogout()}
           >
             <LogOut className="h-4 w-4 mr-2" />
             Sign out

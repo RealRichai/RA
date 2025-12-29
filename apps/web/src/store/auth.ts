@@ -1,7 +1,8 @@
+import type { Role, Permission } from '@realriches/types';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+
 import { api } from '@/lib/api';
-import type { Role, Permission } from '@realriches/types';
 
 interface User {
   id: string;

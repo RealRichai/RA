@@ -56,12 +56,12 @@ class ApiClient {
       headers,
     });
 
-    const data = await response.json();
+    const data: ApiResponse<T> = await response.json() as ApiResponse<T>;
 
     if (!response.ok) {
       throw new ApiError(
-        data.error?.message || 'An error occurred',
-        data.error?.code || 'UNKNOWN_ERROR',
+        data.error?.message ?? 'An error occurred',
+        data.error?.code ?? 'UNKNOWN_ERROR',
         response.status
       );
     }

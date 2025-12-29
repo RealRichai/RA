@@ -2,12 +2,13 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Building, Users, DollarSign, Wrench, TrendingUp, AlertTriangle } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { api } from '@/lib/api';
-import { useAuthStore } from '@/store/auth';
-import { formatCurrency } from '@/lib/utils';
 import Link from 'next/link';
+
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { api } from '@/lib/api';
+import { formatCurrency } from '@/lib/utils';
+import { useAuthStore } from '@/store/auth';
 
 interface PortfolioData {
   properties: number;
@@ -30,7 +31,7 @@ interface PortfolioData {
 export default function DashboardPage() {
   const user = useAuthStore((state) => state.user);
 
-  const { data: portfolioData, isLoading } = useQuery({
+  const { data: portfolioData } = useQuery({
     queryKey: ['portfolio'],
     queryFn: async () => {
       const response = await api.get<PortfolioData>('/analytics/portfolio');
