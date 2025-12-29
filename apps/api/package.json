@@ -27,6 +27,7 @@
     "@fastify/swagger-ui": "^2.1.0",
     "@realriches/compliance-engine": "workspace:*",
     "@realriches/config": "workspace:*",
+    "@realriches/document-storage": "workspace:*",
     "@realriches/database": "workspace:*",
     "@realriches/types": "workspace:*",
     "@realriches/utils": "workspace:*",

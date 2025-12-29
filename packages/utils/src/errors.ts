@@ -66,6 +66,15 @@ export class AuthorizationError extends AppError {
 }
 
 /**
+ * Forbidden error (403) - alias for AuthorizationError
+ */
+export class ForbiddenError extends AppError {
+  constructor(message = 'Access forbidden') {
+    super(message, 'FORBIDDEN', 403, true);
+  }
+}
+
+/**
  * Not found error (404)
  */
 export class NotFoundError extends AppError {
