@@ -237,8 +237,8 @@ describe('Transaction State Transitions', () => {
 
     expect(reversal.type).toBe('reversal');
     expect(reversal.status).toBe('pending');
-    expect(reversal.entries[0].isDebit).toBe(!posted.entries[0].isDebit);
-    expect(reversal.entries[1].isDebit).toBe(!posted.entries[1].isDebit);
+    expect(reversal.entries[0]!.isDebit).toBe(!posted.entries[0]!.isDebit);
+    expect(reversal.entries[1]!.isDebit).toBe(!posted.entries[1]!.isDebit);
   });
 });
 
@@ -382,7 +382,7 @@ describe('Reconciliation Reference', () => {
 describe('Allocation Rules', () => {
   it('should sort rules by priority', () => {
     const sorted = sortRulesByPriority(DEFAULT_ALLOCATION_RULES);
-    expect(sorted[0].priority).toBeLessThanOrEqual(sorted[1].priority);
+    expect(sorted[0]!.priority).toBeLessThanOrEqual(sorted[1]!.priority);
   });
 
   it('should check if rule applies', () => {

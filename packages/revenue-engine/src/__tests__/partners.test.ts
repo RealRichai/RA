@@ -53,6 +53,7 @@ const mockBindRequest: BindRequest = {
   termsAccepted: true,
   termsAcceptedAt: new Date(),
   idempotencyKey: 'bind_test_123',
+  payNow: false,
 };
 
 // =============================================================================
@@ -108,6 +109,7 @@ describe('LeaseLock Provider', () => {
       providerPolicyId: 'll_pol_123',
       reason: 'Tenant moved out',
       idempotencyKey: 'cancel_123',
+      refundRequested: false,
     });
 
     expect(result.success).toBe(true);
@@ -273,8 +275,8 @@ describe('Provider Registry', () => {
     const quotes = await registry.getMultiProviderQuotes(mockQuoteRequest);
 
     expect(quotes.length).toBeGreaterThan(0);
-    expect(quotes[0].quote).not.toBeNull();
-    expect(quotes[0].responseTimeMs).toBeGreaterThanOrEqual(0);
+    expect(quotes[0]!.quote).not.toBeNull();
+    expect(quotes[0]!.responseTimeMs).toBeGreaterThanOrEqual(0);
   });
 
   it('should get best quote (lowest premium)', async () => {
@@ -333,6 +335,7 @@ describe('Contract Lifecycle', () => {
       termsAccepted: true,
       termsAcceptedAt: new Date(),
       idempotencyKey: `bind_${Date.now()}`,
+      payNow: false,
     };
 
     const policy = await provider.bind(bindRequest);
@@ -347,6 +350,7 @@ describe('Contract Lifecycle', () => {
       providerPolicyId: policy.providerPolicyId,
       reason: 'Tenant moved out early',
       idempotencyKey: `cancel_${Date.now()}`,
+      refundRequested: false,
     });
 
     expect(cancelResult.success).toBe(true);
@@ -366,6 +370,7 @@ describe('Contract Lifecycle', () => {
       termsAccepted: true,
       termsAcceptedAt: new Date(),
       idempotencyKey: `bind_${Date.now()}`,
+      payNow: false,
     });
 
     // 3. Renew
@@ -405,6 +410,7 @@ describe('Commission Calculations', () => {
       termsAccepted: true,
       termsAcceptedAt: new Date(),
       idempotencyKey: 'bind_commission_test',
+      payNow: false,
     });
 
     expect(policy.commissionRate).toBeGreaterThan(0);
