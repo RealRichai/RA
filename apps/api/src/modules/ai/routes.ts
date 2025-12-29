@@ -1,6 +1,5 @@
-import { prisma } from '@realriches/database';
+import { prisma, type Prisma } from '@realriches/database';
 import { generatePrefixedId, NotFoundError } from '@realriches/utils';
-import type { Prisma } from '@realriches/database';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
