@@ -5,8 +5,6 @@
  * Implements FARE Act, FCHA, Good Cause, and disclosure enforcement.
  */
 
-import { prisma } from '@realriches/database';
-import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
 import {
   gateListingPublish,
   gateFCHAStageTransition,
@@ -29,6 +27,8 @@ import {
   type FCHAStage,
   type ComplianceDecision,
 } from '@realriches/compliance-engine';
+import { prisma } from '@realriches/database';
+import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
