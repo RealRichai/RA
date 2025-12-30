@@ -1,10 +1,32 @@
 name: Deploy
 
-# Only run manually until AWS infrastructure is configured
-# To enable automatic deploys, uncomment the push trigger below
+# =============================================================================
+# DEPLOYMENT PIPELINE
+# =============================================================================
+#
+# Auto-deploy is DISABLED until AWS infrastructure is configured.
+# Currently: Manual trigger only via workflow_dispatch.
+#
+# To enable automatic deploys after infrastructure setup:
+# 1. Configure all required secrets (see docs/release-checklist.md)
+# 2. Uncomment the push trigger below
+# 3. Remove workflow_call from CI workflow if not needed
+#
+# Pipeline gates:
+# 1. CI must pass (lint, test, build, security)
+# 2. Container images built and pushed to ECR
+# 3. Environment-specific deployment with health checks
+# =============================================================================
+
 on:
+  # Automatic deployment (DISABLED - uncomment when infrastructure ready)
   # push:
   #   branches: [main]
+  #   paths-ignore:
+  #     - '**.md'
+  #     - 'docs/**'
+
+  # Manual deployment trigger
   workflow_dispatch:
     inputs:
       environment:
@@ -15,26 +37,84 @@ on:
         options:
           - staging
           - production
+      skip_ci_check:
+        description: 'Skip CI check (emergency only)'
+        required: false
+        default: false
+        type: boolean
+
+# =============================================================================
+# Environment Configuration
+# =============================================================================
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'
   PNPM_VERSION: '8'
   AWS_REGION: us-east-1
+
+  # ECR Repository Names
   ECR_REPOSITORY_API: realriches-api
   ECR_REPOSITORY_WEB: realriches-web
 
+  # ECS Cluster Names (per environment)
+  # These should match your Terraform/CloudFormation outputs
+  ECS_CLUSTER_STAGING: realriches-staging
+  ECS_CLUSTER_PRODUCTION: realriches-production
+
 jobs:
-  build-and-push:
-    name: Build & Push Images
+  # ===========================================================================
+  # Gate: Verify CI Passed
+  # ===========================================================================
+  ci-gate:
+    name: CI Gate
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'staging' }}
+    if: ${{ !inputs.skip_ci_check }}
+    steps:
+      - name: Check CI status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: checkRuns } = await github.rest.checks.listForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              check_name: 'Build'
+            });
+
+            const ciPassed = checkRuns.check_runs.some(
+              run => run.conclusion === 'success'
+            );
+
+            if (!ciPassed) {
+              core.setFailed('CI must pass before deployment. Run CI workflow first or use skip_ci_check for emergencies.');
+            }
+
+            console.log('CI gate passed - proceeding with deployment');
+
+  # ===========================================================================
+  # Build: Container Images
+  # ===========================================================================
+  build-images:
+    name: Build Container Images
+    runs-on: ubuntu-latest
+    needs: [ci-gate]
+    if: always() && (needs.ci-gate.result == 'success' || inputs.skip_ci_check)
+    environment: ${{ inputs.environment || 'staging' }}
+
     outputs:
-      api-image: ${{ steps.build-api.outputs.image }}
-      web-image: ${{ steps.build-web.outputs.image }}
+      api-image: ${{ steps.meta-api.outputs.tags }}
+      web-image: ${{ steps.meta-web.outputs.tags }}
+      image-tag: ${{ steps.vars.outputs.tag }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: vars
+        run: |
+          TAG="${{ github.sha }}"
+          echo "tag=${TAG:0:7}" >> $GITHUB_OUTPUT
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -50,43 +130,67 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Docker meta - API
+        id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_API }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ inputs.environment || 'staging' }}
+
+      - name: Docker meta - Web
+        id: meta-web
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_WEB }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ inputs.environment || 'staging' }}
+
       - name: Build and push API image
-        id: build-api
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/api/Dockerfile
           target: production
           push: true
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_API }}:${{ github.sha }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_API }}:latest
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
 
       - name: Build and push Web image
-        id: build-web
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/web/Dockerfile
           target: production
           push: true
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_WEB }}:${{ github.sha }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_WEB }}:latest
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
+            NODE_ENV=production
             NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
             NEXT_PUBLIC_APP_URL=${{ vars.NEXT_PUBLIC_APP_URL }}
 
+  # ===========================================================================
+  # Deploy: Staging Environment
+  # ===========================================================================
   deploy-staging:
     name: Deploy to Staging
-    needs: build-and-push
+    needs: [build-images]
     runs-on: ubuntu-latest
-    environment: staging
-    if: github.event.inputs.environment == 'staging' || github.event.inputs.environment == ''
+    environment:
+      name: staging
+      url: https://staging.realriches.com
+    if: inputs.environment == 'staging' || inputs.environment == ''
 
     steps:
       - name: Checkout
@@ -99,35 +203,111 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy to ECS
-        run: |
-          aws ecs update-service \
-            --cluster realriches-staging \
-            --service realriches-api \
-            --force-new-deployment
-
-          aws ecs update-service \
-            --cluster realriches-staging \
-            --service realriches-web \
-            --force-new-deployment
-
-      - name: Wait for deployment
-        run: |
-          aws ecs wait services-stable \
-            --cluster realriches-staging \
-            --services realriches-api realriches-web
-
+      # -----------------------------------------------------------------------
+      # Database Migrations
+      # -----------------------------------------------------------------------
+      # Run migrations before deploying new code.
+      # This uses an ECS task to execute prisma migrate deploy.
+      #
+      # Prerequisites:
+      # - ECS task definition: realriches-migrations-staging
+      # - Task must have DATABASE_URL secret configured
+      # - VPC/security groups allowing DB access
+      # -----------------------------------------------------------------------
       - name: Run database migrations
         run: |
-          # TODO: HUMAN_IMPLEMENTATION_REQUIRED - Configure ECS task for migrations
-          echo "Migrations should be run via ECS task or Lambda"
+          echo "Running database migrations for staging..."
 
+          # Run migration task and wait for completion
+          TASK_ARN=$(aws ecs run-task \
+            --cluster ${{ env.ECS_CLUSTER_STAGING }} \
+            --task-definition realriches-migrations-staging \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID }}],assignPublicIp=ENABLED}" \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "Migration task started: $TASK_ARN"
+
+          # Wait for task to complete
+          aws ecs wait tasks-stopped \
+            --cluster ${{ env.ECS_CLUSTER_STAGING }} \
+            --tasks $TASK_ARN
+
+          # Check exit code
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster ${{ env.ECS_CLUSTER_STAGING }} \
+            --tasks $TASK_ARN \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed with exit code: $EXIT_CODE"
+            exit 1
+          fi
+
+          echo "Migrations completed successfully"
+        continue-on-error: false
+
+      # -----------------------------------------------------------------------
+      # Deploy Services
+      # -----------------------------------------------------------------------
+      - name: Deploy API service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER_STAGING }} \
+            --service realriches-api \
+            --force-new-deployment \
+            --desired-count 2
+
+      - name: Deploy Web service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER_STAGING }} \
+            --service realriches-web \
+            --force-new-deployment \
+            --desired-count 2
+
+      - name: Wait for services to stabilize
+        run: |
+          echo "Waiting for services to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER_STAGING }} \
+            --services realriches-api realriches-web
+          echo "Services are stable"
+
+      # -----------------------------------------------------------------------
+      # Health Checks
+      # -----------------------------------------------------------------------
+      - name: Verify deployment health
+        run: |
+          echo "Verifying deployment health..."
+
+          # Wait for ALB health checks
+          sleep 30
+
+          # Check API health endpoint
+          API_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" \
+            ${{ vars.STAGING_API_URL }}/health || echo "000")
+
+          if [ "$API_HEALTH" != "200" ]; then
+            echo "API health check failed: $API_HEALTH"
+            exit 1
+          fi
+
+          echo "Staging deployment verified successfully"
+
+  # ===========================================================================
+  # Deploy: Production Environment
+  # ===========================================================================
   deploy-production:
     name: Deploy to Production
-    needs: build-and-push
+    needs: [build-images]
     runs-on: ubuntu-latest
-    environment: production
-    if: github.event.inputs.environment == 'production'
+    environment:
+      name: production
+      url: https://app.realriches.com
+    if: inputs.environment == 'production'
 
     steps:
       - name: Checkout
@@ -140,31 +320,152 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy to ECS (Blue/Green)
+      # -----------------------------------------------------------------------
+      # Database Migrations (Production)
+      # -----------------------------------------------------------------------
+      - name: Run database migrations
         run: |
-          # TODO: HUMAN_IMPLEMENTATION_REQUIRED - Implement blue/green deployment
-          aws ecs update-service \
-            --cluster realriches-production \
-            --service realriches-api \
-            --force-new-deployment
+          echo "Running database migrations for production..."
 
-          aws ecs update-service \
-            --cluster realriches-production \
-            --service realriches-web \
-            --force-new-deployment
+          TASK_ARN=$(aws ecs run-task \
+            --cluster ${{ env.ECS_CLUSTER_PRODUCTION }} \
+            --task-definition realriches-migrations-production \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID }}],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' \
+            --output text)
 
-      - name: Notify Slack
+          echo "Migration task started: $TASK_ARN"
+
+          aws ecs wait tasks-stopped \
+            --cluster ${{ env.ECS_CLUSTER_PRODUCTION }} \
+            --tasks $TASK_ARN
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster ${{ env.ECS_CLUSTER_PRODUCTION }} \
+            --tasks $TASK_ARN \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed with exit code: $EXIT_CODE"
+            exit 1
+          fi
+
+          echo "Migrations completed successfully"
+
+      # -----------------------------------------------------------------------
+      # Blue/Green Deployment
+      # -----------------------------------------------------------------------
+      # Production uses CodeDeploy for blue/green deployments.
+      # This provides zero-downtime deploys with automatic rollback.
+      #
+      # Prerequisites:
+      # - CodeDeploy application: realriches-production
+      # - Deployment group: realriches-api-dg, realriches-web-dg
+      # - ALB target groups configured for blue/green
+      # -----------------------------------------------------------------------
+      - name: Deploy API (Blue/Green)
+        run: |
+          echo "Starting blue/green deployment for API..."
+
+          # Create deployment
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name realriches-production \
+            --deployment-group-name realriches-api-dg \
+            --revision "{\"revisionType\":\"ECS\",\"ecsRevision\":{\"taskDefinition\":\"realriches-api-production\"}}" \
+            --deployment-config-name CodeDeployDefault.ECSLinear10PercentEvery1Minutes \
+            --query 'deploymentId' \
+            --output text)
+
+          echo "API deployment started: $DEPLOYMENT_ID"
+
+          # Wait for deployment
+          aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID
+
+          echo "API deployment completed"
+
+      - name: Deploy Web (Blue/Green)
+        run: |
+          echo "Starting blue/green deployment for Web..."
+
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name realriches-production \
+            --deployment-group-name realriches-web-dg \
+            --revision "{\"revisionType\":\"ECS\",\"ecsRevision\":{\"taskDefinition\":\"realriches-web-production\"}}" \
+            --deployment-config-name CodeDeployDefault.ECSLinear10PercentEvery1Minutes \
+            --query 'deploymentId' \
+            --output text)
+
+          echo "Web deployment started: $DEPLOYMENT_ID"
+
+          aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID
+
+          echo "Web deployment completed"
+
+      # -----------------------------------------------------------------------
+      # Post-Deployment Verification
+      # -----------------------------------------------------------------------
+      - name: Verify production health
+        run: |
+          echo "Verifying production deployment..."
+
+          sleep 60
+
+          API_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" \
+            ${{ vars.PRODUCTION_API_URL }}/health || echo "000")
+
+          if [ "$API_HEALTH" != "200" ]; then
+            echo "::error::Production API health check failed: $API_HEALTH"
+            exit 1
+          fi
+
+          WEB_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" \
+            ${{ vars.PRODUCTION_WEB_URL }} || echo "000")
+
+          if [ "$WEB_HEALTH" != "200" ]; then
+            echo "::error::Production Web health check failed: $WEB_HEALTH"
+            exit 1
+          fi
+
+          echo "Production deployment verified successfully"
+
+      # -----------------------------------------------------------------------
+      # Notifications
+      # -----------------------------------------------------------------------
+      - name: Notify Slack - Success
+        if: success()
         uses: slackapi/slack-github-action@v1
         with:
           payload: |
             {
-              "text": "Production deployment completed for RealRiches",
+              "text": "Production deployment successful",
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*Production Deployment Complete* :rocket:\n*Commit:* ${{ github.sha }}\n*By:* ${{ github.actor }}"
+                    "text": "*Production Deployment Complete* :rocket:\n*Commit:* `${{ needs.build-images.outputs.image-tag }}`\n*By:* ${{ github.actor }}\n*Workflow:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Slack - Failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "Production deployment FAILED",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment FAILED* :x:\n*Commit:* `${{ needs.build-images.outputs.image-tag }}`\n*By:* ${{ github.actor }}\n*Workflow:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
                   }
                 }
               ]

@@ -1,5 +1,8 @@
 # RealRiches
 
+[![CI](https://github.com/RealRichai/RA/actions/workflows/ci.yml/badge.svg)](https://github.com/RealRichai/RA/actions/workflows/ci.yml)
+[![Deploy](https://github.com/RealRichai/RA/actions/workflows/deploy.yml/badge.svg)](https://github.com/RealRichai/RA/actions/workflows/deploy.yml)
+
 AI-Powered Real Estate Investment Platform
 
 ## Prerequisites
@@ -133,12 +136,35 @@ STRIPE_SECRET_KEY=sk_...
 
 ## CI/CD
 
-The CI pipeline includes:
-- **Secrets Guard**: Fails if `.env` or sensitive files are committed
-- **Lint & Type Check**: ESLint + TypeScript strict mode
-- **Unit Tests**: Vitest with coverage
-- **Security Scan**: Snyk vulnerability scanning
-- **Build Verification**: Full production build
+### Branch Strategy
+
+| Branch | Purpose | CI | Deploy |
+|--------|---------|-----|--------|
+| `main` | Production-ready code | On push/PR | Manual trigger |
+| `develop` | Integration branch | On push/PR | - |
+| `feature/*` | Feature development | On PR to develop | - |
+
+### CI Pipeline
+
+The CI workflow runs on all pushes and PRs:
+
+1. **Secrets Guard** - Fails if `.env` or sensitive files are committed
+2. **Lint & Type Check** - ESLint + TypeScript strict mode
+3. **Unit Tests** - Vitest with coverage, requires Postgres + Redis
+4. **Security Scan** - Snyk vulnerability scanning
+5. **Build Verification** - Full production build with artifacts
+
+### Deploy Pipeline
+
+Deployment is **manual-only** until AWS infrastructure is configured:
+
+1. **CI Gate** - Requires CI workflow to pass first
+2. **Container Build** - Docker images pushed to ECR
+3. **Database Migrations** - Run via ECS task before deploy
+4. **Service Deployment** - ECS rolling update (staging) or blue/green (production)
+5. **Health Checks** - Verify endpoints respond correctly
+
+See [docs/release-checklist.md](docs/release-checklist.md) for deployment requirements.
 
 ## License
 
