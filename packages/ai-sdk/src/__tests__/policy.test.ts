@@ -7,17 +7,17 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  checkAIFeeStructures,
-  checkAIFCHACompliance,
-  checkAllPolicyRules,
-} from '../policy/rules';
-import {
   gateAIOutput,
   getMarketRules,
   NYC_STRICT_RULES,
   US_STANDARD_RULES,
   CA_STANDARD_RULES,
 } from '../policy/gate';
+import {
+  checkAIFeeStructures,
+  checkAIFCHACompliance,
+  checkAllPolicyRules,
+} from '../policy/rules';
 
 describe('Fee Structure Rules', () => {
   describe('checkAIFeeStructures', () => {
@@ -238,8 +238,8 @@ describe('Policy Gate', () => {
   });
 
   describe('gateAIOutput', () => {
-    it('should allow compliant content', async () => {
-      const result = await gateAIOutput({
+    it('should allow compliant content', () => {
+      const result = gateAIOutput({
         content:
           'The landlord pays the broker fee. Security deposit is one month.',
         marketId: 'nyc',
@@ -249,8 +249,8 @@ describe('Policy Gate', () => {
       expect(result.blockedReason).toBeUndefined();
     });
 
-    it('should block critical violations', async () => {
-      const result = await gateAIOutput({
+    it('should block critical violations', () => {
+      const result = gateAIOutput({
         content: 'Tenant must pay broker fee of $5000.',
         marketId: 'nyc',
       });
@@ -259,8 +259,8 @@ describe('Policy Gate', () => {
       expect(result.blockedReason).toBeDefined();
     });
 
-    it('should provide sanitized output option', async () => {
-      const result = await gateAIOutput({
+    it('should provide sanitized output option', () => {
+      const result = gateAIOutput({
         content: 'The tenant pays the broker fee.',
         marketId: 'nyc',
       });
@@ -268,8 +268,8 @@ describe('Policy Gate', () => {
       expect(result.sanitizedOutput).toBeDefined();
     });
 
-    it('should include check result details', async () => {
-      const result = await gateAIOutput({
+    it('should include check result details', () => {
+      const result = gateAIOutput({
         content: 'Tenant pays broker fee.',
         marketId: 'nyc',
       });
@@ -278,8 +278,8 @@ describe('Policy Gate', () => {
       expect(result.checkResult.violations.length).toBeGreaterThan(0);
     });
 
-    it('should handle FCHA context', async () => {
-      const result = await gateAIOutput({
+    it('should handle FCHA context', () => {
+      const result = gateAIOutput({
         content: 'We should run a background check before reviewing the application.',
         marketId: 'nyc',
         context: {
@@ -295,8 +295,8 @@ describe('Policy Gate', () => {
       ).toBe(true);
     });
 
-    it('should pass through compliant FCHA stages', async () => {
-      const result = await gateAIOutput({
+    it('should pass through compliant FCHA stages', () => {
+      const result = gateAIOutput({
         content: 'We can now run the background check on the applicant.',
         marketId: 'nyc',
         context: {

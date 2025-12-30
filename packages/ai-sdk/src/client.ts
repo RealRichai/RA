@@ -5,6 +5,15 @@
  * policy gate, and audit logging.
  */
 
+import { createAnthropicProvider } from './adapters/anthropic';
+import { createConsoleProvider } from './adapters/console';
+import type { ILLMProvider } from './adapters/provider-interface';
+import { LLMBudgetExceededError } from './adapters/provider-interface';
+import { getAgentRunService } from './ledger/agent-run';
+import type { AgentRunServiceConfig } from './ledger/agent-run';
+import { gateAIOutput } from './policy/gate';
+import { getRedactor } from './redaction/redactor';
+import type { RedactionConfig } from './redaction/types';
 import type {
   LLMProvider,
   LLMProviderConfig,
@@ -12,15 +21,6 @@ import type {
   CompletionRequest,
   CompletionResponse,
 } from './types';
-import type { ILLMProvider } from './adapters/provider-interface';
-import { LLMBudgetExceededError } from './adapters/provider-interface';
-import { createAnthropicProvider } from './adapters/anthropic';
-import { createConsoleProvider } from './adapters/console';
-import { getRedactor } from './redaction/redactor';
-import type { RedactionConfig } from './redaction/types';
-import { gateAIOutput } from './policy/gate';
-import { getAgentRunService } from './ledger/agent-run';
-import type { AgentRunServiceConfig } from './ledger/agent-run';
 
 // =============================================================================
 // Client Configuration
@@ -163,7 +163,7 @@ export class AIClient {
 
       // 6. Policy gate check (if enabled and marketId provided)
       if (this.enablePolicyGate && request.context?.marketId) {
-        const gateResult = await gateAIOutput({
+        const gateResult = gateAIOutput({
           content: outputRedaction.content,
           marketId: request.context.marketId,
           context: {

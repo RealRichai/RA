@@ -154,10 +154,11 @@ export class PIIDetector {
       case 'ssn':
         // Additional SSN validation
         return this.validateSSN(value);
-      case 'bank_account':
+      case 'bank_account': {
         // Filter out common false positives (too short or likely other numbers)
         const digits = value.replace(/\D/g, '');
         return digits.length >= 8 && digits.length <= 17;
+      }
       default:
         return true;
     }

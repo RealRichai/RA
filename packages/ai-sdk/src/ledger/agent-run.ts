@@ -6,8 +6,8 @@
 
 import { randomUUID } from 'crypto';
 
-import type { RedactionReport } from '../redaction/types';
 import type { PolicyCheckResult } from '../policy/types';
+import type { RedactionReport } from '../redaction/types';
 
 import type { AgentRun, AgentRunInput, BudgetUsage } from './types';
 

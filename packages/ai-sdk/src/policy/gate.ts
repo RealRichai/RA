@@ -106,9 +106,7 @@ export function getMarketRules(marketId: string): MarketRules {
 /**
  * Gate AI output for compliance violations.
  */
-export async function gateAIOutput(
-  input: AIOutputCheckInput
-): Promise<AIGateResult> {
+export function gateAIOutput(input: AIOutputCheckInput): AIGateResult {
   const marketRules = getMarketRules(input.marketId);
   const violations: AIViolation[] = [];
   const fixes: RecommendedFix[] = [];
