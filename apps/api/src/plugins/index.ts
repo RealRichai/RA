@@ -12,10 +12,15 @@ import type { FastifyInstance } from 'fastify';
 import { auditPlugin } from './audit';
 import { authPlugin } from './auth';
 import { errorHandler } from './error-handler';
+import rawBodyPlugin from './raw-body';
 import { redisPlugin } from './redis';
 
 export async function registerPlugins(app: FastifyInstance): Promise<void> {
   const config = getConfig();
+
+  // Raw body parser (for webhook signature verification)
+  // Must be registered before other content type parsers
+  await app.register(rawBodyPlugin);
 
   // Security headers
   await app.register(helmet, {

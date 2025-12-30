@@ -16,6 +16,7 @@ import { marketingRoutes } from './marketing/routes';
 import { paymentRoutes } from './payments/routes';
 import { propertyRoutes } from './properties/routes';
 import { userRoutes } from './users/routes';
+import { webhookRoutes } from './webhooks/routes';
 
 export async function registerModules(app: FastifyInstance): Promise<void> {
   const config = getConfig();
@@ -23,6 +24,9 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
 
   // Health check (no prefix)
   await app.register(healthRoutes);
+
+  // Webhooks (no auth, signature verification)
+  await app.register(webhookRoutes, { prefix: '/webhooks' });
 
   // API routes with prefix
   await app.register(

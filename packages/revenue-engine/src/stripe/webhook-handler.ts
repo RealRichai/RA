@@ -299,6 +299,69 @@ export async function handleChargeRefunded(
 }
 
 /**
+ * Handle payment_intent.payment_failed event.
+ */
+export async function handlePaymentIntentFailed(
+  event: WebhookEvent,
+  idempotencyManager: IdempotencyManager
+): Promise<WebhookHandlerResult> {
+  const idempotencyKey = generateWebhookIdempotencyKey(event.id);
+
+  const check = await idempotencyManager.checkAndLock(idempotencyKey);
+  if (!check.isNew) {
+    return {
+      success: true,
+      eventId: event.id,
+      skipped: true,
+      skipReason: 'Already processed',
+    };
+  }
+
+  try {
+    const paymentIntent = event.data.object as {
+      id: string;
+      amount: number;
+      currency: string;
+      last_payment_error?: {
+        code?: string;
+        message?: string;
+      };
+      metadata?: Record<string, string>;
+    };
+
+    // Record the failure for tracking (no ledger entry for failed payments)
+    await idempotencyManager.recordCompleted(
+      idempotencyKey,
+      `failed_${paymentIntent.id}`,
+      {
+        status: 'failed',
+        errorCode: paymentIntent.last_payment_error?.code,
+        errorMessage: paymentIntent.last_payment_error?.message,
+        paymentId: paymentIntent.metadata?.payment_id,
+      }
+    );
+
+    return {
+      success: true,
+      eventId: event.id,
+      // No ledger transaction for failed payments
+    };
+  } catch (error) {
+    await idempotencyManager.recordFailed(
+      idempotencyKey,
+      '',
+      (error as Error).message
+    );
+
+    return {
+      success: false,
+      eventId: event.id,
+      error: (error as Error).message,
+    };
+  }
+}
+
+/**
  * Handle charge.dispute.created event.
  */
 export async function handleDisputeCreated(
@@ -342,6 +405,7 @@ export async function handleDisputeCreated(
 
 const eventHandlers: Partial<Record<StripeEventType, WebhookEventHandler>> = {
   'payment_intent.succeeded': handlePaymentIntentSucceeded,
+  'payment_intent.payment_failed': handlePaymentIntentFailed,
   'charge.refunded': handleChargeRefunded,
   'charge.dispute.created': handleDisputeCreated,
 };

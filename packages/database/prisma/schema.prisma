@@ -1768,3 +1768,62 @@ model JobRecord {
   @@index([scheduledFor])
   @@map("job_records")
 }
+
+// =============================================================================
+// Ledger & Financial Tracking
+// =============================================================================
+
+model LedgerTransaction {
+  id              String    @id @default(uuid()) @db.Uuid
+  idempotencyKey  String    @unique @map("idempotency_key")
+  type            String    // payment_received, refund, dispute, commission, etc.
+  status          String    @default("pending") // pending, posted, voided, reversed
+  description     String?
+  externalId      String?   @map("external_id") // e.g., Stripe PaymentIntent ID
+  referenceType   String?   @map("reference_type") // payment_intent, charge, etc.
+  referenceId     String?   @map("reference_id") @db.Uuid // Link to Payment, etc.
+  metadata        Json?
+  postedAt        DateTime? @map("posted_at")
+  voidedAt        DateTime? @map("voided_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  entries LedgerEntry[]
+
+  @@index([type])
+  @@index([status])
+  @@index([externalId])
+  @@index([referenceId])
+  @@map("ledger_transactions")
+}
+
+model LedgerEntry {
+  id            String   @id @default(uuid()) @db.Uuid
+  transactionId String   @map("transaction_id") @db.Uuid
+  accountCode   String   @map("account_code") // CASH, STRIPE_CLEARING, AR, etc.
+  accountType   String   @map("account_type") // asset, liability, revenue, expense
+  amount        Decimal  @db.Decimal(19, 4)
+  isDebit       Boolean  @map("is_debit")
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  transaction LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([accountCode])
+  @@map("ledger_entries")
+}
+
+model ProcessedWebhook {
+  id          String   @id @default(uuid()) @db.Uuid
+  eventId     String   @unique @map("event_id") // Stripe event ID
+  eventType   String   @map("event_type")
+  source      String   @default("stripe") // stripe, plaid, etc.
+  payload     Json?    // Store redacted payload for debugging
+  result      Json?    // Processing result
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@index([eventType])
+  @@index([source])
+  @@map("processed_webhooks")
+}

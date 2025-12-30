@@ -1,7 +1,16 @@
 import { prisma } from '@realriches/database';
-import { generatePrefixedId, NotFoundError, ForbiddenError, ValidationError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError, ValidationError, AppError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+
+import {
+  isStripeConfigured,
+  getOrCreateCustomer,
+  createPaymentIntent,
+  retrievePaymentMethod,
+  attachPaymentMethod,
+  redactStripeData,
+} from '../../lib/stripe';
 
 const CreatePaymentSchema = z.object({
   leaseId: z.string(),
@@ -239,21 +248,134 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
         throw new ValidationError('Invalid payment method');
       }
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with Stripe for payment processing
-      // const stripeResult = await stripe.paymentIntents.create({ ... });
+      // Check if Stripe is configured
+      if (!isStripeConfigured()) {
+        throw new AppError(
+          'Payment processing is not configured',
+          'PAYMENT_PROCESSING_UNAVAILABLE',
+          503
+        );
+      }
 
-      // Simulate successful payment
-      const updatedPayment = await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: 'completed',
-          paidAt: new Date(),
-          paymentMethodId,
-          transactionId: generatePrefixedId('txn'),
-        },
+      // Get the user with their Stripe customer ID from metadata
+      const user = await prisma.user.findUnique({
+        where: { id: request.user.id },
+        select: { id: true, email: true, firstName: true, lastName: true, metadata: true },
       });
 
-      return reply.send({ success: true, data: updatedPayment });
+      if (!user) {
+        throw new NotFoundError('User not found');
+      }
+
+      // Get or create Stripe customer
+      const existingCustomerId = (user.metadata as Record<string, unknown> | null)?.stripeCustomerId as string | undefined;
+      const stripeCustomerId = await getOrCreateCustomer(
+        user.id,
+        user.email,
+        `${user.firstName} ${user.lastName}`,
+        existingCustomerId
+      );
+
+      // Store Stripe customer ID in user metadata if new
+      if (!existingCustomerId) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            metadata: {
+              ...(user.metadata as Record<string, unknown> || {}),
+              stripeCustomerId,
+            },
+          },
+        });
+      }
+
+      // Verify the payment method has a Stripe payment method ID
+      if (!paymentMethod.stripePaymentMethodId) {
+        throw new ValidationError('Payment method not linked to Stripe');
+      }
+
+      // Update payment to processing status
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: 'processing' },
+      });
+
+      try {
+        // Create and confirm PaymentIntent with Stripe
+        const paymentIntent = await createPaymentIntent({
+          amount: Math.round(Number(payment.amount) * 100), // Convert to cents
+          currency: 'usd',
+          customerId: stripeCustomerId,
+          paymentMethodId: paymentMethod.stripePaymentMethodId,
+          paymentId: payment.id,
+          description: `Payment for ${payment.type} - ${payment.id}`,
+          confirm: true,
+        });
+
+        // Log redacted payment intent for debugging
+        request.log.info({ paymentIntent: redactStripeData(paymentIntent) }, 'PaymentIntent created');
+
+        // Handle the payment intent status
+        if (paymentIntent.status === 'succeeded') {
+          // Payment succeeded immediately
+          const updatedPayment = await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: 'completed',
+              paidAt: new Date(),
+              processedAt: new Date(),
+              stripePaymentIntentId: paymentIntent.id,
+              stripeChargeId: paymentIntent.latest_charge as string | undefined,
+              transactionId: generatePrefixedId('txn'),
+            },
+          });
+
+          return reply.send({ success: true, data: updatedPayment });
+        } else if (paymentIntent.status === 'requires_action') {
+          // Payment requires additional action (e.g., 3D Secure)
+          const updatedPayment = await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: 'pending',
+              stripePaymentIntentId: paymentIntent.id,
+            },
+          });
+
+          return reply.send({
+            success: true,
+            data: updatedPayment,
+            requiresAction: true,
+            clientSecret: paymentIntent.client_secret,
+          });
+        } else {
+          // Payment is processing or has other status
+          const updatedPayment = await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: 'processing',
+              stripePaymentIntentId: paymentIntent.id,
+            },
+          });
+
+          return reply.send({ success: true, data: updatedPayment });
+        }
+      } catch (error) {
+        // Payment failed - update status and record error
+        request.log.error({ error: redactStripeData(error) }, 'Payment processing failed');
+
+        const errorMessage = error instanceof Error ? error.message : 'Payment processing failed';
+
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: 'failed',
+            lastError: errorMessage,
+            retryCount: { increment: 1 },
+          },
+        });
+
+        throw new AppError(errorMessage, 'PAYMENT_FAILED', 400);
+      }
     }
   );
 
@@ -310,8 +432,89 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
 
       const data = AddPaymentMethodSchema.parse(request.body);
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Validate token with Stripe/Plaid
-      // const stripeMethod = await stripe.paymentMethods.retrieve(data.token);
+      // Check if Stripe is configured
+      if (!isStripeConfigured()) {
+        throw new AppError(
+          'Payment processing is not configured',
+          'PAYMENT_PROCESSING_UNAVAILABLE',
+          503
+        );
+      }
+
+      // Retrieve and validate the payment method from Stripe
+      // The token should be a Stripe PaymentMethod ID (pm_xxx) created on the frontend
+      let stripePaymentMethod;
+      try {
+        stripePaymentMethod = await retrievePaymentMethod(data.token);
+      } catch (error) {
+        request.log.error({ error: redactStripeData(error) }, 'Failed to retrieve payment method');
+        throw new ValidationError('Invalid payment method token');
+      }
+
+      // Validate the payment method type matches what was requested
+      const stripeType = stripePaymentMethod.type;
+      const expectedType = data.type === 'card' ? 'card' : 'us_bank_account';
+      if (stripeType !== expectedType && stripeType !== 'card') {
+        throw new ValidationError(`Payment method type mismatch: expected ${data.type}, got ${stripeType}`);
+      }
+
+      // Get or create Stripe customer for the user
+      const user = await prisma.user.findUnique({
+        where: { id: request.user.id },
+        select: { id: true, email: true, firstName: true, lastName: true, metadata: true },
+      });
+
+      if (!user) {
+        throw new NotFoundError('User not found');
+      }
+
+      const existingCustomerId = (user.metadata as Record<string, unknown> | null)?.stripeCustomerId as string | undefined;
+      const stripeCustomerId = await getOrCreateCustomer(
+        user.id,
+        user.email,
+        `${user.firstName} ${user.lastName}`,
+        existingCustomerId
+      );
+
+      // Store Stripe customer ID if new
+      if (!existingCustomerId) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            metadata: {
+              ...(user.metadata as Record<string, unknown> || {}),
+              stripeCustomerId,
+            },
+          },
+        });
+      }
+
+      // Attach the payment method to the customer if not already attached
+      if (stripePaymentMethod.customer !== stripeCustomerId) {
+        try {
+          await attachPaymentMethod(data.token, stripeCustomerId);
+        } catch (error) {
+          request.log.error({ error: redactStripeData(error) }, 'Failed to attach payment method');
+          throw new ValidationError('Failed to attach payment method to customer');
+        }
+      }
+
+      // Extract card or bank account details
+      let last4 = '****';
+      let cardBrand: string | undefined;
+      let cardExpMonth: number | undefined;
+      let cardExpYear: number | undefined;
+      let bankName: string | undefined;
+
+      if (stripePaymentMethod.card) {
+        last4 = stripePaymentMethod.card.last4;
+        cardBrand = stripePaymentMethod.card.brand;
+        cardExpMonth = stripePaymentMethod.card.exp_month;
+        cardExpYear = stripePaymentMethod.card.exp_year;
+      } else if (stripePaymentMethod.us_bank_account) {
+        last4 = stripePaymentMethod.us_bank_account.last4 || '****';
+        bankName = stripePaymentMethod.us_bank_account.bank_name || undefined;
+      }
 
       // If setting as default, unset other defaults
       if (data.isDefault) {
@@ -327,13 +530,19 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           userId: request.user.id,
           type: data.type,
           provider: 'stripe',
-          externalId: data.token,
-          last4: '4242', // Would come from Stripe
+          stripePaymentMethodId: data.token,
+          last4,
+          cardBrand,
+          cardExpMonth,
+          cardExpYear,
+          bankName,
           isDefault: data.isDefault,
+          isVerified: true,
           isActive: true,
         },
       });
 
+      request.log.info({ paymentMethodId: method.id }, 'Payment method added');
       return reply.status(201).send({ success: true, data: method });
     }
   );

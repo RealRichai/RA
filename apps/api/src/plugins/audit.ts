@@ -182,6 +182,7 @@ function sanitizeForAudit(data: Record<string, unknown> | null | undefined): Rec
   }
 
   const sensitiveFields = [
+    // Authentication
     'password',
     'passwordHash',
     'currentPassword',
@@ -192,12 +193,27 @@ function sanitizeForAudit(data: Record<string, unknown> | null | undefined): Rec
     'refreshToken',
     'secret',
     'apiKey',
-    'ssn',
-    'creditCard',
-    'bankAccount',
     'encryptionKey',
     'mfaSecret',
     'mfaCode',
+    // Personal/Financial
+    'ssn',
+    'creditCard',
+    'bankAccount',
+    'routingNumber',
+    'accountNumber',
+    // Stripe
+    'stripeCustomerId',
+    'stripePaymentMethodId',
+    'stripePaymentIntentId',
+    'clientSecret',
+    'cardNumber',
+    'cvc',
+    'expiry',
+    'card',
+    // Plaid
+    'plaidAccessToken',
+    'plaidAccountId',
   ];
 
   const sanitized: Record<string, unknown> = {};
