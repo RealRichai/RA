@@ -1,0 +1,35 @@
+{
+  "name": "@realriches/email-service",
+  "version": "1.0.0",
+  "description": "Email delivery service with templates, queuing, and provider adapters",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.525.0",
+    "bullmq": "^5.1.0",
+    "html-to-text": "^9.0.5",
+    "ioredis": "^5.3.2",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/html-to-text": "^9.0.4",
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^1.6.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.6.0"
+  },
+  "peerDependencies": {
+    "@realriches/config": "workspace:*",
+    "@realriches/database": "workspace:*",
+    "@realriches/types": "workspace:*"
+  }
+}

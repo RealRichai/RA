@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
 
 import { auditPlugin } from './audit';
 import { authPlugin } from './auth';
+import { emailPlugin } from './email';
 import { errorHandler } from './error-handler';
 import rawBodyPlugin from './raw-body';
 import { redisPlugin } from './redis';
@@ -84,6 +85,9 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
 
   // Redis
   await app.register(redisPlugin);
+
+  // Email service (depends on Redis)
+  await app.register(emailPlugin);
 
   // Auth decorators
   await app.register(authPlugin);

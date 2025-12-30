@@ -69,10 +69,20 @@ const AWSConfigSchema = z.object({
 });
 
 const EmailConfigSchema = z.object({
-  provider: z.enum(['sendgrid', 'ses', 'smtp']).default('sendgrid'),
-  sendgridApiKey: z.string().optional(),
+  provider: z.enum(['ses', 'sendgrid', 'postmark', 'console']).default('console'),
   from: z.string().email(),
   fromName: z.string().default('RealRiches'),
+  replyTo: z.string().email().optional(),
+  sandbox: z.coerce.boolean().default(false),
+  // SES-specific options
+  sesRegion: z.string().optional(),
+  sesAccessKeyId: z.string().optional(),
+  sesSecretAccessKey: z.string().optional(),
+  sesConfigurationSet: z.string().optional(),
+  // SendGrid-specific options
+  sendgridApiKey: z.string().optional(),
+  // Postmark-specific options
+  postmarkApiKey: z.string().optional(),
 });
 
 const SMSConfigSchema = z.object({
@@ -269,12 +279,22 @@ function parseConfig(): Config {
         }
       : undefined,
 
-    email: process.env['SENDGRID_API_KEY']
+    email: process.env['EMAIL_FROM']
       ? {
           provider: process.env['EMAIL_PROVIDER'],
-          sendgridApiKey: process.env['SENDGRID_API_KEY'],
           from: process.env['EMAIL_FROM'],
           fromName: process.env['EMAIL_FROM_NAME'],
+          replyTo: process.env['EMAIL_REPLY_TO'],
+          sandbox: process.env['EMAIL_SANDBOX'],
+          // SES options
+          sesRegion: process.env['AWS_SES_REGION'] || process.env['AWS_REGION'],
+          sesAccessKeyId: process.env['AWS_SES_ACCESS_KEY_ID'] || process.env['AWS_ACCESS_KEY_ID'],
+          sesSecretAccessKey: process.env['AWS_SES_SECRET_ACCESS_KEY'] || process.env['AWS_SECRET_ACCESS_KEY'],
+          sesConfigurationSet: process.env['AWS_SES_CONFIGURATION_SET'],
+          // SendGrid options
+          sendgridApiKey: process.env['SENDGRID_API_KEY'],
+          // Postmark options
+          postmarkApiKey: process.env['POSTMARK_API_KEY'],
         }
       : undefined,
 

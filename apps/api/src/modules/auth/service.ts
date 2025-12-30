@@ -1,6 +1,7 @@
 import { getConfig } from '@realriches/config';
 import { prisma } from '@realriches/database';
-import type { Role, Permission } from '@realriches/types';
+import type { EmailService } from '@realriches/email-service';
+import type { Role } from '@realriches/types';
 import { RolePermissionsMap } from '@realriches/types';
 import {
   generatePrefixedId,
@@ -13,6 +14,15 @@ import {
 } from '@realriches/utils';
 import { hash, verify } from 'argon2';
 import type { FastifyInstance } from 'fastify';
+import type Redis from 'ioredis';
+
+// Redis key prefixes for tokens
+const PASSWORD_RESET_PREFIX = 'password_reset:';
+const EMAIL_VERIFICATION_PREFIX = 'email_verification:';
+
+// Token expiration times (in seconds)
+const PASSWORD_RESET_EXPIRY = 60 * 60; // 1 hour
+const EMAIL_VERIFICATION_EXPIRY = 24 * 60 * 60; // 24 hours
 
 export interface TokenPair {
   accessToken: string;
@@ -44,7 +54,13 @@ const ARGON2_OPTIONS = {
 };
 
 export class AuthService {
-  constructor(private app: FastifyInstance) {}
+  private redis: Redis;
+  private emailService: EmailService;
+
+  constructor(private app: FastifyInstance) {
+    this.redis = app.redis;
+    this.emailService = app.emailService;
+  }
 
   async register(input: RegisterInput): Promise<{ user: any; tokens: TokenPair }> {
     // Check if user exists
@@ -85,6 +101,12 @@ export class AuthService {
 
     // Create session and tokens
     const tokens = await this.createSession(user.id, user.email, user.role as Role);
+
+    // Send email verification (non-blocking)
+    this.sendEmailVerification(user.id).catch((err) => {
+      // Log error but don't fail registration
+      console.error('Failed to send verification email:', err);
+    });
 
     return { user, tokens };
   }
@@ -270,23 +292,138 @@ export class AuthService {
       return;
     }
 
+    // Generate a secure token
     const token = generateToken(32);
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    const tokenHash = sha256(token);
 
-    // Store reset token in Redis
+    // Store token in Redis with user ID
+    await this.redis.setex(
+      `${PASSWORD_RESET_PREFIX}${tokenHash}`,
+      PASSWORD_RESET_EXPIRY,
+      user.id
+    );
+
+    // Build the reset URL
     const config = getConfig();
-    // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Send password reset email
-    // await sendPasswordResetEmail(user.email, token);
+    const resetUrl = `${config.web.appUrl}/reset-password?token=${token}`;
+
+    // Send the password reset email
+    await this.emailService.send({
+      templateId: 'auth.password-reset',
+      to: user.email,
+      data: {
+        firstName: user.firstName,
+        resetUrl,
+        expiresIn: '1 hour',
+      },
+      priority: 'high',
+      userId: user.id,
+      entityType: 'user',
+      entityId: user.id,
+    });
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
-    // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Implement password reset with token validation
-    throw new AppError('Password reset not implemented', 'NOT_IMPLEMENTED', 501);
+    // Hash the token to look it up
+    const tokenHash = sha256(token);
+    const redisKey = `${PASSWORD_RESET_PREFIX}${tokenHash}`;
+
+    // Get the user ID from Redis
+    const userId = await this.redis.get(redisKey);
+
+    if (!userId) {
+      throw new ValidationError('Invalid or expired reset token');
+    }
+
+    // Find the user
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundError('User not found');
+    }
+
+    // Hash the new password
+    const passwordHash = await hash(newPassword, ARGON2_OPTIONS);
+
+    // Update the password
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+
+    // Delete the used token
+    await this.redis.del(redisKey);
+
+    // Logout all existing sessions for security
+    await this.logoutAllSessions(userId);
+  }
+
+  async sendEmailVerification(userId: string): Promise<void> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundError('User not found');
+    }
+
+    if (user.emailVerified) {
+      return; // Already verified
+    }
+
+    // Generate a secure token
+    const token = generateToken(32);
+    const tokenHash = sha256(token);
+
+    // Store token in Redis with user ID
+    await this.redis.setex(
+      `${EMAIL_VERIFICATION_PREFIX}${tokenHash}`,
+      EMAIL_VERIFICATION_EXPIRY,
+      user.id
+    );
+
+    // Build the verification URL
+    const config = getConfig();
+    const verificationUrl = `${config.web.appUrl}/verify-email?token=${token}`;
+
+    // Send the verification email
+    await this.emailService.send({
+      templateId: 'auth.email-verification',
+      to: user.email,
+      data: {
+        firstName: user.firstName,
+        verificationUrl,
+        expiresIn: '24 hours',
+      },
+      priority: 'high',
+      userId: user.id,
+      entityType: 'user',
+      entityId: user.id,
+    });
   }
 
   async verifyEmail(token: string): Promise<void> {
-    // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Implement email verification
-    throw new AppError('Email verification not implemented', 'NOT_IMPLEMENTED', 501);
+    // Hash the token to look it up
+    const tokenHash = sha256(token);
+    const redisKey = `${EMAIL_VERIFICATION_PREFIX}${tokenHash}`;
+
+    // Get the user ID from Redis
+    const userId = await this.redis.get(redisKey);
+
+    if (!userId) {
+      throw new ValidationError('Invalid or expired verification token');
+    }
+
+    // Update user's email verified status
+    await prisma.user.update({
+      where: { id: userId },
+      data: { emailVerified: true },
+    });
+
+    // Delete the used token
+    await this.redis.del(redisKey);
   }
 
   private async createSession(
