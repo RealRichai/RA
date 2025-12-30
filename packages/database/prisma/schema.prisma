@@ -1515,6 +1515,74 @@ model MaintenanceTriage {
 }
 
 // =============================================================================
+// AI Agent Run Ledger
+// =============================================================================
+
+enum AgentRunStatus {
+  pending
+  processing
+  completed
+  failed
+  blocked
+}
+
+model AgentRun {
+  id                    String         @id @default(uuid()) @db.Uuid
+  userId                String?        @map("user_id") @db.Uuid
+  organizationId        String?        @map("organization_id") @db.Uuid
+  conversationId        String?        @map("conversation_id") @db.Uuid
+  entityType            String?        @map("entity_type")
+  entityId              String?        @map("entity_id") @db.Uuid
+  marketId              String?        @map("market_id")
+  model                 String
+  provider              String
+  agentType             String?        @map("agent_type")
+  promptRedacted        String         @map("prompt_redacted")
+  outputRedacted        String?        @map("output_redacted")
+  promptRedactionReport Json?          @map("prompt_redaction_report")
+  outputRedactionReport Json?          @map("output_redaction_report")
+  policyCheckResult     Json?          @map("policy_check_result")
+  tokensPrompt          Int            @default(0) @map("tokens_prompt")
+  tokensCompletion      Int            @default(0) @map("tokens_completion")
+  tokensTotal           Int            @default(0) @map("tokens_total")
+  cost                  Int            @default(0) // Cost in cents
+  status                AgentRunStatus @default(pending)
+  startedAt             DateTime       @map("started_at")
+  completedAt           DateTime?      @map("completed_at")
+  processingTimeMs      Int?           @map("processing_time_ms")
+  errorCode             String?        @map("error_code")
+  errorMessage          String?        @map("error_message")
+  requestId             String?        @map("request_id")
+  providerRequestId     String?        @map("provider_request_id")
+  createdAt             DateTime       @default(now()) @map("created_at")
+  updatedAt             DateTime       @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([marketId])
+  @@map("agent_runs")
+}
+
+model AIBudgetUsage {
+  id             String   @id @default(uuid()) @db.Uuid
+  date           DateTime @db.Date
+  userId         String?  @map("user_id") @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  totalCost      Int      @default(0) @map("total_cost") // Cost in cents
+  totalTokens    Int      @default(0) @map("total_tokens")
+  requestCount   Int      @default(0) @map("request_count")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([date, userId])
+  @@unique([date, organizationId])
+  @@index([date])
+  @@map("ai_budget_usage")
+}
+
+// =============================================================================
 // Marketing
 // =============================================================================
 
