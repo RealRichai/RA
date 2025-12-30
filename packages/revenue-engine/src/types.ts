@@ -171,6 +171,7 @@ export const PartnerProviderSchema = z.enum([
   'lemonade',
   'state_farm',
   'assurant',
+  'sure',
 
   // Guarantor
   'the_guarantors',

@@ -6,10 +6,12 @@
 
 import type { PartnerProductType, PartnerProvider, QuoteRequest, QuoteResponse } from '../types';
 
+import { AssurantProvider } from './adapters/assurant';
 import { JettyProvider } from './adapters/jetty';
 import { LeaseLockProvider } from './adapters/leaselock';
 import { LemonadeProvider } from './adapters/lemonade';
 import { RhinoProvider } from './adapters/rhino';
+import { SureProvider } from './adapters/sure';
 import type { IPartnerProvider, ProviderConfig } from './provider-interface';
 import { ProviderUnavailableError } from './provider-interface';
 
@@ -22,6 +24,8 @@ export interface ProviderRegistryConfig {
   rhino?: ProviderConfig;
   jetty?: ProviderConfig;
   lemonade?: ProviderConfig;
+  assurant?: ProviderConfig;
+  sure?: ProviderConfig;
   state_farm?: ProviderConfig;
   the_guarantors?: ProviderConfig;
   insurent?: ProviderConfig;
@@ -76,6 +80,18 @@ export class ProviderRegistry {
       this.providers.set('lemonade', new LemonadeProvider(config.lemonade));
     } else {
       this.providers.set('lemonade', new LemonadeProvider({ apiKey: '', apiUrl: '' }));
+    }
+
+    if (config.assurant) {
+      this.providers.set('assurant', new AssurantProvider(config.assurant));
+    } else {
+      this.providers.set('assurant', new AssurantProvider({ apiKey: '', apiUrl: '' }));
+    }
+
+    if (config.sure) {
+      this.providers.set('sure', new SureProvider(config.sure));
+    } else {
+      this.providers.set('sure', new SureProvider({ apiKey: '', apiUrl: '' }));
     }
   }
 
@@ -270,6 +286,24 @@ export function createRegistryFromEnv(): ProviderRegistry {
     config.lemonade = {
       apiKey: process.env.LEMONADE_API_KEY,
       apiUrl: process.env.LEMONADE_API_URL || 'https://api.lemonade.com',
+    };
+  }
+
+  // Assurant
+  if (process.env.ASSURANT_API_KEY) {
+    config.assurant = {
+      apiKey: process.env.ASSURANT_API_KEY,
+      apiUrl: process.env.ASSURANT_API_URL || 'https://api.assurant.com',
+      webhookSecret: process.env.ASSURANT_WEBHOOK_SECRET,
+    };
+  }
+
+  // Sure
+  if (process.env.SURE_API_KEY) {
+    config.sure = {
+      apiKey: process.env.SURE_API_KEY,
+      apiUrl: process.env.SURE_API_URL || 'https://api.sureapp.com',
+      webhookSecret: process.env.SURE_WEBHOOK_SECRET,
     };
   }
 

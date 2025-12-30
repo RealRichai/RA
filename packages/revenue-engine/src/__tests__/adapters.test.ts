@@ -11,6 +11,8 @@ import {
   RhinoProvider,
   LeaseLockProvider,
   LemonadeProvider,
+  AssurantProvider,
+  SureProvider,
 } from '../partners/adapters';
 import type { IPartnerProvider, ProviderConfig } from '../partners/provider-interface';
 import {
@@ -63,6 +65,8 @@ describe('Partner Provider Contract', () => {
     { name: 'Rhino', Provider: RhinoProvider, products: ['deposit_alternative', 'guarantor'] },
     { name: 'LeaseLock', Provider: LeaseLockProvider, products: ['deposit_alternative'] },
     { name: 'Lemonade', Provider: LemonadeProvider, products: ['renters_insurance'] },
+    { name: 'Assurant', Provider: AssurantProvider, products: ['renters_insurance'] },
+    { name: 'Sure', Provider: SureProvider, products: ['renters_insurance'] },
   ];
 
   describe.each(providerClasses)('$name Provider', ({ Provider, products }) => {
