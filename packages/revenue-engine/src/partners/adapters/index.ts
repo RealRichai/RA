@@ -8,3 +8,5 @@ export { JettyProvider } from './jetty';
 export { LemonadeProvider } from './lemonade';
 export { AssurantProvider } from './assurant';
 export { SureProvider } from './sure';
+export { InsurentProvider } from './insurent';
+export { LeapProvider } from './leap';

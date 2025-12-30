@@ -13,6 +13,8 @@ import {
   LemonadeProvider,
   AssurantProvider,
   SureProvider,
+  InsurentProvider,
+  LeapProvider,
 } from '../partners/adapters';
 import type { IPartnerProvider, ProviderConfig } from '../partners/provider-interface';
 import {
@@ -67,6 +69,8 @@ describe('Partner Provider Contract', () => {
     { name: 'Lemonade', Provider: LemonadeProvider, products: ['renters_insurance'] },
     { name: 'Assurant', Provider: AssurantProvider, products: ['renters_insurance'] },
     { name: 'Sure', Provider: SureProvider, products: ['renters_insurance'] },
+    { name: 'Insurent', Provider: InsurentProvider, products: ['guarantor'] },
+    { name: 'Leap', Provider: LeapProvider, products: ['guarantor'] },
   ];
 
   describe.each(providerClasses)('$name Provider', ({ Provider, products }) => {

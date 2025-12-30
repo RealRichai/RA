@@ -7,7 +7,9 @@
 import type { PartnerProductType, PartnerProvider, QuoteRequest, QuoteResponse } from '../types';
 
 import { AssurantProvider } from './adapters/assurant';
+import { InsurentProvider } from './adapters/insurent';
 import { JettyProvider } from './adapters/jetty';
+import { LeapProvider } from './adapters/leap';
 import { LeaseLockProvider } from './adapters/leaselock';
 import { LemonadeProvider } from './adapters/lemonade';
 import { RhinoProvider } from './adapters/rhino';
@@ -26,9 +28,10 @@ export interface ProviderRegistryConfig {
   lemonade?: ProviderConfig;
   assurant?: ProviderConfig;
   sure?: ProviderConfig;
+  insurent?: ProviderConfig;
+  leap?: ProviderConfig;
   state_farm?: ProviderConfig;
   the_guarantors?: ProviderConfig;
-  insurent?: ProviderConfig;
 }
 
 export interface QuoteComparison {
@@ -92,6 +95,19 @@ export class ProviderRegistry {
       this.providers.set('sure', new SureProvider(config.sure));
     } else {
       this.providers.set('sure', new SureProvider({ apiKey: '', apiUrl: '' }));
+    }
+
+    // Guarantor providers
+    if (config.insurent) {
+      this.providers.set('insurent', new InsurentProvider(config.insurent));
+    } else {
+      this.providers.set('insurent', new InsurentProvider({ apiKey: '', apiUrl: '' }));
+    }
+
+    if (config.leap) {
+      this.providers.set('leap', new LeapProvider(config.leap));
+    } else {
+      this.providers.set('leap', new LeapProvider({ apiKey: '', apiUrl: '' }));
     }
   }
 
@@ -304,6 +320,24 @@ export function createRegistryFromEnv(): ProviderRegistry {
       apiKey: process.env.SURE_API_KEY,
       apiUrl: process.env.SURE_API_URL || 'https://api.sureapp.com',
       webhookSecret: process.env.SURE_WEBHOOK_SECRET,
+    };
+  }
+
+  // Insurent
+  if (process.env.INSURENT_API_KEY) {
+    config.insurent = {
+      apiKey: process.env.INSURENT_API_KEY,
+      apiUrl: process.env.INSURENT_API_URL || 'https://api.insurent.com',
+      webhookSecret: process.env.INSURENT_WEBHOOK_SECRET,
+    };
+  }
+
+  // Leap
+  if (process.env.LEAP_API_KEY) {
+    config.leap = {
+      apiKey: process.env.LEAP_API_KEY,
+      apiUrl: process.env.LEAP_API_URL || 'https://api.leapfinance.com',
+      webhookSecret: process.env.LEAP_WEBHOOK_SECRET,
     };
   }
 
