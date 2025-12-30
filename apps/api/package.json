@@ -29,6 +29,7 @@
     "@realriches/config": "workspace:*",
     "@realriches/database": "workspace:*",
     "@realriches/document-storage": "workspace:*",
+    "@realriches/revenue-engine": "workspace:*",
     "@realriches/types": "workspace:*",
     "@realriches/utils": "workspace:*",
     "argon2": "^0.31.2",

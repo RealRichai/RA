@@ -80,6 +80,9 @@ importers:
       '@realriches/document-storage':
         specifier: workspace:*
         version: link:../../packages/document-storage
+      '@realriches/revenue-engine':
+        specifier: workspace:*
+        version: link:../../packages/revenue-engine
       '@realriches/types':
         specifier: workspace:*
         version: link:../../packages/types
