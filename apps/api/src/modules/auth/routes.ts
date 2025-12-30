@@ -1,8 +1,21 @@
+/**
+ * Authentication Routes
+ *
+ * Implements secure auth endpoints with:
+ * - Stricter rate limits on sensitive endpoints
+ * - Request context passed for security logging
+ * - Account lockout status in error responses
+ */
+
 import { RegisterRequestSchema, LoginRequestSchema } from '@realriches/types';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import { AuthService } from './service';
+
+// =============================================================================
+// Request Schemas
+// =============================================================================
 
 const RefreshSchema = z.object({
   refreshToken: z.string().min(1),
@@ -22,13 +35,46 @@ const ResetPasswordSchema = z.object({
   newPassword: z.string().min(8).max(128),
 });
 
+const VerifyEmailSchema = z.object({
+  token: z.string().min(1),
+});
+
+// =============================================================================
+// Rate Limit Configurations
+// =============================================================================
+
+// Stricter limits for auth endpoints (applied via route-level config)
+const AUTH_RATE_LIMIT = {
+  max: 10, // 10 requests
+  timeWindow: '1 minute',
+};
+
+const LOGIN_RATE_LIMIT = {
+  max: 5, // 5 login attempts
+  timeWindow: '1 minute',
+};
+
+const PASSWORD_RESET_RATE_LIMIT = {
+  max: 3, // 3 reset requests
+  timeWindow: '15 minutes',
+};
+
+// =============================================================================
+// Routes
+// =============================================================================
+
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   const authService = new AuthService(app);
 
+  // ===========================================================================
   // Register
+  // ===========================================================================
   app.post(
     '/register',
     {
+      config: {
+        rateLimit: AUTH_RATE_LIMIT,
+      },
       schema: {
         description: 'Register a new user account',
         tags: ['Auth'],
@@ -79,10 +125,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
+  // ===========================================================================
   // Login
+  // ===========================================================================
   app.post(
     '/login',
     {
+      config: {
+        rateLimit: LOGIN_RATE_LIMIT,
+      },
       schema: {
         description: 'Login with email and password',
         tags: ['Auth'],
@@ -115,28 +166,64 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
               },
             },
           },
+          423: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: {
+                type: 'object',
+                properties: {
+                  code: { type: 'string' },
+                  message: { type: 'string' },
+                  lockoutRemaining: { type: 'number' },
+                },
+              },
+            },
+          },
         },
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const input = LoginRequestSchema.parse(request.body);
-      const result = await authService.login({
-        ...input,
-        userAgent: request.headers['user-agent'],
-        ipAddress: request.ip,
-      });
 
-      return reply.send({
-        success: true,
-        data: result,
-      });
+      try {
+        const result = await authService.login({
+          ...input,
+          userAgent: request.headers['user-agent'],
+          ipAddress: request.ip,
+        });
+
+        return reply.send({
+          success: true,
+          data: result,
+        });
+      } catch (error) {
+        // Add lockout remaining time to error response
+        if (error instanceof Error && (error as any).code === 'ACCOUNT_LOCKED') {
+          const lockoutRemaining = await authService.getLockoutRemaining(input.email);
+          return reply.status(423).send({
+            success: false,
+            error: {
+              code: 'ACCOUNT_LOCKED',
+              message: error.message,
+              lockoutRemaining,
+            },
+          });
+        }
+        throw error;
+      }
     }
   );
 
-  // Refresh tokens
+  // ===========================================================================
+  // Refresh Tokens
+  // ===========================================================================
   app.post(
     '/refresh',
     {
+      config: {
+        rateLimit: AUTH_RATE_LIMIT,
+      },
       schema: {
         description: 'Refresh access token using refresh token',
         tags: ['Auth'],
@@ -167,7 +254,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { refreshToken } = RefreshSchema.parse(request.body);
-      const tokens = await authService.refreshTokens(refreshToken);
+      const tokens = await authService.refreshTokens(refreshToken, request);
 
       return reply.send({
         success: true,
@@ -176,7 +263,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
+  // ===========================================================================
   // Logout
+  // ===========================================================================
   app.post(
     '/logout',
     {
@@ -206,7 +295,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      await authService.logout(request.user.sessionId);
+      await authService.logout(request.user.sessionId, request.user.id, request);
 
       return reply.send({
         success: true,
@@ -215,7 +304,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Logout all sessions
+  // ===========================================================================
+  // Logout All Sessions
+  // ===========================================================================
   app.post(
     '/logout-all',
     {
@@ -245,7 +336,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      await authService.logoutAllSessions(request.user.id);
+      await authService.logoutAllSessions(request.user.id, request);
 
       return reply.send({
         success: true,
@@ -254,10 +345,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Change password
+  // ===========================================================================
+  // Change Password
+  // ===========================================================================
   app.post(
     '/change-password',
     {
+      config: {
+        rateLimit: AUTH_RATE_LIMIT,
+      },
       schema: {
         description: 'Change password for current user',
         tags: ['Auth'],
@@ -293,7 +389,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { currentPassword, newPassword } = ChangePasswordSchema.parse(request.body);
-      await authService.changePassword(request.user.id, currentPassword, newPassword);
+      await authService.changePassword(request.user.id, currentPassword, newPassword, request);
 
       return reply.send({
         success: true,
@@ -302,10 +398,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Request password reset
+  // ===========================================================================
+  // Forgot Password (Request Reset)
+  // ===========================================================================
   app.post(
     '/forgot-password',
     {
+      config: {
+        rateLimit: PASSWORD_RESET_RATE_LIMIT,
+      },
       schema: {
         description: 'Request password reset email',
         tags: ['Auth'],
@@ -329,7 +430,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { email } = RequestResetSchema.parse(request.body);
-      await authService.requestPasswordReset(email);
+      await authService.requestPasswordReset(email, request);
 
       // Always return success to prevent email enumeration
       return reply.send({
@@ -339,10 +440,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Reset password
+  // ===========================================================================
+  // Reset Password
+  // ===========================================================================
   app.post(
     '/reset-password',
     {
+      config: {
+        rateLimit: AUTH_RATE_LIMIT,
+      },
       schema: {
         description: 'Reset password using token',
         tags: ['Auth'],
@@ -367,7 +473,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { token, newPassword } = ResetPasswordSchema.parse(request.body);
-      await authService.resetPassword(token, newPassword);
+      await authService.resetPassword(token, newPassword, request);
 
       return reply.send({
         success: true,
@@ -376,7 +482,47 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Get current user
+  // ===========================================================================
+  // Verify Email
+  // ===========================================================================
+  app.post(
+    '/verify-email',
+    {
+      schema: {
+        description: 'Verify email using token',
+        tags: ['Auth'],
+        body: {
+          type: 'object',
+          required: ['token'],
+          properties: {
+            token: { type: 'string' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { token } = VerifyEmailSchema.parse(request.body);
+      await authService.verifyEmail(token, request);
+
+      return reply.send({
+        success: true,
+        message: 'Email verified successfully',
+      });
+    }
+  );
+
+  // ===========================================================================
+  // Get Current User
+  // ===========================================================================
   app.get(
     '/me',
     {
