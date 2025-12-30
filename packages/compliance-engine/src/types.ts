@@ -146,6 +146,8 @@ export const SecurityDepositRuleSchema = z.object({
   maxMonths: z.number(),
   interestRequired: z.boolean().optional(),
   separateAccountRequired: z.boolean().optional(),
+  returnDays: z.number().optional(), // Days landlord has to return deposit after move-out
+  exemptions: z.array(z.string()).optional(), // Exemption categories
 });
 
 export const RentIncreaseRuleSchema = z.object({
@@ -214,6 +216,50 @@ export const GDPRRuleSchema = z.object({
 
 export type GDPRRule = z.infer<typeof GDPRRuleSchema>;
 
+// California AB 1482 (Tenant Protection Act) Schema
+export const AB1482RuleSchema = z.object({
+  enabled: z.boolean(),
+  rentCapFormula: z.string().optional(), // e.g., 'cpi_plus_5_max_10'
+  justCauseEvictionRequired: z.boolean().optional(),
+  validEvictionReasons: z.array(z.string()).optional(),
+  relocationAssistance: z.object({
+    required: z.boolean(),
+    amount: z.string().optional(), // e.g., 'one_month_rent'
+    noFaultEvictionsOnly: z.boolean().optional(),
+  }).optional(),
+  exemptions: z.array(z.string()).optional(),
+});
+
+// Texas Property Code Schema
+export const TexasPropertyCodeRuleSchema = z.object({
+  enabled: z.boolean(),
+  repairRemedies: z.object({
+    enabled: z.boolean(),
+    noticeRequired: z.boolean().optional(),
+    noticeDays: z.number().optional(),
+    landlordResponseDays: z.number().optional(),
+    tenantRemedies: z.array(z.string()).optional(),
+  }).optional(),
+  lockoutProhibited: z.boolean().optional(),
+  utilityShutoffProhibited: z.boolean().optional(),
+  retaliationProhibited: z.boolean().optional(),
+  retaliationPeriodDays: z.number().optional(), // Months presumption period
+  securityDevices: z.object({
+    required: z.boolean(),
+    types: z.array(z.string()).optional(),
+    landlordMustProvide: z.boolean().optional(),
+    tenantCanRequest: z.boolean().optional(),
+  }).optional(),
+});
+
+// No Rent Control Schema (for states with preemption)
+export const NoRentControlRuleSchema = z.object({
+  enabled: z.boolean(),
+  statePreemption: z.boolean().optional(),
+  citiesCannotEnact: z.boolean().optional(),
+  reference: z.string().optional(),
+});
+
 export const MarketPackRulesSchema = z.object({
   brokerFee: BrokerFeeRuleSchema,
   securityDeposit: SecurityDepositRuleSchema,
@@ -235,6 +281,9 @@ export const MarketPackRulesSchema = z.object({
     rgbBoardUrl: z.string().optional(),
   }).optional(),
   gdpr: GDPRRuleSchema.optional(),
+  ab1482: AB1482RuleSchema.optional(), // California Tenant Protection Act
+  texasPropertyCode: TexasPropertyCodeRuleSchema.optional(), // Texas Property Code
+  noRentControl: NoRentControlRuleSchema.optional(), // State rent control preemption
 });
 
 export type MarketPackRules = z.infer<typeof MarketPackRulesSchema>;

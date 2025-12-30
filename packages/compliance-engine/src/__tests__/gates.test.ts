@@ -86,8 +86,8 @@ describe('Listing Publish Gate', () => {
     });
   });
 
-  describe('US Standard Market', () => {
-    it('should allow broker fee in standard US market', async () => {
+  describe('Texas Market', () => {
+    it('should allow broker fee in Texas market', async () => {
       const result = await gateListingPublish({
         listingId: 'lst_123',
         marketId: 'texas',
@@ -101,7 +101,7 @@ describe('Listing Publish Gate', () => {
       });
 
       expect(result.allowed).toBe(true);
-      expect(result.decision.marketPack).toBe('US_STANDARD');
+      expect(result.decision.marketPack).toBe('TX_STANDARD');
     });
   });
 });
