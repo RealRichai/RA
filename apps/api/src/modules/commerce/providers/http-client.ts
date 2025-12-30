@@ -9,8 +9,10 @@
  * - Result-based error handling
  */
 
-import { z, type ZodType } from 'zod';
+import crypto from 'crypto';
+
 import { generatePrefixedId, logger } from '@realriches/utils';
+import { z, type ZodType } from 'zod';
 
 // =============================================================================
 // Types
@@ -363,7 +365,6 @@ export class TypedHttpClient {
     }
 
     // Simple HMAC verification - provider-specific implementations may override
-    const crypto = require('crypto');
     const expectedSignature = crypto
       .createHmac('sha256', this.config.webhookSecret)
       .update(payload)

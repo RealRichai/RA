@@ -20,13 +20,13 @@ import {
   getMockMovingProvider,
   getMockUtilitiesProvider,
 } from './mock';
-import { createTheGuarantorsAdapter, type TheGuarantorsAdapter } from './the-guarantors';
 import type {
   IGuarantorProvider,
   IInsuranceProvider,
   IMovingProvider,
   IUtilitiesProvider,
 } from './provider.types';
+import { createTheGuarantorsAdapter, type TheGuarantorsAdapter } from './the-guarantors';
 
 // =============================================================================
 // Provider Configuration
