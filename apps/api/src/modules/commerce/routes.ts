@@ -1,7 +1,27 @@
-import { prisma } from '@realriches/database';
-import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+/**
+ * Commerce Routes
+ *
+ * Endpoints for commerce services:
+ * - Utilities concierge
+ * - Moving services
+ * - Renters insurance
+ * - Guarantor products
+ * - Vendor marketplace
+ *
+ * All endpoints use the CommerceService which orchestrates
+ * provider integrations with fallback to mock providers.
+ */
+
+import { generatePrefixedId } from '@realriches/utils';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+
+import { CommerceService } from './commerce.service';
+import type { Address, MoveSize, OrderType, UtilityType } from './providers/provider.types';
+
+// =============================================================================
+// Request Schemas
+// =============================================================================
 
 const UtilitySetupSchema = z.object({
   leaseId: z.string(),
@@ -25,10 +45,40 @@ const MovingQuoteSchema = z.object({
   floorNumber: z.number().int().optional(),
 });
 
+const MovingBookSchema = z.object({
+  quoteId: z.string(),
+  paymentMethodId: z.string(),
+  specialInstructions: z.string().optional(),
+});
+
+const InsuranceQuoteSchema = z.object({
+  leaseId: z.string(),
+  coverageAmount: z.number().int().min(5000).max(100000),
+  liabilityCoverage: z.number().int().min(100000).max(500000).default(100000),
+  deductible: z.number().int().min(100).max(2500).default(500),
+});
+
+const InsurancePurchaseSchema = z.object({
+  quoteId: z.string(),
+  leaseId: z.string(),
+  paymentMethodId: z.string(),
+  autoRenew: z.boolean().optional(),
+});
+
+const GuarantorApplySchema = z.object({
+  applicationId: z.string(),
+  leaseId: z.string(),
+  optionId: z.string(),
+  monthlyRent: z.number().int().min(500),
+  annualIncome: z.number().int().min(0),
+});
+
 const VendorOrderSchema = z.object({
   vendorId: z.string(),
   productId: z.string(),
+  productName: z.string(),
   quantity: z.number().int().min(1).default(1),
+  unitPrice: z.number().int().min(0),
   deliveryAddress: z.object({
     street: z.string(),
     unit: z.string().optional(),
@@ -38,12 +88,78 @@ const VendorOrderSchema = z.object({
   }),
   deliveryDate: z.string().datetime().optional(),
   notes: z.string().optional(),
+  idempotencyKey: z.string().optional(),
 });
 
-export async function commerceRoutes(app: FastifyInstance): Promise<void> {
-  // === UTILITIES CONCIERGE ===
+const OrderConfirmSchema = z.object({
+  orderId: z.string(),
+  paymentIntentId: z.string(),
+  idempotencyKey: z.string(),
+});
 
-  // Get available utility providers
+// Type exports for Zod schemas
+type MovingBookInput = z.infer<typeof MovingBookSchema>;
+type InsurancePurchaseInput = z.infer<typeof InsurancePurchaseSchema>;
+type GuarantorApplyInput = z.infer<typeof GuarantorApplySchema>;
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+function sendServiceResponse<T>(
+  reply: FastifyReply,
+  response: { success: boolean; data?: T; error?: { code: string; message: string }; meta?: any },
+  successStatus = 200
+): FastifyReply {
+  if (!response.success) {
+    const statusCode = response.error?.code === 'NOT_FOUND' ? 404
+      : response.error?.code === 'FORBIDDEN' ? 403
+      : response.error?.code === 'AUTH_REQUIRED' ? 401
+      : response.error?.code === 'INVALID_STATE' ? 409
+      : 400;
+
+    return reply.status(statusCode).send({
+      success: false,
+      error: response.error,
+    });
+  }
+
+  return reply.status(successStatus).send({
+    success: true,
+    data: response.data,
+    meta: response.meta,
+  });
+}
+
+// =============================================================================
+// Routes
+// =============================================================================
+
+export async function commerceRoutes(app: FastifyInstance): Promise<void> {
+  const commerceService = new CommerceService(app);
+
+  // ===========================================================================
+  // Provider Status (Admin/Debug)
+  // ===========================================================================
+
+  app.get(
+    '/status',
+    {
+      schema: {
+        description: 'Get commerce provider status',
+        tags: ['Commerce'],
+      },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const status = commerceService.getProviderStatus();
+      return reply.send({ success: true, data: status });
+    }
+  );
+
+  // ===========================================================================
+  // UTILITIES CONCIERGE
+  // ===========================================================================
+
   app.get(
     '/utilities/providers',
     {
@@ -54,60 +170,29 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
           type: 'object',
           properties: {
             zipCode: { type: 'string' },
-            utilityType: { type: 'string' },
+            utilityType: { type: 'string', enum: ['ELECTRIC', 'GAS', 'WATER', 'INTERNET', 'CABLE', 'TRASH'] },
           },
+          required: ['zipCode'],
         },
       },
     },
     async (
       request: FastifyRequest<{
-        Querystring: { zipCode?: string; utilityType?: string };
+        Querystring: { zipCode: string; utilityType?: UtilityType };
       }>,
       reply: FastifyReply
     ) => {
       const { zipCode, utilityType } = request.query;
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with utility provider APIs
-      // Return providers available in the area
-
-      const providers = [
-        {
-          id: 'con-ed',
-          name: 'Con Edison',
-          types: ['ELECTRIC', 'GAS'],
-          website: 'https://coned.com',
-          phone: '1-800-752-6633',
-        },
-        {
-          id: 'national-grid',
-          name: 'National Grid',
-          types: ['GAS'],
-          website: 'https://nationalgrid.com',
-          phone: '1-800-930-5003',
-        },
-        {
-          id: 'spectrum',
-          name: 'Spectrum',
-          types: ['INTERNET', 'CABLE'],
-          website: 'https://spectrum.com',
-          phone: '1-844-222-0718',
-        },
-      ];
-
-      const filtered = utilityType
-        ? providers.filter((p) => p.types.includes(utilityType))
-        : providers;
-
-      return reply.send({ success: true, data: filtered });
+      const response = await commerceService.getUtilityProviders({ zipCode, utilityType });
+      return sendServiceResponse(reply, response);
     }
   );
 
-  // Request utility setup
   app.post(
     '/utilities/setup',
     {
       schema: {
-        description: 'Request utility setup assistance',
+        description: 'Request utility setup assistance via concierge service',
         tags: ['Commerce'],
         security: [{ bearerAuth: [] }],
       },
@@ -116,51 +201,21 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-        });
-      }
-
       const data = UtilitySetupSchema.parse(request.body);
-
-      const lease = await prisma.lease.findUnique({
-        where: { id: data.leaseId },
-        include: { unit: { include: { property: true } } },
+      const response = await commerceService.createUtilitySetup(request, {
+        leaseId: data.leaseId,
+        utilityType: data.utilityType as UtilityType,
+        provider: data.provider,
+        transferDate: new Date(data.transferDate),
       });
-
-      if (!lease || lease.tenantId !== request.user.id) {
-        throw new ForbiddenError('Access denied');
-      }
-
-      // Create utility setup request
-      const utilitySetup = await prisma.utilitySetup.create({
-        data: {
-          id: generatePrefixedId('utl'),
-          leaseId: data.leaseId,
-          userId: request.user.id,
-          utilityType: data.utilityType,
-          provider: data.provider,
-          transferDate: new Date(data.transferDate),
-          status: 'PENDING',
-          address: lease.unit.property.address,
-        },
-      });
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with utility concierge service
-
-      return reply.status(201).send({
-        success: true,
-        data: utilitySetup,
-        message: 'Utility setup request submitted. We will contact you shortly.',
-      });
+      return sendServiceResponse(reply, response, 201);
     }
   );
 
-  // === MOVING SERVICES ===
+  // ===========================================================================
+  // MOVING SERVICES
+  // ===========================================================================
 
-  // Get moving quotes
   app.post(
     '/moving/quotes',
     {
@@ -174,83 +229,20 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-        });
-      }
-
       const data = MovingQuoteSchema.parse(request.body);
-
-      const lease = await prisma.lease.findUnique({
-        where: { id: data.leaseId },
-        include: { unit: { include: { property: true } } },
+      const response = await commerceService.getMovingQuotes(request, {
+        leaseId: data.leaseId,
+        originAddress: data.originAddress as Address,
+        moveDate: new Date(data.moveDate),
+        estimatedItems: data.estimatedItems as MoveSize,
+        needsPacking: data.needsPacking,
+        hasElevator: data.hasElevator,
+        floorNumber: data.floorNumber,
       });
-
-      if (!lease || lease.tenantId !== request.user.id) {
-        throw new ForbiddenError('Access denied');
-      }
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with moving company APIs
-      // For now, return sample quotes
-
-      const basePrice = {
-        STUDIO: 300,
-        ONE_BEDROOM: 500,
-        TWO_BEDROOM: 800,
-        THREE_PLUS: 1200,
-      }[data.estimatedItems];
-
-      const quotes = [
-        {
-          id: generatePrefixedId('mvq'),
-          company: 'City Movers',
-          price: basePrice * 1.0,
-          duration: '3-4 hours',
-          rating: 4.8,
-          reviews: 234,
-          includes: ['Loading', 'Unloading', 'Basic protection'],
-        },
-        {
-          id: generatePrefixedId('mvq'),
-          company: 'Quick Move NYC',
-          price: basePrice * 1.15,
-          duration: '3-5 hours',
-          rating: 4.6,
-          reviews: 189,
-          includes: ['Loading', 'Unloading', 'Basic protection', 'Furniture disassembly'],
-        },
-        {
-          id: generatePrefixedId('mvq'),
-          company: 'Premium Relocations',
-          price: basePrice * 1.4,
-          duration: '4-5 hours',
-          rating: 4.9,
-          reviews: 312,
-          includes: [
-            'Loading',
-            'Unloading',
-            'Full protection',
-            'Furniture disassembly',
-            'Packing materials',
-          ],
-        },
-      ];
-
-      // Add packing cost if needed
-      if (data.needsPacking) {
-        quotes.forEach((q) => {
-          q.price *= 1.3;
-          q.includes.push('Full packing service');
-        });
-      }
-
-      return reply.send({ success: true, data: quotes });
+      return sendServiceResponse(reply, response);
     }
   );
 
-  // Book moving service
   app.post(
     '/moving/book',
     {
@@ -264,38 +256,16 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-        });
-      }
-
-      const { quoteId, paymentMethodId } = (request.body as {
-        quoteId: string;
-        paymentMethodId: string;
-      }) || {};
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Process booking with moving company
-
-      const booking = {
-        id: generatePrefixedId('mvb'),
-        quoteId,
-        status: 'CONFIRMED',
-        confirmationCode: `MV-${Date.now().toString(36).toUpperCase()}`,
-      };
-
-      return reply.status(201).send({
-        success: true,
-        data: booking,
-        message: 'Moving service booked successfully. Confirmation sent to your email.',
-      });
+      const data: MovingBookInput = MovingBookSchema.parse(request.body);
+      const response = await commerceService.bookMovingService(request, data);
+      return sendServiceResponse(reply, response, 201);
     }
   );
 
-  // === VENDOR MARKETPLACE ===
+  // ===========================================================================
+  // VENDOR MARKETPLACE
+  // ===========================================================================
 
-  // List marketplace vendors
   app.get(
     '/marketplace/vendors',
     {
@@ -307,69 +277,32 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
           properties: {
             category: { type: 'string' },
             search: { type: 'string' },
+            serviceArea: { type: 'string' },
+            minRating: { type: 'number' },
+            limit: { type: 'number', default: 20 },
+            offset: { type: 'number', default: 0 },
           },
         },
       },
     },
     async (
       request: FastifyRequest<{
-        Querystring: { category?: string; search?: string };
+        Querystring: {
+          category?: string;
+          search?: string;
+          serviceArea?: string;
+          minRating?: number;
+          limit?: number;
+          offset?: number;
+        };
       }>,
       reply: FastifyReply
     ) => {
-      const { category, search } = request.query;
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Query actual vendor database
-      // For now, return sample vendors
-
-      const vendors = [
-        {
-          id: 'vendor-1',
-          name: 'NYC Furniture Outlet',
-          category: 'FURNITURE',
-          rating: 4.7,
-          description: 'Quality furniture at affordable prices',
-          logo: 'https://example.com/logo1.png',
-          featured: true,
-        },
-        {
-          id: 'vendor-2',
-          name: 'Home Essentials Plus',
-          category: 'HOME_GOODS',
-          rating: 4.5,
-          description: 'Everything you need for your new home',
-          logo: 'https://example.com/logo2.png',
-          featured: false,
-        },
-        {
-          id: 'vendor-3',
-          name: 'CleanStart Services',
-          category: 'CLEANING',
-          rating: 4.9,
-          description: 'Professional move-in/move-out cleaning',
-          logo: 'https://example.com/logo3.png',
-          featured: true,
-        },
-      ];
-
-      let filtered = vendors;
-      if (category) {
-        filtered = filtered.filter((v) => v.category === category);
-      }
-      if (search) {
-        const searchLower = search.toLowerCase();
-        filtered = filtered.filter(
-          (v) =>
-            v.name.toLowerCase().includes(searchLower) ||
-            v.description.toLowerCase().includes(searchLower)
-        );
-      }
-
-      return reply.send({ success: true, data: filtered });
+      const response = await commerceService.listVendors(request.query);
+      return sendServiceResponse(reply, response);
     }
   );
 
-  // Get vendor products
   app.get(
     '/marketplace/vendors/:vendorId/products',
     {
@@ -381,33 +314,30 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
           properties: { vendorId: { type: 'string' } },
           required: ['vendorId'],
         },
+        querystring: {
+          type: 'object',
+          properties: {
+            category: { type: 'string' },
+            limit: { type: 'number' },
+          },
+        },
       },
     },
-    async (request: FastifyRequest<{ Params: { vendorId: string } }>, reply: FastifyReply) => {
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Query actual product database
-
-      const products = [
-        {
-          id: 'prod-1',
-          name: 'Move-In Cleaning Package',
-          description: 'Deep cleaning for your new apartment',
-          price: 149.99,
-          category: 'SERVICES',
-        },
-        {
-          id: 'prod-2',
-          name: 'Essential Kitchen Set',
-          description: 'Pots, pans, and utensils to get started',
-          price: 89.99,
-          category: 'HOME_GOODS',
-        },
-      ];
-
-      return reply.send({ success: true, data: products });
+    async (
+      request: FastifyRequest<{
+        Params: { vendorId: string };
+        Querystring: { category?: string; limit?: number };
+      }>,
+      reply: FastifyReply
+    ) => {
+      const response = await commerceService.getVendorProducts(
+        request.params.vendorId,
+        request.query
+      );
+      return sendServiceResponse(reply, response);
     }
   );
 
-  // Place order
   app.post(
     '/marketplace/orders',
     {
@@ -429,32 +359,118 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const data = VendorOrderSchema.parse(request.body);
+      const idempotencyKey = data.idempotencyKey || generatePrefixedId('idem');
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Process order with vendor
-      // Create order in database and process payment
-
-      const order = {
-        id: generatePrefixedId('ord'),
+      const response = await commerceService.createOrder(request, {
+        userId: request.user.id,
+        type: 'VENDOR_PRODUCT' as OrderType,
+        items: [
+          {
+            productId: data.productId,
+            productName: data.productName,
+            quantity: data.quantity,
+            unitPrice: data.unitPrice,
+            totalPrice: data.unitPrice * data.quantity,
+          },
+        ],
         vendorId: data.vendorId,
-        productId: data.productId,
-        quantity: data.quantity,
-        status: 'CONFIRMED',
-        deliveryAddress: data.deliveryAddress,
-        estimatedDelivery: data.deliveryDate || new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
-        orderNumber: `ORD-${Date.now().toString(36).toUpperCase()}`,
-      };
-
-      return reply.status(201).send({
-        success: true,
-        data: order,
-        message: 'Order placed successfully',
+        deliveryAddress: data.deliveryAddress as Address,
+        deliveryDate: data.deliveryDate ? new Date(data.deliveryDate) : undefined,
+        idempotencyKey,
+        notes: data.notes,
       });
+
+      return sendServiceResponse(reply, response, 201);
     }
   );
 
-  // === RENTERS INSURANCE ===
+  app.post(
+    '/marketplace/orders/:orderId/confirm',
+    {
+      schema: {
+        description: 'Confirm an order with payment',
+        tags: ['Commerce'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (
+      request: FastifyRequest<{ Params: { orderId: string } }>,
+      reply: FastifyReply
+    ) => {
+      const body = OrderConfirmSchema.parse(request.body);
+      const response = await commerceService.confirmOrder(request, {
+        orderId: request.params.orderId,
+        paymentIntentId: body.paymentIntentId,
+        idempotencyKey: body.idempotencyKey,
+      });
+      return sendServiceResponse(reply, response);
+    }
+  );
 
-  // Get insurance quotes
+  app.post(
+    '/marketplace/orders/:orderId/cancel',
+    {
+      schema: {
+        description: 'Cancel an order',
+        tags: ['Commerce'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (
+      request: FastifyRequest<{ Params: { orderId: string }; Body: { reason?: string } }>,
+      reply: FastifyReply
+    ) => {
+      const reason = (request.body as { reason?: string })?.reason;
+      const response = await commerceService.cancelOrder(
+        request,
+        request.params.orderId,
+        reason
+      );
+      return sendServiceResponse(reply, response);
+    }
+  );
+
+  app.get(
+    '/marketplace/orders/:orderId',
+    {
+      schema: {
+        description: 'Get order details',
+        tags: ['Commerce'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (
+      request: FastifyRequest<{ Params: { orderId: string } }>,
+      reply: FastifyReply
+    ) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
+      const response = await commerceService.getOrder(
+        request.params.orderId,
+        request.user.id
+      );
+      return sendServiceResponse(reply, response);
+    }
+  );
+
+  // ===========================================================================
+  // RENTERS INSURANCE
+  // ===========================================================================
+
   app.post(
     '/insurance/quotes',
     {
@@ -468,58 +484,17 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-        });
-      }
-
-      const { leaseId, coverageAmount, deductible } = (request.body as {
-        leaseId: string;
-        coverageAmount: number;
-        deductible: number;
-      }) || {};
-
-      const lease = await prisma.lease.findUnique({
-        where: { id: leaseId },
-        include: { unit: { include: { property: true } } },
+      const data = InsuranceQuoteSchema.parse(request.body);
+      const response = await commerceService.getInsuranceQuotes(request, {
+        leaseId: data.leaseId,
+        coverageAmount: data.coverageAmount,
+        liabilityCoverage: data.liabilityCoverage,
+        deductible: data.deductible,
       });
-
-      if (!lease || lease.tenantId !== request.user.id) {
-        throw new ForbiddenError('Access denied');
-      }
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with Lemonade/other insurance APIs
-
-      const monthlyPremium = (coverageAmount / 1000) * 0.5 + (1000 - deductible) * 0.01;
-
-      const quotes = [
-        {
-          id: generatePrefixedId('ins'),
-          provider: 'Lemonade',
-          monthlyPremium: Math.round(monthlyPremium * 100) / 100,
-          coverageAmount,
-          deductible,
-          features: ['Personal property', 'Liability', 'Loss of use', 'Medical payments'],
-          rating: 4.9,
-        },
-        {
-          id: generatePrefixedId('ins'),
-          provider: 'State Farm',
-          monthlyPremium: Math.round(monthlyPremium * 1.1 * 100) / 100,
-          coverageAmount,
-          deductible,
-          features: ['Personal property', 'Liability', 'Loss of use', 'Identity theft'],
-          rating: 4.7,
-        },
-      ];
-
-      return reply.send({ success: true, data: quotes });
+      return sendServiceResponse(reply, response);
     }
   );
 
-  // Purchase insurance
   app.post(
     '/insurance/purchase',
     {
@@ -533,48 +508,16 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-        });
-      }
-
-      const { quoteId, leaseId, paymentMethodId } = (request.body as {
-        quoteId: string;
-        leaseId: string;
-        paymentMethodId: string;
-      }) || {};
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Process insurance purchase
-
-      const policy = await prisma.rentersInsurance.create({
-        data: {
-          id: generatePrefixedId('rip'),
-          leaseId,
-          userId: request.user.id,
-          provider: 'Lemonade',
-          policyNumber: `POL-${Date.now().toString(36).toUpperCase()}`,
-          coverageAmount: 30000,
-          deductible: 500,
-          monthlyPremium: 15.0,
-          startDate: new Date(),
-          endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-          status: 'ACTIVE',
-        },
-      });
-
-      return reply.status(201).send({
-        success: true,
-        data: policy,
-        message: 'Insurance policy activated. Certificate sent to your email.',
-      });
+      const data: InsurancePurchaseInput = InsurancePurchaseSchema.parse(request.body);
+      const response = await commerceService.purchaseInsurance(request, data);
+      return sendServiceResponse(reply, response, 201);
     }
   );
 
-  // === GUARANTOR PRODUCTS ===
+  // ===========================================================================
+  // GUARANTOR PRODUCTS
+  // ===========================================================================
 
-  // Get guarantor options
   app.get(
     '/guarantor/options',
     {
@@ -582,46 +525,27 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
         description: 'Get guarantor service options',
         tags: ['Commerce'],
         security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            monthlyRent: { type: 'number' },
+          },
+        },
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
       },
     },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with The Guarantors API
-
-      const options = [
-        {
-          id: 'tg-basic',
-          provider: 'The Guarantors',
-          name: 'Basic Coverage',
-          coverageMultiple: 1, // 1x rent
-          feePercentage: 5,
-          description: 'Standard guarantor coverage for 1x monthly rent',
-        },
-        {
-          id: 'tg-premium',
-          provider: 'The Guarantors',
-          name: 'Premium Coverage',
-          coverageMultiple: 2, // 2x rent
-          feePercentage: 8,
-          description: 'Enhanced coverage for 2x monthly rent',
-        },
-        {
-          id: 'insurent',
-          provider: 'Insurent',
-          name: 'Institutional Guarantee',
-          coverageMultiple: 2,
-          feePercentage: 6.5,
-          description: 'Institutional guarantor service',
-        },
-      ];
-
-      return reply.send({ success: true, data: options });
+    async (
+      request: FastifyRequest<{ Querystring: { monthlyRent?: number } }>,
+      reply: FastifyReply
+    ) => {
+      const monthlyRent = request.query.monthlyRent || 2000;
+      const response = await commerceService.getGuarantorOptions(monthlyRent);
+      return sendServiceResponse(reply, response);
     }
   );
 
-  // Apply for guarantor
   app.post(
     '/guarantor/apply',
     {
@@ -635,37 +559,32 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-        });
-      }
+      const data: GuarantorApplyInput = GuarantorApplySchema.parse(request.body);
+      const response = await commerceService.submitGuarantorApplication(request, data);
+      return sendServiceResponse(reply, response, 201);
+    }
+  );
 
-      const { applicationId, optionId, annualIncome } = (request.body as {
-        applicationId: string;
-        optionId: string;
-        annualIncome: number;
-      }) || {};
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Submit to guarantor provider
-
-      const application = await prisma.guarantorProduct.create({
-        data: {
-          id: generatePrefixedId('gua'),
-          userId: request.user.id,
-          applicationId,
-          provider: optionId.startsWith('tg') ? 'THE_GUARANTORS' : 'INSURENT',
-          status: 'PENDING',
-          annualFee: (annualIncome * 12 * 0.005), // Approximate
-        },
-      });
-
-      return reply.status(201).send({
-        success: true,
-        data: application,
-        message: 'Guarantor application submitted. Decision typically within 24 hours.',
-      });
+  app.get(
+    '/guarantor/applications/:applicationId/status',
+    {
+      schema: {
+        description: 'Poll guarantor application status',
+        tags: ['Commerce'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (
+      request: FastifyRequest<{ Params: { applicationId: string } }>,
+      reply: FastifyReply
+    ) => {
+      const response = await commerceService.pollGuarantorStatus(
+        request.params.applicationId
+      );
+      return sendServiceResponse(reply, response);
     }
   );
 }
