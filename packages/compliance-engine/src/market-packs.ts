@@ -890,6 +890,541 @@ export const CO_STANDARD_V1: MarketPack = {
 };
 
 // ============================================================================
+// MA_STANDARD v1.0.0 - Massachusetts Compliance Pack
+// ============================================================================
+
+export const MA_STANDARD_V1: MarketPack = {
+  id: 'MA_STANDARD',
+  name: 'Massachusetts Standard Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'Massachusetts compliance with security deposit interest, last month rent rules, and tenant protections',
+  jurisdiction: 'Massachusetts',
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 1, // Max one month security deposit
+      interestRequired: true, // Must pay 5% annual interest or actual bank rate
+      separateAccountRequired: true, // Must be in separate interest-bearing account
+      returnDays: 30,
+    },
+    rentIncrease: {
+      enabled: false,
+      noticeRequired: true,
+      noticeDays: 30, // 30 days or one rental period, whichever is longer
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'lead_paint_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'security_deposit_receipt',
+        requiredBefore: 'move_in',
+        signatureRequired: true,
+      },
+      {
+        type: 'statement_of_condition',
+        requiredBefore: 'move_in',
+        signatureRequired: true,
+      },
+      {
+        type: 'insurance_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'landlord_manager_identity',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'smoke_detector_compliance',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+    ],
+    massachusettsRules: {
+      enabled: true,
+      lastMonthRent: {
+        canCollect: true,
+        interestRequired: true,
+      },
+      statementOfCondition: {
+        required: true,
+        withinDays: 10, // Must provide within 10 days of tenancy
+        tenantResponseDays: 15,
+      },
+      securityDepositInterest: {
+        rate: 'five_percent_or_bank_rate',
+        paymentFrequency: 'annual',
+      },
+    },
+  },
+  metadata: {
+    legislativeReferences: [
+      'Massachusetts General Laws Chapter 186 (Tenancy)',
+      'MGL c. 186, § 15B (Security Deposits)',
+      'MGL c. 111, § 127L (Lead Paint)',
+      '105 CMR 410 (Minimum Standards of Fitness)',
+    ],
+  },
+};
+
+// ============================================================================
+// NJ_STANDARD v1.0.0 - New Jersey Compliance Pack
+// ============================================================================
+
+export const NJ_STANDARD_V1: MarketPack = {
+  id: 'NJ_STANDARD',
+  name: 'New Jersey Standard Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'New Jersey compliance with security deposit limits, interest requirements, and Truth in Renting Act',
+  jurisdiction: 'New Jersey',
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 1.5, // Max 1.5 months rent
+      interestRequired: true, // Must pay interest annually
+      separateAccountRequired: true, // Must be in NJ bank or savings institution
+      returnDays: 30, // 30 days, or 5 days for domestic violence
+    },
+    rentIncrease: {
+      enabled: false, // Some municipalities have rent control
+      noticeRequired: true,
+      noticeDays: 30,
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'lead_paint_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'truth_in_renting_statement',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'flood_zone_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'window_guard_notice',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'landlord_identity_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+    ],
+    newJerseyRules: {
+      enabled: true,
+      truthInRenting: {
+        required: true,
+        dgcaApproved: true, // Must use DCA-approved statement
+      },
+      securityDepositInterest: {
+        annualPayment: true,
+        bankMustBeInNJ: true,
+      },
+      antiEvictionAct: {
+        enabled: true, // NJ Anti-Eviction Act protections
+        goodCauseRequired: true,
+      },
+    },
+  },
+  metadata: {
+    antiEvictionActEffectiveDate: '1974-01-01',
+    legislativeReferences: [
+      'N.J.S.A. 46:8-19 to 46:8-26 (Security Deposits)',
+      'N.J.S.A. 46:8-43 to 46:8-50 (Truth in Renting)',
+      'N.J.S.A. 2A:18-61.1 (Anti-Eviction Act)',
+      'N.J.A.C. 5:10 (Hotel and Multiple Dwelling Code)',
+    ],
+  },
+};
+
+// ============================================================================
+// PA_STANDARD v1.0.0 - Pennsylvania Compliance Pack
+// ============================================================================
+
+export const PA_STANDARD_V1: MarketPack = {
+  id: 'PA_STANDARD',
+  name: 'Pennsylvania Standard Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'Pennsylvania compliance with Landlord Tenant Act, security deposit limits, and escrow requirements',
+  jurisdiction: 'Pennsylvania',
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 2, // First year: 2 months max; After first year: 1 month max
+      interestRequired: true, // After 2 years, must pay interest or put in escrow
+      separateAccountRequired: true, // After 2 years, must be in escrow
+      returnDays: 30,
+    },
+    rentIncrease: {
+      enabled: false,
+      noticeRequired: true,
+      noticeDays: 30,
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'lead_paint_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'landlord_identity_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'radon_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'security_deposit_location',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+    ],
+    pennsylvaniaRules: {
+      enabled: true,
+      securityDepositTiers: {
+        firstYear: 2, // Max 2 months first year
+        afterFirstYear: 1, // Max 1 month after first year
+      },
+      escrowAfterTwoYears: {
+        required: true,
+        interestRate: 'market_rate',
+      },
+      philadelphiaRules: {
+        fairHousingOrdinance: true,
+        goodCauseEviction: true, // Philadelphia has additional protections
+      },
+    },
+  },
+  metadata: {
+    legislativeReferences: [
+      '68 P.S. § 250.101 et seq. (Landlord and Tenant Act)',
+      '68 P.S. § 250.511a-512 (Security Deposits)',
+      '35 P.S. § 7210.101 (Radon Certification Act)',
+      'Philadelphia Code § 9-804 (Good Cause Eviction)',
+    ],
+  },
+};
+
+// ============================================================================
+// GA_STANDARD v1.0.0 - Georgia Compliance Pack
+// ============================================================================
+
+export const GA_STANDARD_V1: MarketPack = {
+  id: 'GA_STANDARD',
+  name: 'Georgia Standard Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'Georgia compliance with Landlord Tenant Act, security deposit handling, and disclosure requirements',
+  jurisdiction: 'Georgia',
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 0, // No statutory limit
+      interestRequired: false,
+      separateAccountRequired: true, // Must be in escrow account if > 10 units
+      returnDays: 30, // One month from termination
+    },
+    rentIncrease: {
+      enabled: false,
+      noticeRequired: true,
+      noticeDays: 60, // 60 days for lease changes
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'lead_paint_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'flooding_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'authorized_agent_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'move_in_inspection_list',
+        requiredBefore: 'move_in',
+        signatureRequired: true,
+      },
+      {
+        type: 'mold_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+    ],
+    georgiaRules: {
+      enabled: true,
+      escrowRequirement: {
+        unitsThreshold: 10, // Escrow required for landlords with 10+ units
+        bankingInstitutionRequired: true,
+      },
+      moveInInspection: {
+        required: true,
+        tenantSignatureRequired: true,
+        listMustBeComprehensive: true,
+      },
+      securityDepositDeductions: {
+        itemizedStatementRequired: true,
+        withinThreeDays: true, // Must provide list within 3 days of inspection
+      },
+    },
+    noRentControl: {
+      enabled: true,
+      statePreemption: true,
+      citiesCannotEnact: true,
+      reference: 'O.C.G.A. § 44-7-19',
+    },
+  },
+  metadata: {
+    legislativeReferences: [
+      'O.C.G.A. § 44-7-30 to 44-7-37 (Security Deposits)',
+      'O.C.G.A. § 44-7-33 (Move-in Inspection)',
+      'O.C.G.A. § 44-7-20 (Flooding Disclosure)',
+      'O.C.G.A. § 44-7-19 (Rent Control Preemption)',
+    ],
+  },
+};
+
+// ============================================================================
+// AZ_STANDARD v1.0.0 - Arizona Compliance Pack
+// ============================================================================
+
+export const AZ_STANDARD_V1: MarketPack = {
+  id: 'AZ_STANDARD',
+  name: 'Arizona Standard Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'Arizona compliance with Residential Landlord Tenant Act, security deposit limits, and disclosure requirements',
+  jurisdiction: 'Arizona',
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 1.5, // Max 1.5 months rent
+      interestRequired: false,
+      separateAccountRequired: false,
+      returnDays: 14, // Must return within 14 business days
+    },
+    rentIncrease: {
+      enabled: false,
+      noticeRequired: true,
+      noticeDays: 30,
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'lead_paint_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'move_in_inspection_statement',
+        requiredBefore: 'move_in',
+        signatureRequired: true,
+      },
+      {
+        type: 'bedbug_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'pool_safety_notice',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'landlord_contact_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'nonrefundable_fees_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+    ],
+    arizonaRules: {
+      enabled: true,
+      moveInInspection: {
+        required: true,
+        landlordMustProvide: true,
+        tenantHas5DaysToComplete: true,
+      },
+      nonrefundableFees: {
+        mustBeDisclosed: true,
+        separateFromDeposit: true,
+      },
+      poolSafety: {
+        noticeRequired: true,
+        fencingRequirements: true,
+      },
+      remedies: {
+        repairAndDeduct: true,
+        maxDeductAmount: 'half_month_rent',
+        rentWithholding: true,
+      },
+    },
+    noRentControl: {
+      enabled: true,
+      statePreemption: true,
+      citiesCannotEnact: true,
+      reference: 'A.R.S. § 33-1329',
+    },
+  },
+  metadata: {
+    legislativeReferences: [
+      'A.R.S. § 33-1301 to 33-1381 (Residential Landlord Tenant Act)',
+      'A.R.S. § 33-1321 (Security Deposits)',
+      'A.R.S. § 33-1319 (Move-in Inspection)',
+      'A.R.S. § 33-1329 (Rent Control Preemption)',
+      'A.R.S. § 36-1681 (Pool Safety)',
+    ],
+  },
+};
+
+// ============================================================================
+// NV_STANDARD v1.0.0 - Nevada Compliance Pack
+// ============================================================================
+
+export const NV_STANDARD_V1: MarketPack = {
+  id: 'NV_STANDARD',
+  name: 'Nevada Standard Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'Nevada compliance with landlord tenant laws, security deposit limits, and disclosure requirements',
+  jurisdiction: 'Nevada',
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 3, // Max 3 months rent
+      interestRequired: false,
+      separateAccountRequired: false,
+      returnDays: 30,
+    },
+    rentIncrease: {
+      enabled: false,
+      noticeRequired: true,
+      noticeDays: 45, // 45 days written notice
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'lead_paint_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'foreclosure_status_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'move_in_checklist',
+        requiredBefore: 'move_in',
+        signatureRequired: true,
+      },
+      {
+        type: 'landlord_contact_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'nuisance_and_noise_policy',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+    ],
+    nevadaRules: {
+      enabled: true,
+      foreclosureDisclosure: {
+        required: true,
+        mustDiscloseIfInForeclosure: true,
+      },
+      moveInChecklist: {
+        recommended: true,
+        helpfulForDepositDisputes: true,
+      },
+      landlordRemedies: {
+        summaryEviction: true,
+        noticePeriods: {
+          nonPayment: 7, // 7 days for non-payment
+          leaseViolation: 5, // 5 days to cure
+          unlawfulDetainer: 5,
+        },
+      },
+      tenantRemedies: {
+        repairAndDeduct: true,
+        rentWithholding: false, // Not explicitly allowed in NV
+        habitabilityStandards: true,
+      },
+    },
+    noRentControl: {
+      enabled: true,
+      statePreemption: true,
+      citiesCannotEnact: true,
+      reference: 'NRS 268.4159 and NRS 278.0215',
+    },
+  },
+  metadata: {
+    legislativeReferences: [
+      'NRS Chapter 118A (Residential Landlord Tenant Act)',
+      'NRS 118A.242 (Security Deposits)',
+      'NRS 118A.275 (Foreclosure Disclosure)',
+      'NRS 268.4159 (Rent Control Preemption - Cities)',
+      'NRS 278.0215 (Rent Control Preemption - Counties)',
+    ],
+  },
+};
+
+// ============================================================================
 // Market Pack Registry
 // ============================================================================
 
@@ -902,6 +1437,12 @@ export const MARKET_PACKS: Record<MarketPackId, MarketPack> = {
   IL_STANDARD: IL_STANDARD_V1,
   WA_STANDARD: WA_STANDARD_V1,
   CO_STANDARD: CO_STANDARD_V1,
+  MA_STANDARD: MA_STANDARD_V1,
+  NJ_STANDARD: NJ_STANDARD_V1,
+  PA_STANDARD: PA_STANDARD_V1,
+  GA_STANDARD: GA_STANDARD_V1,
+  AZ_STANDARD: AZ_STANDARD_V1,
+  NV_STANDARD: NV_STANDARD_V1,
   UK_GDPR: UK_GDPR_V1,
 };
 
@@ -1031,6 +1572,104 @@ export function getMarketPackIdFromMarket(marketId: string): MarketPackId {
     'boulder': 'CO_STANDARD',
     'greeley': 'CO_STANDARD',
     'longmont': 'CO_STANDARD',
+    // Massachusetts markets
+    'ma': 'MA_STANDARD',
+    'massachusetts': 'MA_STANDARD',
+    'boston': 'MA_STANDARD',
+    'worcester': 'MA_STANDARD',
+    'springfield_ma': 'MA_STANDARD',
+    'cambridge': 'MA_STANDARD',
+    'lowell': 'MA_STANDARD',
+    'brockton': 'MA_STANDARD',
+    'new_bedford': 'MA_STANDARD',
+    'quincy': 'MA_STANDARD',
+    'lynn': 'MA_STANDARD',
+    'fall_river': 'MA_STANDARD',
+    'newton': 'MA_STANDARD',
+    'somerville': 'MA_STANDARD',
+    // New Jersey markets
+    'nj': 'NJ_STANDARD',
+    'new_jersey': 'NJ_STANDARD',
+    'newark': 'NJ_STANDARD',
+    'jersey_city': 'NJ_STANDARD',
+    'paterson': 'NJ_STANDARD',
+    'elizabeth': 'NJ_STANDARD',
+    'edison': 'NJ_STANDARD',
+    'woodbridge': 'NJ_STANDARD',
+    'lakewood_nj': 'NJ_STANDARD',
+    'toms_river': 'NJ_STANDARD',
+    'hamilton': 'NJ_STANDARD',
+    'trenton': 'NJ_STANDARD',
+    'clifton': 'NJ_STANDARD',
+    'camden': 'NJ_STANDARD',
+    'brick': 'NJ_STANDARD',
+    'cherry_hill': 'NJ_STANDARD',
+    'passaic': 'NJ_STANDARD',
+    'hoboken': 'NJ_STANDARD',
+    // Pennsylvania markets
+    'pa': 'PA_STANDARD',
+    'pennsylvania': 'PA_STANDARD',
+    'philadelphia': 'PA_STANDARD',
+    'pittsburgh': 'PA_STANDARD',
+    'allentown': 'PA_STANDARD',
+    'reading': 'PA_STANDARD',
+    'scranton': 'PA_STANDARD',
+    'bethlehem': 'PA_STANDARD',
+    'lancaster': 'PA_STANDARD',
+    'harrisburg': 'PA_STANDARD',
+    'altoona': 'PA_STANDARD',
+    'erie': 'PA_STANDARD',
+    'wilkes_barre': 'PA_STANDARD',
+    'york': 'PA_STANDARD',
+    'state_college': 'PA_STANDARD',
+    // Georgia markets
+    'ga': 'GA_STANDARD',
+    'georgia': 'GA_STANDARD',
+    'atlanta': 'GA_STANDARD',
+    'augusta': 'GA_STANDARD',
+    'columbus_ga': 'GA_STANDARD',
+    'macon': 'GA_STANDARD',
+    'savannah': 'GA_STANDARD',
+    'athens': 'GA_STANDARD',
+    'sandy_springs': 'GA_STANDARD',
+    'roswell': 'GA_STANDARD',
+    'johns_creek': 'GA_STANDARD',
+    'albany_ga': 'GA_STANDARD',
+    'warner_robins': 'GA_STANDARD',
+    'alpharetta': 'GA_STANDARD',
+    'marietta': 'GA_STANDARD',
+    'smyrna': 'GA_STANDARD',
+    // Arizona markets
+    'az': 'AZ_STANDARD',
+    'arizona': 'AZ_STANDARD',
+    'phoenix': 'AZ_STANDARD',
+    'tucson': 'AZ_STANDARD',
+    'mesa': 'AZ_STANDARD',
+    'chandler': 'AZ_STANDARD',
+    'scottsdale': 'AZ_STANDARD',
+    'gilbert': 'AZ_STANDARD',
+    'glendale_az': 'AZ_STANDARD',
+    'tempe': 'AZ_STANDARD',
+    'peoria_az': 'AZ_STANDARD',
+    'surprise': 'AZ_STANDARD',
+    'yuma': 'AZ_STANDARD',
+    'avondale': 'AZ_STANDARD',
+    'goodyear': 'AZ_STANDARD',
+    'flagstaff': 'AZ_STANDARD',
+    // Nevada markets
+    'nv': 'NV_STANDARD',
+    'nevada': 'NV_STANDARD',
+    'las_vegas': 'NV_STANDARD',
+    'henderson': 'NV_STANDARD',
+    'reno': 'NV_STANDARD',
+    'north_las_vegas': 'NV_STANDARD',
+    'sparks': 'NV_STANDARD',
+    'carson_city': 'NV_STANDARD',
+    'fernley': 'NV_STANDARD',
+    'elko': 'NV_STANDARD',
+    'mesquite': 'NV_STANDARD',
+    'boulder_city': 'NV_STANDARD',
+    'pahrump': 'NV_STANDARD',
     // UK markets
     'uk': 'UK_GDPR',
     'united_kingdom': 'UK_GDPR',

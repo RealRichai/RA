@@ -125,6 +125,12 @@ export const MarketPackIdSchema = z.enum([
   'IL_STANDARD',
   'WA_STANDARD',
   'CO_STANDARD',
+  'MA_STANDARD',
+  'NJ_STANDARD',
+  'PA_STANDARD',
+  'GA_STANDARD',
+  'AZ_STANDARD',
+  'NV_STANDARD',
   'UK_GDPR',
 ]);
 
@@ -313,6 +319,125 @@ export const ColoradoWarrantyOfHabitabilitySchema = z.object({
   noticeDays: z.number().optional(),
 });
 
+// Massachusetts Rules Schema
+export const MassachusettsRulesSchema = z.object({
+  enabled: z.boolean(),
+  lastMonthRent: z.object({
+    canCollect: z.boolean(),
+    interestRequired: z.boolean().optional(),
+  }).optional(),
+  statementOfCondition: z.object({
+    required: z.boolean(),
+    withinDays: z.number().optional(),
+    tenantResponseDays: z.number().optional(),
+  }).optional(),
+  securityDepositInterest: z.object({
+    rate: z.string().optional(),
+    paymentFrequency: z.string().optional(),
+  }).optional(),
+});
+
+// New Jersey Rules Schema
+export const NewJerseyRulesSchema = z.object({
+  enabled: z.boolean(),
+  truthInRenting: z.object({
+    required: z.boolean(),
+    dgcaApproved: z.boolean().optional(),
+  }).optional(),
+  securityDepositInterest: z.object({
+    annualPayment: z.boolean().optional(),
+    bankMustBeInNJ: z.boolean().optional(),
+  }).optional(),
+  antiEvictionAct: z.object({
+    enabled: z.boolean(),
+    goodCauseRequired: z.boolean().optional(),
+  }).optional(),
+});
+
+// Pennsylvania Rules Schema
+export const PennsylvaniaRulesSchema = z.object({
+  enabled: z.boolean(),
+  securityDepositTiers: z.object({
+    firstYear: z.number(),
+    afterFirstYear: z.number(),
+  }).optional(),
+  escrowAfterTwoYears: z.object({
+    required: z.boolean(),
+    interestRate: z.string().optional(),
+  }).optional(),
+  philadelphiaRules: z.object({
+    fairHousingOrdinance: z.boolean().optional(),
+    goodCauseEviction: z.boolean().optional(),
+  }).optional(),
+});
+
+// Georgia Rules Schema
+export const GeorgiaRulesSchema = z.object({
+  enabled: z.boolean(),
+  escrowRequirement: z.object({
+    unitsThreshold: z.number(),
+    bankingInstitutionRequired: z.boolean().optional(),
+  }).optional(),
+  moveInInspection: z.object({
+    required: z.boolean(),
+    tenantSignatureRequired: z.boolean().optional(),
+    listMustBeComprehensive: z.boolean().optional(),
+  }).optional(),
+  securityDepositDeductions: z.object({
+    itemizedStatementRequired: z.boolean().optional(),
+    withinThreeDays: z.boolean().optional(),
+  }).optional(),
+});
+
+// Arizona Rules Schema
+export const ArizonaRulesSchema = z.object({
+  enabled: z.boolean(),
+  moveInInspection: z.object({
+    required: z.boolean(),
+    landlordMustProvide: z.boolean().optional(),
+    tenantHas5DaysToComplete: z.boolean().optional(),
+  }).optional(),
+  nonrefundableFees: z.object({
+    mustBeDisclosed: z.boolean().optional(),
+    separateFromDeposit: z.boolean().optional(),
+  }).optional(),
+  poolSafety: z.object({
+    noticeRequired: z.boolean().optional(),
+    fencingRequirements: z.boolean().optional(),
+  }).optional(),
+  remedies: z.object({
+    repairAndDeduct: z.boolean().optional(),
+    maxDeductAmount: z.string().optional(),
+    rentWithholding: z.boolean().optional(),
+  }).optional(),
+});
+
+// Nevada Rules Schema
+export const NevadaRulesSchema = z.object({
+  enabled: z.boolean(),
+  foreclosureDisclosure: z.object({
+    required: z.boolean(),
+    mustDiscloseIfInForeclosure: z.boolean().optional(),
+  }).optional(),
+  moveInChecklist: z.object({
+    recommended: z.boolean().optional(),
+    helpfulForDepositDisputes: z.boolean().optional(),
+  }).optional(),
+  landlordRemedies: z.object({
+    summaryEviction: z.boolean().optional(),
+    noticePeriods: z.object({
+      nonPayment: z.number().optional(),
+      leaseViolation: z.number().optional(),
+      unlawfulDetainer: z.number().optional(),
+    }).optional(),
+  }).optional(),
+  tenantRemedies: z.object({
+    repairAndDeduct: z.boolean().optional(),
+    rentWithholding: z.boolean().optional(),
+    habitabilityStandards: z.boolean().optional(),
+  }).optional(),
+});
+
 export const MarketPackRulesSchema = z.object({
   brokerFee: BrokerFeeRuleSchema,
   securityDeposit: SecurityDepositRuleSchema,
@@ -341,6 +466,12 @@ export const MarketPackRulesSchema = z.object({
   washingtonRCW: WashingtonRCWRuleSchema.optional(), // Washington RCW 59.18
   seattleJustCause: SeattleJustCauseRuleSchema.optional(), // Seattle Just Cause Eviction
   coloradoWarrantyOfHabitability: ColoradoWarrantyOfHabitabilitySchema.optional(), // Colorado Warranty
+  massachusettsRules: MassachusettsRulesSchema.optional(), // Massachusetts specific rules
+  newJerseyRules: NewJerseyRulesSchema.optional(), // New Jersey specific rules
+  pennsylvaniaRules: PennsylvaniaRulesSchema.optional(), // Pennsylvania specific rules
+  georgiaRules: GeorgiaRulesSchema.optional(), // Georgia specific rules
+  arizonaRules: ArizonaRulesSchema.optional(), // Arizona specific rules
+  nevadaRules: NevadaRulesSchema.optional(), // Nevada specific rules
 });
 
 export type MarketPackRules = z.infer<typeof MarketPackRulesSchema>;
