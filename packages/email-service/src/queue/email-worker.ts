@@ -7,6 +7,8 @@
 import { Worker, type Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 
+import type { IEmailProvider } from '../providers';
+import { renderTemplate } from '../templates';
 import type {
   EmailJobData,
   EmailJobResult,
@@ -14,8 +16,6 @@ import type {
   EmailQueueConfig,
 } from '../types';
 import { DEFAULT_QUEUE_CONFIG } from '../types';
-import type { IEmailProvider } from '../providers';
-import { renderTemplate } from '../templates';
 
 export interface EmailWorkerOptions {
   connection: Redis;
@@ -56,7 +56,7 @@ export class EmailWorker {
     // Set up event handlers
     this.worker.on('completed', (job, result) => {
       if (this.onSuccess && result.success) {
-        this.onSuccess(job, result);
+        void this.onSuccess(job, result);
       }
     });
 
@@ -67,10 +67,10 @@ export class EmailWorker {
 
         if (attemptsMade >= maxAttempts && this.onDLQ) {
           // Final failure - move to DLQ
-          this.onDLQ(job, error);
+          void this.onDLQ(job, error);
         } else if (this.onFailure) {
           // Intermediate failure - will be retried
-          this.onFailure(job, error);
+          void this.onFailure(job, error);
         }
       }
     });

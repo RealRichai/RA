@@ -8,8 +8,8 @@ export * from './engine';
 export * from './layouts/base';
 export * from './definitions';
 
-import { registerTemplate } from './engine';
 import { allTemplates } from './definitions';
+import { registerTemplate } from './engine';
 
 /**
  * Register all built-in templates.

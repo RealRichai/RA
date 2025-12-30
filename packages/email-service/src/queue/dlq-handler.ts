@@ -147,6 +147,7 @@ export class DLQHandler {
 export function createDLQHandler(options: DLQHandlerOptions = {}): DLQHandler {
   return new DLQHandler({
     onRecord: (record) => {
+      // eslint-disable-next-line no-console
       console.error(
         `[EMAIL DLQ] Permanently failed: ${record.messageId} (${record.templateId})`,
         {
@@ -155,9 +156,10 @@ export function createDLQHandler(options: DLQHandlerOptions = {}): DLQHandler {
           attempts: record.attempts,
         }
       );
-      options.onRecord?.(record);
+      void options.onRecord?.(record);
     },
     onAlert: (record) => {
+      // eslint-disable-next-line no-console
       console.error(
         `[EMAIL DLQ ALERT] High-priority email failed: ${record.messageId}`,
         {
@@ -166,7 +168,7 @@ export function createDLQHandler(options: DLQHandlerOptions = {}): DLQHandler {
           error: record.error,
         }
       );
-      options.onAlert?.(record);
+      void options.onAlert?.(record);
     },
   });
 }

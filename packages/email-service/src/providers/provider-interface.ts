@@ -58,16 +58,16 @@ export abstract class BaseEmailProvider implements IEmailProvider {
   /**
    * Check if the provider is available.
    */
-  async isAvailable(): Promise<boolean> {
-    return this.isConfigured;
+  isAvailable(): Promise<boolean> {
+    return Promise.resolve(this.isConfigured);
   }
 
   /**
    * Validate credentials. Default implementation returns isConfigured.
    * Subclasses should override to make actual API calls.
    */
-  async validateCredentials(): Promise<boolean> {
-    return this.isConfigured;
+  validateCredentials(): Promise<boolean> {
+    return Promise.resolve(this.isConfigured);
   }
 
   /**

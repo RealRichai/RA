@@ -1,8 +1,8 @@
+import type { Job } from 'bullmq';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { DLQHandler, createDLQHandler } from '../queue';
 import type { EmailJobData } from '../types';
-import type { Job } from 'bullmq';
 
 describe('DLQHandler', () => {
   let handler: DLQHandler;

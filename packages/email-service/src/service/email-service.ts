@@ -6,15 +6,16 @@
 
 import type { Redis } from 'ioredis';
 
+import type { IEmailProvider } from '../providers';
+import { EmailQueue, EmailWorker, DLQHandler, createDLQHandler } from '../queue';
+import { renderTemplate } from '../templates';
 import type {
   EmailMessage,
   EmailQueueConfig,
   SendEmailOptions,
   SendResult,
 } from '../types';
-import type { IEmailProvider } from '../providers';
-import { EmailQueue, EmailWorker, DLQHandler, createDLQHandler } from '../queue';
-import { renderTemplate } from '../templates';
+
 import type { INotificationLogger } from './notification-logger';
 import { ConsoleNotificationLogger } from './notification-logger';
 
@@ -80,7 +81,8 @@ export class EmailService {
       onSuccess: async (job, result) => {
         await this.notificationLogger.logSent(job.data.messageId, result);
       },
-      onFailure: async (job, error) => {
+      onFailure: (job, error) => {
+        // eslint-disable-next-line no-console
         console.warn(
           `[EMAIL] Job ${job.data.messageId} failed (attempt ${job.attemptsMade}): ${error.message}`
         );

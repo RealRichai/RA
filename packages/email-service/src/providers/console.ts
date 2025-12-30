@@ -4,7 +4,10 @@
  * Development/testing provider that logs emails to console instead of sending.
  */
 
+/* eslint-disable no-console */
+
 import type { EmailMessage, EmailProviderConfig, SendResult } from '../types';
+
 import { BaseEmailProvider } from './provider-interface';
 
 export class ConsoleEmailProvider extends BaseEmailProvider {
@@ -26,21 +29,21 @@ export class ConsoleEmailProvider extends BaseEmailProvider {
     return true; // Console provider is always available
   }
 
-  override async validateCredentials(): Promise<boolean> {
-    return true;
+  override validateCredentials(): Promise<boolean> {
+    return Promise.resolve(true);
   }
 
   /**
    * "Send" an email by logging it to console.
    */
-  async send(message: EmailMessage): Promise<SendResult> {
+  send(message: EmailMessage): Promise<SendResult> {
     if (this.shouldFail) {
-      return {
+      return Promise.resolve({
         success: false,
         messageId: message.id,
         error: this.failureMessage,
         errorCode: 'SIMULATED_FAILURE',
-      };
+      });
     }
 
     const separator = '─'.repeat(60);
@@ -79,12 +82,12 @@ export class ConsoleEmailProvider extends BaseEmailProvider {
 
     this.sentMessages.push(message);
 
-    return {
+    return Promise.resolve({
       success: true,
       messageId: message.id,
       providerMessageId: `console_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       sentAt: new Date(),
-    };
+    });
   }
 
   // Test helpers

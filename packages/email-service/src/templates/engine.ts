@@ -51,11 +51,11 @@ export function renderTemplate(
 
   // Validate required fields
   const missingFields = template.requiredFields.filter(
-    (field) => data[field as string] === undefined || data[field as string] === null
+    (field) => data[field] === undefined || data[field] === null
   );
 
   if (missingFields.length > 0) {
-    throw new MissingFieldsError(templateId, missingFields as string[]);
+    throw new MissingFieldsError(templateId, missingFields);
   }
 
   // Render subject
@@ -134,8 +134,8 @@ export function validateTemplateData(
   }
 
   const missingFields = template.requiredFields.filter(
-    (field) => data[field as string] === undefined || data[field as string] === null
-  ) as string[];
+    (field) => data[field] === undefined || data[field] === null
+  );
 
   return {
     valid: missingFields.length === 0,

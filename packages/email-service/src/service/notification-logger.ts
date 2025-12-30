@@ -39,7 +39,7 @@ export interface INotificationLogger {
 export class InMemoryNotificationLogger implements INotificationLogger {
   private records: Map<string, NotificationRecord> = new Map();
 
-  async logQueued(options: SendEmailOptions, messageId: string): Promise<string> {
+  logQueued(options: SendEmailOptions, messageId: string): Promise<string> {
     const record: NotificationRecord = {
       id: messageId,
       userId: options.userId,
@@ -59,10 +59,10 @@ export class InMemoryNotificationLogger implements INotificationLogger {
     };
 
     this.records.set(messageId, record);
-    return messageId;
+    return Promise.resolve(messageId);
   }
 
-  async logSent(messageId: string, result: EmailJobResult): Promise<void> {
+  logSent(messageId: string, result: EmailJobResult): Promise<void> {
     const record = this.records.get(messageId);
     if (record) {
       record.status = 'sent';
@@ -72,18 +72,20 @@ export class InMemoryNotificationLogger implements INotificationLogger {
         providerMessageId: result.providerMessageId,
       };
     }
+    return Promise.resolve();
   }
 
-  async logFailed(messageId: string, error: string): Promise<void> {
+  logFailed(messageId: string, error: string): Promise<void> {
     const record = this.records.get(messageId);
     if (record) {
       record.status = 'failed';
       record.error = error;
     }
+    return Promise.resolve();
   }
 
-  async getNotification(messageId: string): Promise<NotificationRecord | null> {
-    return this.records.get(messageId) || null;
+  getNotification(messageId: string): Promise<NotificationRecord | null> {
+    return Promise.resolve(this.records.get(messageId) || null);
   }
 
   // Test helpers
@@ -99,28 +101,31 @@ export class InMemoryNotificationLogger implements INotificationLogger {
 /**
  * Console notification logger for development.
  */
+/* eslint-disable no-console */
 export class ConsoleNotificationLogger implements INotificationLogger {
-  async logQueued(options: SendEmailOptions, messageId: string): Promise<string> {
+  logQueued(options: SendEmailOptions, messageId: string): Promise<string> {
     console.log(`[NOTIFICATION] Queued: ${messageId}`, {
       templateId: options.templateId,
       to: options.to,
       userId: options.userId,
     });
-    return messageId;
+    return Promise.resolve(messageId);
   }
 
-  async logSent(messageId: string, result: EmailJobResult): Promise<void> {
+  logSent(messageId: string, result: EmailJobResult): Promise<void> {
     console.log(`[NOTIFICATION] Sent: ${messageId}`, {
       providerMessageId: result.providerMessageId,
       sentAt: result.sentAt,
     });
+    return Promise.resolve();
   }
 
-  async logFailed(messageId: string, error: string): Promise<void> {
+  logFailed(messageId: string, error: string): Promise<void> {
     console.error(`[NOTIFICATION] Failed: ${messageId}`, { error });
+    return Promise.resolve();
   }
 
-  async getNotification(_messageId: string): Promise<NotificationRecord | null> {
-    return null; // Console logger doesn't persist
+  getNotification(_messageId: string): Promise<NotificationRecord | null> {
+    return Promise.resolve(null); // Console logger doesn't persist
   }
 }

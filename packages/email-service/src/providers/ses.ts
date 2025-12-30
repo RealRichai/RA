@@ -12,6 +12,7 @@ import {
 } from '@aws-sdk/client-ses';
 
 import type { EmailMessage, EmailProviderConfig, SendResult } from '../types';
+
 import { BaseEmailProvider, RateLimitError } from './provider-interface';
 
 export class SESEmailProvider extends BaseEmailProvider {

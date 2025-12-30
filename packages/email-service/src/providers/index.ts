@@ -9,8 +9,9 @@ export * from './ses';
 export * from './console';
 
 import type { EmailProvider, EmailProviderConfig } from '../types';
-import type { IEmailProvider } from './provider-interface';
+
 import { createConsoleProvider } from './console';
+import type { IEmailProvider } from './provider-interface';
 import { createSESProvider } from './ses';
 
 /**
@@ -28,10 +29,13 @@ export function createProvider(
     case 'postmark':
     case 'sendgrid':
       // Fallback to console for unimplemented providers
+      // eslint-disable-next-line no-console
       console.warn(`Provider '${provider}' not implemented, falling back to console`);
       return createConsoleProvider(config);
-    default:
-      throw new Error(`Unknown email provider: ${provider}`);
+    default: {
+      const exhaustiveCheck: never = provider;
+      throw new Error(`Unknown email provider: ${String(exhaustiveCheck)}`);
+    }
   }
 }
 
