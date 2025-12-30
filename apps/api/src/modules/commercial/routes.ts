@@ -1,7 +1,15 @@
 import { prisma } from '@realriches/database';
-import { generatePrefixedId, NotFoundError, ForbiddenError, AppError } from '@realriches/utils';
+import { NotFoundError, ForbiddenError, AppError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+
+import {
+  runUnderwritingAnalysis,
+  listFractionalOfferings,
+  createFractionalOffering,
+  processInvestment,
+  getInvestorPortfolio,
+} from './commercial.service';
 
 // Commercial module - behind feature flag for enterprise customers
 
@@ -338,64 +346,19 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Property not found');
       }
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Implement full underwriting model
-      // This is a simplified placeholder calculation
-
-      const purchasePrice = data.purchasePrice;
-      const loanAmount = data.loanAmount || purchasePrice * 0.7; // 70% LTV default
-      const equity = purchasePrice - loanAmount;
-      const interestRate = data.interestRate || 0.065; // 6.5% default
-      const holdPeriod = data.holdPeriod;
-      const exitCapRate = data.exitCapRate || 0.055; // 5.5% default
-
-      // Assume NOI based on property size (placeholder)
-      const estimatedNOI = (property.squareFeet || 10000) * 25; // $25/sqft NOI estimate
-      const goingInCapRate = estimatedNOI / purchasePrice;
-
-      // Annual debt service
-      const annualDebtService = loanAmount * interestRate;
-
-      // Cash on cash return
-      const yearOneCashFlow = estimatedNOI - annualDebtService;
-      const cashOnCash = (yearOneCashFlow / equity) * 100;
-
-      // Exit value and IRR estimate
-      const exitNOI = estimatedNOI * Math.pow(1.02, holdPeriod); // 2% annual NOI growth
-      const exitValue = exitNOI / exitCapRate;
-      const totalProfit = exitValue - loanAmount - equity;
-      const irr = Math.pow((equity + totalProfit) / equity, 1 / holdPeriod) - 1;
-
-      const analysis = {
-        propertyId: data.propertyId,
-        propertyName: property.name,
-        inputs: {
-          purchasePrice,
-          loanAmount,
-          equity,
-          interestRate,
-          holdPeriod,
-          exitCapRate,
+      // Run underwriting analysis using commercial service
+      const analysis = await runUnderwritingAnalysis(
+        {
+          propertyId: data.propertyId,
+          purchasePrice: data.purchasePrice,
+          loanAmount: data.loanAmount,
+          interestRate: data.interestRate,
+          holdPeriod: data.holdPeriod,
+          exitCapRate: data.exitCapRate,
         },
-        metrics: {
-          goingInCapRate: Math.round(goingInCapRate * 10000) / 100,
-          cashOnCash: Math.round(cashOnCash * 100) / 100,
-          estimatedIRR: Math.round(irr * 10000) / 100,
-          dscr: Math.round((estimatedNOI / annualDebtService) * 100) / 100,
-          ltv: Math.round((loanAmount / purchasePrice) * 10000) / 100,
-        },
-        projections: {
-          year1NOI: Math.round(estimatedNOI),
-          year1CashFlow: Math.round(yearOneCashFlow),
-          exitValue: Math.round(exitValue),
-          totalProfit: Math.round(totalProfit),
-        },
-        sensitivity: {
-          capRateMinus50bps: Math.round(exitNOI / (exitCapRate - 0.005)),
-          capRatePlus50bps: Math.round(exitNOI / (exitCapRate + 0.005)),
-        },
-        createdAt: new Date().toISOString(),
-        createdBy: request.user.id,
-      };
+        { id: property.id, name: property.name, squareFeet: property.squareFeet },
+        request.user.id
+      );
 
       return reply.send({ success: true, data: analysis });
     }
@@ -430,28 +393,8 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply: FastifyReply
     ) => {
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Query actual fractional offerings table
-      // For now, return sample data
-
-      const offerings = [
-        {
-          id: 'frac-1',
-          propertyName: 'Manhattan Office Tower',
-          propertyType: 'OFFICE',
-          location: 'New York, NY',
-          totalValue: 50000000,
-          pricePerShare: 1000,
-          sharesAvailable: 5000,
-          minimumInvestment: 10000,
-          projectedReturns: {
-            annualCashYield: 6.5,
-            targetIRR: 15,
-            holdPeriod: 5,
-          },
-          status: 'OPEN',
-          deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        },
-      ];
+      // Get fractional offerings using commercial service
+      const offerings = listFractionalOfferings({ status, minInvestment });
 
       return reply.send({ success: true, data: offerings });
     }
@@ -490,22 +433,28 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
         throw new NotFoundError('Property not found');
       }
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Create offering in database
-      // Would need regulatory compliance checks (SEC, etc.)
+      // Create fractional offering using commercial service
+      const addressStr = typeof property.address === 'object'
+        ? `${(property.address as Record<string, string>).city}, ${(property.address as Record<string, string>).state}`
+        : String(property.address || '');
 
-      const offering = {
-        id: generatePrefixedId('frac'),
-        ...data,
-        property: {
+      const offering = await createFractionalOffering(
+        {
+          propertyId: data.propertyId,
+          totalValue: data.totalShares * data.pricePerShare,
+          pricePerShare: data.pricePerShare,
+          minimumInvestment: data.minimumInvestment,
+          projectedReturns: data.projectedReturns,
+          deadline: data.offeringDeadline,
+        },
+        {
           id: property.id,
           name: property.name,
-          address: property.address,
+          address: addressStr,
+          type: (property.metadata as Record<string, unknown>)?.commercialType as string || 'COMMERCIAL',
         },
-        status: 'PENDING_APPROVAL',
-        sharesSubscribed: 0,
-        createdAt: new Date().toISOString(),
-        createdBy: request.user.id,
-      };
+        request.user.id
+      );
 
       return reply.status(201).send({
         success: true,
@@ -543,21 +492,15 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
         paymentMethodId: string;
       }) || {};
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Implement investment flow
-      // Would need:
-      // - Accredited investor verification
-      // - KYC/AML compliance
-      // - Escrow for funds
-      // - Share issuance
-
-      const investment = {
-        id: generatePrefixedId('inv'),
-        offeringId: request.params.id,
-        investorId: request.user.id,
+      // Process investment using commercial service
+      // Note: Full implementation would include accredited investor verification,
+      // KYC/AML compliance, escrow, and share issuance
+      const investment = await processInvestment(
+        request.params.id,
+        request.user.id,
         shares,
-        status: 'PENDING_VERIFICATION',
-        createdAt: new Date().toISOString(),
-      };
+        paymentMethodId
+      );
 
       return reply.status(201).send({
         success: true,
@@ -589,15 +532,8 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Query actual portfolio data
-
-      const portfolio = {
-        totalInvested: 0,
-        currentValue: 0,
-        totalReturns: 0,
-        investments: [],
-        distributions: [],
-      };
+      // Get investor portfolio using commercial service
+      const portfolio = await getInvestorPortfolio(request.user.id);
 
       return reply.send({ success: true, data: portfolio });
     }

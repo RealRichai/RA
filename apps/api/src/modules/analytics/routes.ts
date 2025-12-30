@@ -3,6 +3,8 @@ import { ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import { getMarketData, generateReport } from './analytics.service';
+
 const DateRangeSchema = z.object({
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
@@ -478,29 +480,8 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
     ) => {
       const { neighborhood, zipCode, bedrooms } = request.query;
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with market data providers
-      // For now, return sample market data
-
-      const marketData = {
-        location: neighborhood || zipCode || 'NYC',
-        averageRent: {
-          studio: 2500,
-          oneBed: 3200,
-          twoBed: 4500,
-          threeBed: 6000,
-        },
-        rentTrends: [
-          { month: '2024-01', avgRent: 3100 },
-          { month: '2024-02', avgRent: 3150 },
-          { month: '2024-03', avgRent: 3200 },
-          { month: '2024-04', avgRent: 3180 },
-          { month: '2024-05', avgRent: 3250 },
-          { month: '2024-06', avgRent: 3300 },
-        ],
-        vacancyRate: 2.8,
-        daysOnMarket: 21,
-        yoyChange: 4.5,
-      };
+      // Get market data from analytics service
+      const marketData = getMarketData({ neighborhood, zipCode, bedrooms });
 
       return reply.send({ success: true, data: marketData });
     }
@@ -540,17 +521,27 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply: FastifyReply
     ) => {
-      const { format = 'csv', reportType = 'portfolio' } = request.query;
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Generate actual report files
-      // Would use libraries like pdfkit, exceljs, etc.
+      const { format = 'csv', reportType = 'portfolio', startDate, endDate } = request.query;
+
+      // Generate report using analytics service
+      const result = await generateReport({
+        format: format as 'csv' | 'pdf' | 'xlsx',
+        reportType,
+        startDate,
+        endDate,
+        userId: request.user.id,
+      });
 
       return reply.send({
         success: true,
-        data: {
-          downloadUrl: `https://storage.example.com/reports/${reportType}-${Date.now()}.${format}`,
-          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-        },
+        data: result,
         message: 'Report generated. Download link expires in 1 hour.',
       });
     }

@@ -3,6 +3,8 @@ import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/u
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import { sendEmergencyNotification, sendEscalationNotification } from './maintenance.service';
+
 const CreateWorkOrderSchema = z.object({
   unitId: z.string(),
   title: z.string().min(1).max(200),
@@ -199,8 +201,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
 
       // Auto-escalate emergencies
       if (data.priority === 'emergency') {
-        // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Send emergency notifications
-        // await sendEmergencyAlert(workOrder);
+        await sendEmergencyNotification(app, workOrder);
       }
 
       return reply.status(201).send({ success: true, data: workOrder });
@@ -550,6 +551,8 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
             ? 'high'
             : 'emergency';
 
+      const previousPriority = workOrder.priority;
+
       const updated = await prisma.workOrder.update({
         where: { id: workOrder.id },
         data: {
@@ -558,7 +561,14 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
         },
       });
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Send escalation notifications
+      // Send escalation notifications
+      await sendEscalationNotification(
+        app,
+        { ...updated, title: workOrder.title },
+        { id: request.user.id, email: request.user.email },
+        reason,
+        previousPriority
+      );
 
       return reply.send({
         success: true,

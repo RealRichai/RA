@@ -12,6 +12,8 @@ import { generatePrefixedId, NotFoundError, ForbiddenError, ValidationError, log
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import { initiateBackgroundCheck } from './leases.service';
+
 const CreateLeaseSchema = z.object({
   unitId: z.string(),
   tenantId: z.string(),
@@ -906,11 +908,26 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with actual background check provider
+      // Initiate background check with provider
+      const applicant = application.applicant as Record<string, unknown> | null;
+      const checkResult = await initiateBackgroundCheck({
+        applicationId: application.id,
+        applicantInfo: {
+          firstName: (applicant?.firstName as string) || 'Unknown',
+          lastName: (applicant?.lastName as string) || 'Unknown',
+          dateOfBirth: applicant?.dateOfBirth as string | undefined,
+          email: (applicant?.email as string) || '',
+        },
+        checkType: data.checkType,
+        propertyAddress: application.listing.unit.property.address as string | undefined,
+      });
+
       logger.info({
         msg: 'background_check_initiated',
         applicationId: application.id,
+        checkId: checkResult.checkId,
         checkType: data.checkType,
+        provider: checkResult.provider,
         complianceCheckId,
       });
 
@@ -918,8 +935,11 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
         success: true,
         data: {
           applicationId: application.id,
+          checkId: checkResult.checkId,
           checkType: data.checkType,
-          status: 'initiated',
+          status: checkResult.status,
+          provider: checkResult.provider,
+          estimatedCompletionTime: checkResult.estimatedCompletionTime,
           message: 'Background check has been initiated. Results will be available shortly.',
         },
         meta: { complianceCheckId },
