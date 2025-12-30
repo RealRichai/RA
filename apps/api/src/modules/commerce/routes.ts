@@ -12,11 +12,12 @@
  * provider integrations with fallback to mock providers.
  */
 
-import { generatePrefixedId } from '@realriches/utils';
+import { generatePrefixedId, logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
 import { CommerceService } from './commerce.service';
+import { getCommerceProviderRegistry } from './providers';
 import type { Address, MoveSize, OrderType, UtilityType } from './providers/provider.types';
 
 // =============================================================================
@@ -585,6 +586,131 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
         request.params.applicationId
       );
       return sendServiceResponse(reply, response);
+    }
+  );
+
+  // ===========================================================================
+  // PROVIDER WEBHOOKS
+  // ===========================================================================
+
+  // Lemonade Insurance Webhook
+  app.post(
+    '/webhooks/insurance/lemonade',
+    {
+      schema: {
+        description: 'Webhook endpoint for Lemonade insurance status updates',
+        tags: ['Commerce', 'Webhooks'],
+      },
+      config: {
+        rawBody: true, // Preserve raw body for signature verification
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const registry = getCommerceProviderRegistry();
+      const lemonadeAdapter = registry.getLemonadeAdapter();
+
+      if (!lemonadeAdapter) {
+        logger.warn({ msg: 'lemonade_webhook_received_but_adapter_not_configured' });
+        return reply.status(200).send({ received: true, processed: false });
+      }
+
+      // Get signature from header (Lemonade uses X-Lemonade-Signature)
+      const signature = request.headers['x-lemonade-signature'] as string;
+      if (!signature) {
+        logger.warn({ msg: 'lemonade_webhook_missing_signature' });
+        return reply.status(401).send({ error: 'Missing signature' });
+      }
+
+      // Get raw body for signature verification
+      const rawBody = (request as any).rawBody || JSON.stringify(request.body);
+
+      try {
+        const result = await lemonadeAdapter.processWebhook(rawBody, signature);
+
+        if (!result.valid) {
+          logger.warn({ msg: 'lemonade_webhook_invalid' });
+          return reply.status(401).send({ error: 'Invalid signature' });
+        }
+
+        // Log successful webhook processing
+        logger.info({
+          msg: 'lemonade_webhook_processed',
+          eventType: result.event?.type,
+          policyId: result.event?.policyId,
+        });
+
+        // Acknowledge receipt
+        return reply.status(200).send({
+          received: true,
+          processed: true,
+          eventType: result.event?.type,
+        });
+      } catch (error) {
+        logger.error({
+          msg: 'lemonade_webhook_processing_error',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+        return reply.status(500).send({ error: 'Webhook processing failed' });
+      }
+    }
+  );
+
+  // The Guarantors Webhook
+  app.post(
+    '/webhooks/guarantor/the-guarantors',
+    {
+      schema: {
+        description: 'Webhook endpoint for The Guarantors application status updates',
+        tags: ['Commerce', 'Webhooks'],
+      },
+      config: {
+        rawBody: true,
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const registry = getCommerceProviderRegistry();
+      const tgAdapter = registry.getTheGuarantorsAdapter();
+
+      if (!tgAdapter) {
+        logger.warn({ msg: 'the_guarantors_webhook_received_but_adapter_not_configured' });
+        return reply.status(200).send({ received: true, processed: false });
+      }
+
+      // Get signature from header (The Guarantors uses X-TG-Signature)
+      const signature = request.headers['x-tg-signature'] as string;
+      if (!signature) {
+        logger.warn({ msg: 'the_guarantors_webhook_missing_signature' });
+        return reply.status(401).send({ error: 'Missing signature' });
+      }
+
+      const rawBody = (request as any).rawBody || JSON.stringify(request.body);
+
+      try {
+        const result = await tgAdapter.processWebhook(rawBody, signature);
+
+        if (!result.valid) {
+          logger.warn({ msg: 'the_guarantors_webhook_invalid' });
+          return reply.status(401).send({ error: 'Invalid signature' });
+        }
+
+        logger.info({
+          msg: 'the_guarantors_webhook_processed',
+          eventType: result.event?.type,
+          applicationId: result.event?.applicationId,
+        });
+
+        return reply.status(200).send({
+          received: true,
+          processed: true,
+          eventType: result.event?.type,
+        });
+      } catch (error) {
+        logger.error({
+          msg: 'the_guarantors_webhook_processing_error',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+        return reply.status(500).send({ error: 'Webhook processing failed' });
+      }
     }
   );
 }
