@@ -244,19 +244,30 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
       // Determine market from property address
       const { marketId, marketPackId } = await getMarketConfigForEntity('listing', listingId);
 
-      // Get delivered disclosures for this listing
+      // Get disclosure records for this listing with disclosure type
       const disclosureRecords = await prisma.disclosureRecord.findMany({
         where: {
-          metadata: {
-            path: ['entityType'],
-            equals: 'listing',
+          entityType: 'listing',
+          entityId: listingId,
+        },
+        include: {
+          disclosure: {
+            select: {
+              type: true,
+            },
           },
         },
       });
 
-      const deliveredDisclosures = disclosureRecords.map(
-        (r) => (r.metadata as Record<string, unknown>)?.disclosureType as string
-      ).filter(Boolean);
+      // Extract delivered disclosures (all records with deliveredAt set)
+      const deliveredDisclosures = disclosureRecords
+        .filter((r) => r.deliveredAt !== null)
+        .map((r) => r.disclosure.type);
+
+      // Extract acknowledged disclosures (records with acknowledgedAt set)
+      const acknowledgedDisclosures = disclosureRecords
+        .filter((r) => r.acknowledgedAt !== null)
+        .map((r) => r.disclosure.type);
 
       // Run listing publish gate
       const gateResult = await gateListingPublish({
@@ -273,7 +284,7 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
           : undefined,
         creditScoreThreshold: listing.creditScoreRequirement ?? undefined,
         deliveredDisclosures,
-        acknowledgedDisclosures: [], // TODO: Track acknowledged disclosures
+        acknowledgedDisclosures,
       });
 
       // Record compliance check
