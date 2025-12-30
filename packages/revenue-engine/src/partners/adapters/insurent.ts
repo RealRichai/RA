@@ -362,7 +362,7 @@ export class InsurentProvider extends BasePartnerProvider {
 
   private mapQuoteResponse(
     response: InsurentQuoteResponse,
-    request: QuoteRequest
+    _request: QuoteRequest
   ): QuoteResponse {
     if (response.status === 'declined') {
       throw new QuoteDeclinedError(
