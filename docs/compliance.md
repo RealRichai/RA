@@ -11,6 +11,7 @@ graph TB
     subgraph "Market Pack System"
         MP[MarketPack Registry] --> NYC[NYC_STRICT v1.0.0]
         MP --> US[US_STANDARD v1.0.0]
+        MP --> UK[UK_GDPR v1.0.0]
         DB[(MarketConfig DB)] --> MP
     end
 
@@ -75,6 +76,27 @@ Baseline federal compliance:
 | Lead Paint | Required disclosure pre-1978 buildings |
 | Fair Housing | Non-discrimination requirements |
 | Security Deposit | Max 2 months (default) |
+
+### UK_GDPR v1.0.0
+
+United Kingdom GDPR compliance:
+
+| Rule | Description | Requirement |
+|------|-------------|-------------|
+| Consent | Explicit consent for data processing | Before data collection |
+| Privacy Notice | Clear privacy notice | Before application |
+| Data Retention | Max 7 years for tax/legal | Auto-purge after |
+| Subject Requests | Respond within 30 days | GDPR Article 12 |
+| Redaction | Sensitive fields auto-redacted | After 8 years |
+| Deposit Protection | Tenancy Deposit Scheme | Within 30 days |
+
+Required UK Disclosures:
+- Privacy Notice (before application)
+- Data Processing Agreement (before application, signature required)
+- How to Rent Guide (before lease signing)
+- EPC Certificate (before listing publish)
+- Gas Safety Certificate (before lease signing)
+- Deposit Protection Info (within 30 days of move-in)
 
 ## Compliance Decision Object
 
@@ -239,6 +261,16 @@ stateDiagram-v2
 | `DISCLOSURE_NOT_DELIVERED` | Critical | Required disclosure not sent |
 | `DISCLOSURE_NOT_ACKNOWLEDGED` | Violation | Signature required but not obtained |
 
+### GDPR (UK)
+| Code | Severity | Description |
+|------|----------|-------------|
+| `GDPR_CONSENT_MISSING` | Critical | Explicit consent not obtained |
+| `GDPR_LAWFUL_BASIS_MISSING` | Critical | No lawful basis specified |
+| `GDPR_PRIVACY_NOTICE_MISSING` | Critical | Privacy notice not provided |
+| `GDPR_DATA_RETENTION_EXCEEDED` | Violation | Data exceeds retention period |
+| `GDPR_DATA_SUBJECT_REQUEST_OVERDUE` | Critical | Response deadline exceeded (30 days) |
+| `GDPR_REDACTION_REQUIRED` | Warning | Sensitive fields need redaction |
+
 ## API Endpoints with Enforcement
 
 ### Listings
@@ -276,13 +308,64 @@ All enforcement can be toggled per-market via feature flags:
 
 Good Cause rent increase calculations require CPI data. The system includes:
 
-1. **ExternalCPIProvider** - Connects to BLS API (TODO: requires implementation)
+1. **ExternalCPIProvider** - Connects to Bureau of Labor Statistics (BLS) API
 2. **FallbackCPIProvider** - Deterministic fallback values when external unavailable
+
+### BLS API Integration
+
+The ExternalCPIProvider fetches real CPI data from the BLS public API:
+
+```mermaid
+sequenceDiagram
+    participant Gate as Compliance Gate
+    participant Provider as ExternalCPIProvider
+    participant BLS as BLS API
+    participant Fallback as FallbackCPIProvider
+
+    Gate->>Provider: getAnnualCPIChange(region)
+
+    alt BLS_API_KEY configured
+        Provider->>BLS: POST /publicAPI/v2/timeseries/data/
+        alt API Success
+            BLS-->>Provider: CPI data with series ID
+            Provider-->>Gate: { percentage: 2.8, isFallback: false, evidence: { dataSource: 'bls_api' } }
+        else API Error/Timeout
+            Provider->>Fallback: getCPIForDate(region, year, month)
+            Fallback-->>Provider: Deterministic fallback value
+            Provider-->>Gate: { percentage: 3.0, isFallback: true, evidence: { dataSource: 'fallback_deterministic' } }
+        end
+    else BLS_API_KEY not set
+        Provider->>Fallback: getCPIForDate(region, year, month)
+        Fallback-->>Gate: { percentage: 3.0, isFallback: true, evidence: { dataSource: 'fallback_deterministic' } }
+    end
+```
+
+### BLS Series IDs
+
+| Region | Series ID | Description |
+|--------|-----------|-------------|
+| NYC | CUURS12ASA0 | New York-Newark-Jersey City, NY-NJ-PA |
+| US (default) | CUUR0000SA0 | U.S. city average |
+| LA | CUURS49ASA0 | Los Angeles-Long Beach-Anaheim, CA |
+| Chicago | CUURS23ASA0 | Chicago-Naperville-Elgin, IL-IN-WI |
+
+### Configuration
+
+Set the `BLS_API_KEY` environment variable to enable live CPI fetching:
+
+```bash
+BLS_API_KEY=your_api_key_here
+```
+
+Register for a free API key at: https://www.bls.gov/developers/
+
+### Fallback Behavior
 
 When fallback is used:
 - Logged as `CPI_FALLBACK_USED` violation (severity: info)
-- Included in compliance decision metadata
+- Included in compliance decision evidence with `dataSource: 'fallback_deterministic'`
 - Uses conservative 3% default if no historical data available
+- All decisions are fully auditable with data source tracking
 
 ## Database Integration
 

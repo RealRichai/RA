@@ -1,32 +1,113 @@
+/**
+ * Compliance Routes
+ *
+ * P0 compliance enforcement with fail-closed gates at all critical transitions.
+ * Implements FARE Act, FCHA, Good Cause, and disclosure enforcement.
+ */
+
 import { prisma } from '@realriches/database';
 import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
+import {
+  gateListingPublish,
+  gateFCHAStageTransition,
+  gateFCHABackgroundCheck,
+  gateLeaseCreation,
+  gateRentIncrease,
+  gateDisclosureRequirement,
+  getMarketPackIdFromMarket,
+  getMarketPack,
+  getMarketPackVersion,
+  checkFAREActRules,
+  checkFCHARules,
+  checkGoodCauseRules,
+  checkSecurityDepositRules,
+  checkBrokerFeeRules,
+  checkDisclosureRules,
+  checkRentStabilizationRules,
+  getCPIProvider,
+  type GateResult,
+  type FCHAStage,
+  type ComplianceDecision,
+} from '@realriches/compliance-engine';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+// ============================================================================
+// Request Schemas
+// ============================================================================
+
 const ComplianceCheckSchema = z.object({
-  entityType: z.enum(['LISTING', 'LEASE', 'PROPERTY', 'UNIT']),
-  entityId: z.string(),
+  entityType: z.enum(['listing', 'lease', 'property', 'unit', 'application']),
+  entityId: z.string().uuid(),
   checkType: z.enum([
-    'FARE_ACT',
-    'FCHA',
-    'GOOD_CAUSE',
-    'RENT_STABILIZATION',
-    'BROKER_FEE',
-    'SECURITY_DEPOSIT',
-    'DISCLOSURE',
+    'fare_act',
+    'fcha',
+    'good_cause',
+    'rent_stabilization',
+    'broker_fee',
+    'security_deposit',
+    'disclosure',
   ]),
+});
+
+const ListingPublishGateSchema = z.object({
+  listingId: z.string().uuid(),
+});
+
+const FCHAStageTransitionSchema = z.object({
+  applicationId: z.string().uuid(),
+  currentStage: z.enum([
+    'initial_inquiry',
+    'application_submitted',
+    'application_review',
+    'conditional_offer',
+    'background_check',
+    'final_approval',
+    'lease_signing',
+  ]),
+  targetStage: z.enum([
+    'initial_inquiry',
+    'application_submitted',
+    'application_review',
+    'conditional_offer',
+    'background_check',
+    'final_approval',
+    'lease_signing',
+  ]),
+});
+
+const FCHABackgroundCheckSchema = z.object({
+  applicationId: z.string().uuid(),
+  checkType: z.enum(['criminal_background_check', 'credit_check', 'eviction_history']),
+});
+
+const LeaseExecutionGateSchema = z.object({
+  leaseId: z.string().uuid(),
 });
 
 const DisclosureRecordSchema = z.object({
   disclosureId: z.string(),
   recipientId: z.string(),
-  recipientType: z.enum(['tenant', 'APPLICANT', 'BUYER']),
-  deliveryMethod: z.enum(['EMAIL', 'IN_APP', 'PHYSICAL', 'ESIGN']),
+  recipientType: z.enum(['tenant', 'applicant', 'buyer']),
+  deliveryMethod: z.enum(['email', 'in_app', 'physical', 'esign']),
   metadata: z.record(z.unknown()).optional(),
 });
 
+const GoodCauseCheckSchema = z.object({
+  leaseId: z.string().uuid(),
+  actionType: z.enum(['non_renewal', 'eviction', 'rent_increase']),
+  reason: z.string().optional(),
+  proposedRent: z.number().optional(),
+});
+
+// ============================================================================
+// Compliance Routes
+// ============================================================================
+
 export async function complianceRoutes(app: FastifyInstance): Promise<void> {
-  // Run compliance check
+  // =========================================================================
+  // POST /check - Run a compliance check on an entity
+  // =========================================================================
   app.post(
     '/check',
     {
@@ -48,40 +129,722 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const data = ComplianceCheckSchema.parse(request.body);
+      const requestId = generatePrefixedId('req');
 
       // Get market configuration for the entity
-      const marketConfig = await getMarketConfigForEntity(data.entityType, data.entityId);
+      const { marketId, marketPackId, pack } = await getMarketConfigForEntity(
+        data.entityType,
+        data.entityId
+      );
 
-      // Run compliance check based on type
-      const result = await runComplianceCheck(data, marketConfig);
+      // Run comprehensive compliance check based on type
+      const result = await runComplianceCheck(data, marketId, pack);
 
-      // Store the compliance check result
+      // Create compliance check record with policyVersion + evidence
       const check = await prisma.complianceCheck.create({
         data: {
           id: generatePrefixedId('cpl'),
-          entityType: data.entityType,
+          entityType: data.entityType.toUpperCase(),
           entityId: data.entityId,
-          checkType: data.checkType,
-          status: result.passed ? 'PASSED' : 'FAILED',
-          result: result,
+          marketId,
+          checkType: data.checkType.toUpperCase(),
+          status: result.passed ? 'passed' : 'failed',
+          severity: result.severity,
+          title: result.title,
+          description: result.description,
+          result: {
+            passed: result.passed,
+            violations: result.violations,
+            recommendations: result.recommendations,
+            policyVersion: result.policyVersion,
+            marketPack: marketPackId,
+            marketPackVersion: result.marketPackVersion,
+            checksPerformed: result.checksPerformed,
+            evidence: result.evidence,
+          },
+          details: result.evidence,
           checkedAt: new Date(),
           checkedById: request.user.id,
         },
       });
 
+      // Create audit log entry
+      await createAuditLog({
+        actorId: request.user.id,
+        actorEmail: request.user.email,
+        action: `compliance_check_${data.checkType}`,
+        entityType: data.entityType,
+        entityId: data.entityId,
+        metadata: {
+          checkId: check.id,
+          passed: result.passed,
+          policyVersion: result.policyVersion,
+          marketPack: marketPackId,
+        },
+        requestId,
+      });
+
       return reply.send({
         success: true,
         data: {
-          check,
+          checkId: check.id,
           passed: result.passed,
           violations: result.violations,
           recommendations: result.recommendations,
+          policyVersion: result.policyVersion,
+          marketPack: marketPackId,
+          marketPackVersion: result.marketPackVersion,
         },
       });
     }
   );
 
-  // Get compliance history for entity
+  // =========================================================================
+  // POST /gates/listing-publish - Listing publish gate (DRAFT -> ACTIVE)
+  // =========================================================================
+  app.post(
+    '/gates/listing-publish',
+    {
+      schema: {
+        description: 'Check if a listing can be published (DRAFT -> ACTIVE transition)',
+        tags: ['Compliance', 'Gates'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
+      const { listingId } = ListingPublishGateSchema.parse(request.body);
+      const requestId = generatePrefixedId('req');
+
+      // Fetch listing with unit and property
+      const listing = await prisma.listing.findUnique({
+        where: { id: listingId },
+        include: {
+          unit: {
+            include: {
+              property: true,
+            },
+          },
+        },
+      });
+
+      if (!listing) {
+        throw new NotFoundError('Listing not found');
+      }
+
+      // Determine market from property address
+      const { marketId, marketPackId } = await getMarketConfigForEntity('listing', listingId);
+
+      // Get delivered disclosures for this listing
+      const disclosureRecords = await prisma.disclosureRecord.findMany({
+        where: {
+          metadata: {
+            path: ['entityType'],
+            equals: 'listing',
+          },
+        },
+      });
+
+      const deliveredDisclosures = disclosureRecords.map(
+        (r) => (r.metadata as Record<string, unknown>)?.disclosureType as string
+      ).filter(Boolean);
+
+      // Run listing publish gate
+      const gateResult = await gateListingPublish({
+        listingId,
+        marketId,
+        status: listing.status,
+        hasBrokerFee: listing.hasBrokerFee ?? false,
+        brokerFeeAmount: listing.brokerFee ? Number(listing.brokerFee) : undefined,
+        brokerFeePaidBy: 'tenant', // Assume tenant-paid until proven otherwise
+        monthlyRent: Number(listing.rent),
+        securityDepositAmount: listing.securityDeposit ? Number(listing.securityDeposit) : undefined,
+        incomeRequirementMultiplier: listing.incomeRequirement
+          ? Number(listing.incomeRequirement)
+          : undefined,
+        creditScoreThreshold: listing.creditScoreRequirement ?? undefined,
+        deliveredDisclosures,
+        acknowledgedDisclosures: [], // TODO: Track acknowledged disclosures
+      });
+
+      // Record compliance check
+      const checkId = await recordGateResult(
+        {
+          entityType: 'listing',
+          entityId: listingId,
+          marketId,
+          action: 'listing_publish',
+          previousState: { status: 'draft' },
+          newState: { status: 'active' },
+        },
+        gateResult,
+        request.user.id,
+        request.user.email,
+        requestId
+      );
+
+      // FAIL-CLOSED: If not allowed, block and optionally suspend
+      if (!gateResult.allowed) {
+        // Set listing to SUSPENDED if critical violations
+        const criticalViolations = gateResult.decision.violations.filter(
+          (v) => v.severity === 'critical'
+        );
+
+        if (criticalViolations.length > 0) {
+          await prisma.listing.update({
+            where: { id: listingId },
+            data: { status: 'suspended' },
+          });
+
+          await createAuditLog({
+            actorId: request.user.id,
+            actorEmail: request.user.email,
+            action: 'listing_suspended_compliance',
+            entityType: 'listing',
+            entityId: listingId,
+            changes: { status: { from: listing.status, to: 'suspended' } },
+            metadata: {
+              reason: gateResult.blockedReason,
+              violations: criticalViolations.map((v) => v.code),
+            },
+            requestId,
+          });
+        }
+
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: 'COMPLIANCE_GATE_BLOCKED',
+            message: gateResult.blockedReason,
+            violations: gateResult.decision.violations,
+            recommendedFixes: gateResult.decision.recommendedFixes,
+            complianceCheckId: checkId,
+            policyVersion: gateResult.decision.policyVersion,
+            marketPack: marketPackId,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          allowed: true,
+          complianceCheckId: checkId,
+          decision: gateResult.decision,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // POST /gates/fcha-stage - FCHA stage transition gate
+  // =========================================================================
+  app.post(
+    '/gates/fcha-stage',
+    {
+      schema: {
+        description: 'Check if an FCHA stage transition is allowed',
+        tags: ['Compliance', 'Gates'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
+      const { applicationId, currentStage, targetStage } = FCHAStageTransitionSchema.parse(
+        request.body
+      );
+      const requestId = generatePrefixedId('req');
+
+      const { marketId, marketPackId } = await getMarketConfigForEntity(
+        'application',
+        applicationId
+      );
+
+      const gateResult = await gateFCHAStageTransition({
+        applicationId,
+        marketId,
+        currentStage: currentStage as FCHAStage,
+        targetStage: targetStage as FCHAStage,
+      });
+
+      const checkId = await recordGateResult(
+        {
+          entityType: 'application',
+          entityId: applicationId,
+          marketId,
+          action: 'fcha_stage_transition',
+          previousState: { stage: currentStage },
+          newState: { stage: targetStage },
+        },
+        gateResult,
+        request.user.id,
+        request.user.email,
+        requestId
+      );
+
+      if (!gateResult.allowed) {
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: 'FCHA_STAGE_BLOCKED',
+            message: gateResult.blockedReason,
+            violations: gateResult.decision.violations,
+            complianceCheckId: checkId,
+            policyVersion: gateResult.decision.policyVersion,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          allowed: true,
+          complianceCheckId: checkId,
+          decision: gateResult.decision,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // POST /gates/fcha-check - FCHA background check gate
+  // =========================================================================
+  app.post(
+    '/gates/fcha-check',
+    {
+      schema: {
+        description: 'Check if a background check is allowed under FCHA',
+        tags: ['Compliance', 'Gates'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
+      const { applicationId, checkType } = FCHABackgroundCheckSchema.parse(request.body);
+      const requestId = generatePrefixedId('req');
+
+      // Get application to find current stage
+      const application = await prisma.application.findUnique({
+        where: { id: applicationId },
+      });
+
+      if (!application) {
+        throw new NotFoundError('Application not found');
+      }
+
+      const { marketId } = await getMarketConfigForEntity('application', applicationId);
+
+      const gateResult = await gateFCHABackgroundCheck({
+        applicationId,
+        marketId,
+        currentStage: (application.status?.toLowerCase() || 'application_submitted') as FCHAStage,
+        checkType,
+      });
+
+      const checkId = await recordGateResult(
+        {
+          entityType: 'application',
+          entityId: applicationId,
+          marketId,
+          action: `fcha_${checkType}`,
+          previousState: { stage: application.status },
+          newState: { attemptedCheck: checkType },
+        },
+        gateResult,
+        request.user.id,
+        request.user.email,
+        requestId
+      );
+
+      if (!gateResult.allowed) {
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: 'FCHA_CHECK_PROHIBITED',
+            message: gateResult.blockedReason,
+            violations: gateResult.decision.violations,
+            complianceCheckId: checkId,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          allowed: true,
+          complianceCheckId: checkId,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // POST /gates/lease-execution - Lease execution gate
+  // =========================================================================
+  app.post(
+    '/gates/lease-execution',
+    {
+      schema: {
+        description: 'Check if a lease can be executed/signed',
+        tags: ['Compliance', 'Gates'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
+      const { leaseId } = LeaseExecutionGateSchema.parse(request.body);
+      const requestId = generatePrefixedId('req');
+
+      const lease = await prisma.lease.findUnique({
+        where: { id: leaseId },
+        include: {
+          unit: {
+            include: { property: true },
+          },
+        },
+      });
+
+      if (!lease) {
+        throw new NotFoundError('Lease not found');
+      }
+
+      const { marketId, marketPackId } = await getMarketConfigForEntity('lease', leaseId);
+
+      // Get disclosure records for this lease
+      const disclosureRecords = await prisma.disclosureRecord.findMany({
+        where: {
+          metadata: {
+            path: ['entityId'],
+            equals: leaseId,
+          },
+        },
+      });
+
+      const deliveredDisclosures = disclosureRecords.map(
+        (r) => (r.metadata as Record<string, unknown>)?.disclosureType as string
+      ).filter(Boolean);
+
+      const acknowledgedDisclosures = disclosureRecords
+        .filter((r) => r.acknowledgedAt)
+        .map((r) => (r.metadata as Record<string, unknown>)?.disclosureType as string)
+        .filter(Boolean);
+
+      const gateResult = await gateLeaseCreation({
+        leaseId,
+        marketId,
+        monthlyRent: Number(lease.monthlyRent),
+        securityDepositAmount: lease.securityDeposit ? Number(lease.securityDeposit) : undefined,
+        isRentStabilized: lease.unit?.isRentStabilized ?? false,
+        legalRentAmount: lease.legalRent ? Number(lease.legalRent) : undefined,
+        preferentialRentAmount: lease.preferentialRent ? Number(lease.preferentialRent) : undefined,
+        deliveredDisclosures,
+        acknowledgedDisclosures,
+      } as Parameters<typeof gateLeaseCreation>[0]);
+
+      const checkId = await recordGateResult(
+        {
+          entityType: 'lease',
+          entityId: leaseId,
+          marketId,
+          action: 'lease_execution',
+          previousState: { status: lease.status },
+          newState: { status: 'active' },
+        },
+        gateResult,
+        request.user.id,
+        request.user.email,
+        requestId
+      );
+
+      if (!gateResult.allowed) {
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: 'LEASE_EXECUTION_BLOCKED',
+            message: gateResult.blockedReason,
+            violations: gateResult.decision.violations,
+            recommendedFixes: gateResult.decision.recommendedFixes,
+            complianceCheckId: checkId,
+            policyVersion: gateResult.decision.policyVersion,
+            marketPack: marketPackId,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          allowed: true,
+          complianceCheckId: checkId,
+          decision: gateResult.decision,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // POST /fare-act/check - FARE Act compliance check
+  // =========================================================================
+  app.post(
+    '/fare-act/check',
+    {
+      schema: {
+        description: 'Check FARE Act compliance for a listing',
+        tags: ['Compliance'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { listingId } = (request.body as { listingId: string }) || {};
+      const requestId = generatePrefixedId('req');
+
+      const listing = await prisma.listing.findUnique({
+        where: { id: listingId },
+        include: {
+          unit: { include: { property: true } },
+        },
+      });
+
+      if (!listing) {
+        throw new NotFoundError('Listing not found');
+      }
+
+      const { marketId, marketPackId, pack } = await getMarketConfigForEntity('listing', listingId);
+
+      const result = checkFAREActRules(
+        {
+          hasBrokerFee: listing.hasBrokerFee ?? false,
+          brokerFeeAmount: listing.brokerFee ? Number(listing.brokerFee) : undefined,
+          monthlyRent: Number(listing.rent),
+          incomeRequirementMultiplier: listing.incomeRequirement
+            ? Number(listing.incomeRequirement)
+            : undefined,
+          creditScoreThreshold: listing.creditScoreRequirement ?? undefined,
+        },
+        pack
+      );
+
+      const passed = result.violations.filter((v) => v.severity === 'critical').length === 0;
+
+      // Store compliance check with policyVersion
+      const check = await prisma.complianceCheck.create({
+        data: {
+          id: generatePrefixedId('cpl'),
+          entityType: 'listing',
+          entityId: listingId,
+          marketId,
+          checkType: 'fare_act',
+          status: passed ? 'passed' : 'failed',
+          severity: passed ? 'info' : 'critical',
+          title: passed ? 'FARE Act Compliant' : 'FARE Act Violation',
+          description: passed
+            ? 'Listing complies with FARE Act requirements'
+            : result.violations.map((v) => v.message).join('; '),
+          result: {
+            violations: result.violations,
+            fixes: result.fixes,
+            policyVersion: '1.0.0',
+            marketPack: marketPackId,
+            marketPackVersion: getMarketPackVersion(pack),
+          },
+          details: {
+            policyVersion: '1.0.0',
+            marketPack: marketPackId,
+          },
+          checkedAt: new Date(),
+          checkedById: request.user?.id || 'system',
+        },
+      });
+
+      // Create audit log
+      await createAuditLog({
+        actorId: request.user?.id,
+        actorEmail: request.user?.email || 'system',
+        action: 'fare_act_check',
+        entityType: 'listing',
+        entityId: listingId,
+        metadata: {
+          checkId: check.id,
+          passed,
+          policyVersion: '1.0.0',
+          marketPack: marketPackId,
+        },
+        requestId,
+      });
+
+      return reply.send({
+        success: true,
+        data: {
+          checkId: check.id,
+          passed,
+          violations: result.violations,
+          recommendedFixes: result.fixes,
+          policyVersion: '1.0.0',
+          marketPack: marketPackId,
+          checkedAt: new Date().toISOString(),
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // POST /good-cause/check - Good Cause Eviction check
+  // =========================================================================
+  app.post(
+    '/good-cause/check',
+    {
+      schema: {
+        description: 'Check Good Cause Eviction compliance for a lease action',
+        tags: ['Compliance'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { leaseId, actionType, reason, proposedRent } = GoodCauseCheckSchema.parse(
+        request.body
+      );
+      const requestId = generatePrefixedId('req');
+
+      const lease = await prisma.lease.findUnique({
+        where: { id: leaseId },
+        include: {
+          unit: { include: { property: true } },
+        },
+      });
+
+      if (!lease) {
+        throw new NotFoundError('Lease not found');
+      }
+
+      const { marketId, marketPackId, pack } = await getMarketConfigForEntity('lease', leaseId);
+
+      // Get CPI provider for Good Cause calculations
+      const cpiProvider = getCPIProvider();
+
+      const result = await checkGoodCauseRules(
+        {
+          checkType: actionType === 'rent_increase' ? 'rent_increase' : 'eviction',
+          currentRent: Number(lease.monthlyRent),
+          proposedRent: proposedRent,
+          evictionReason: reason,
+          noticeDays: 30, // Default, should be calculated from actual notice
+        },
+        pack,
+        cpiProvider
+      );
+
+      const passed = result.violations.filter((v) => v.severity === 'critical').length === 0;
+
+      // Extract CPI evidence from violations
+      const cpiEvidence = result.violations.find((v) => v.code === 'GOOD_CAUSE_CPI_FALLBACK_USED');
+
+      const check = await prisma.complianceCheck.create({
+        data: {
+          id: generatePrefixedId('cpl'),
+          entityType: 'lease',
+          entityId: leaseId,
+          marketId,
+          checkType: 'good_cause',
+          status: passed ? 'passed' : 'failed',
+          severity: passed ? 'info' : 'critical',
+          title: passed ? 'Good Cause Compliant' : 'Good Cause Violation',
+          description: passed
+            ? 'Action complies with Good Cause Eviction requirements'
+            : result.violations.filter((v) => v.severity === 'critical').map((v) => v.message).join('; '),
+          result: {
+            actionType,
+            violations: result.violations,
+            fixes: result.fixes,
+            policyVersion: '1.0.0',
+            marketPack: marketPackId,
+            marketPackVersion: getMarketPackVersion(pack),
+          },
+          details: {
+            policyVersion: '1.0.0',
+            marketPack: marketPackId,
+            dataSource: cpiEvidence?.evidence?.source || 'bls_api',
+            cpiFallback: !!cpiEvidence,
+          },
+          checkedAt: new Date(),
+          checkedById: request.user?.id || 'system',
+        },
+      });
+
+      await createAuditLog({
+        actorId: request.user?.id,
+        actorEmail: request.user?.email || 'system',
+        action: `good_cause_check_${actionType}`,
+        entityType: 'lease',
+        entityId: leaseId,
+        metadata: {
+          checkId: check.id,
+          passed,
+          actionType,
+          policyVersion: '1.0.0',
+        },
+        requestId,
+      });
+
+      return reply.send({
+        success: true,
+        data: {
+          checkId: check.id,
+          passed,
+          violations: result.violations,
+          recommendedFixes: result.fixes,
+          policyVersion: '1.0.0',
+          marketPack: marketPackId,
+          checkedAt: new Date().toISOString(),
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /history/:entityType/:entityId - Compliance check history
+  // =========================================================================
   app.get(
     '/history/:entityType/:entityId',
     {
@@ -109,7 +872,7 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
       const { entityType, entityId } = request.params;
 
       const checks = await prisma.complianceCheck.findMany({
-        where: { entityType, entityId },
+        where: { entityType: entityType.toLowerCase(), entityId },
         orderBy: { checkedAt: 'desc' },
         take: 50,
       });
@@ -118,7 +881,9 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Get required disclosures for market
+  // =========================================================================
+  // GET /disclosures - Get required disclosures for market
+  // =========================================================================
   app.get(
     '/disclosures',
     {
@@ -144,22 +909,32 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply: FastifyReply
     ) => {
-      const { marketId, transactionType } = request.query;
+      const { marketId = 'nyc', transactionType } = request.query;
 
-      const where: Record<string, unknown> = { isActive: true };
-      if (marketId) where.marketId = marketId;
-      if (transactionType) where.transactionType = transactionType;
+      const marketPackId = getMarketPackIdFromMarket(marketId);
+      const pack = getMarketPack(marketPackId);
 
-      const disclosures = await prisma.disclosure.findMany({
-        where,
-        orderBy: { name: 'asc' },
+      let disclosures = pack.rules.disclosures;
+
+      if (transactionType) {
+        disclosures = disclosures.filter((d) => d.requiredBefore === transactionType);
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          marketId,
+          marketPack: marketPackId,
+          marketPackVersion: getMarketPackVersion(pack),
+          disclosures,
+        },
       });
-
-      return reply.send({ success: true, data: disclosures });
     }
   );
 
-  // Record disclosure delivery
+  // =========================================================================
+  // POST /disclosures/record - Record disclosure delivery
+  // =========================================================================
   app.post(
     '/disclosures/record',
     {
@@ -195,9 +970,9 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
           id: generatePrefixedId('dsr'),
           disclosureId: data.disclosureId,
           recipientId: data.recipientId,
-          recipientType: data.recipientType,
+          recipientType: data.recipientType.toUpperCase(),
           deliveredAt: new Date(),
-          deliveryMethod: data.deliveryMethod,
+          deliveryMethod: data.deliveryMethod.toUpperCase(),
           deliveredById: request.user.id,
           metadata: data.metadata,
         },
@@ -207,7 +982,9 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Get market configuration
+  // =========================================================================
+  // GET /markets/:marketId - Get market configuration
+  // =========================================================================
   app.get(
     '/markets/:marketId',
     {
@@ -226,255 +1003,421 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest<{ Params: { marketId: string } }>, reply: FastifyReply) => {
-      const config = await prisma.marketConfig.findFirst({
-        where: { marketId: request.params.marketId, isActive: true },
-      });
+      const { marketId } = request.params;
 
-      if (!config) {
-        throw new NotFoundError('Market configuration not found');
-      }
-
-      return reply.send({ success: true, data: config });
-    }
-  );
-
-  // FARE Act compliance check endpoint
-  app.post(
-    '/fare-act/check',
-    {
-      schema: {
-        description: 'Check FARE Act compliance for a listing',
-        tags: ['Compliance'],
-        security: [{ bearerAuth: [] }],
-      },
-      preHandler: async (request, reply) => {
-        await app.authenticate(request, reply);
-      },
-    },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { listingId } = (request.body as { listingId: string }) || {};
-
-      const listing = await prisma.listing.findUnique({
-        where: { id: listingId },
-        include: {
-          unit: { include: { property: true } },
-        },
-      });
-
-      if (!listing) {
-        throw new NotFoundError('Listing not found');
-      }
-
-      // FARE Act checks
-      const violations: string[] = [];
-      const recommendations: string[] = [];
-
-      // Check 1: No broker fee to tenant
-      if (listing.hasBrokerFee && listing.brokerFee && Number(listing.brokerFee) > 0) {
-        violations.push(
-          'FARE Act violation: Broker fees cannot be charged to tenants in NYC'
-        );
-        recommendations.push('Remove broker fee or transfer to landlord');
-      }
-
-      // Check 2: Security deposit limits (NYC max 1 month rent)
-      const maxSecurityDeposit = Number(listing.rent);
-      if (listing.securityDeposit && Number(listing.securityDeposit) > maxSecurityDeposit) {
-        violations.push(
-          `Security deposit exceeds NYC limit of one month's rent ($${maxSecurityDeposit})`
-        );
-        recommendations.push(`Reduce security deposit to $${maxSecurityDeposit} or less`);
-      }
-
-      const passed = violations.length === 0;
-
-      // Store compliance check
-      await prisma.complianceCheck.create({
-        data: {
-          id: generatePrefixedId('cpl'),
-          entityType: 'LISTING',
-          entityId: listingId,
-          checkType: 'FARE_ACT',
-          status: passed ? 'PASSED' : 'FAILED',
-          result: { violations, recommendations },
-          checkedAt: new Date(),
-          checkedById: request.user?.id || 'system',
-        },
-      });
+      const marketPackId = getMarketPackIdFromMarket(marketId);
+      const pack = getMarketPack(marketPackId);
 
       return reply.send({
         success: true,
         data: {
-          passed,
-          violations,
-          recommendations,
-          checkedAt: new Date().toISOString(),
-        },
-      });
-    }
-  );
-
-  // Good Cause Eviction check
-  app.post(
-    '/good-cause/check',
-    {
-      schema: {
-        description: 'Check Good Cause Eviction compliance for a lease action',
-        tags: ['Compliance'],
-        security: [{ bearerAuth: [] }],
-      },
-      preHandler: async (request, reply) => {
-        await app.authenticate(request, reply);
-      },
-    },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { leaseId, actionType, reason } = (request.body as {
-        leaseId: string;
-        actionType: 'NON_RENEWAL' | 'EVICTION' | 'RENT_INCREASE';
-        reason?: string;
-      }) || {};
-
-      const lease = await prisma.lease.findUnique({
-        where: { id: leaseId },
-        include: {
-          unit: { include: { property: true } },
-          tenant: true,
-        },
-      });
-
-      if (!lease) {
-        throw new NotFoundError('Lease not found');
-      }
-
-      const violations: string[] = [];
-      const recommendations: string[] = [];
-
-      // Good Cause Eviction protections
-      const validEvictionReasons = [
-        'NONPAYMENT',
-        'LEASE_VIOLATION',
-        'NUISANCE',
-        'ILLEGAL_USE',
-        'OWNER_OCCUPANCY',
-        'SUBSTANTIAL_RENOVATION',
-      ];
-
-      if (actionType === 'EVICTION' || actionType === 'NON_RENEWAL') {
-        if (!reason || !validEvictionReasons.includes(reason)) {
-          violations.push(
-            'Good Cause Eviction: A valid reason is required for eviction or non-renewal'
-          );
-          recommendations.push(
-            'Provide documentation for one of the valid eviction reasons: ' +
-            validEvictionReasons.join(', ')
-          );
-        }
-      }
-
-      if (actionType === 'RENT_INCREASE') {
-        // Check if rent-stabilized
-        if (lease.unit.isRentStabilized) {
-          violations.push(
-            'This unit is rent-stabilized. Rent increases must follow RGB guidelines'
-          );
-          recommendations.push('Consult RGB published rent increase percentages for this year');
-        } else {
-          // Non-stabilized - check reasonable increase (5% + CPI under Good Cause)
-          // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Fetch current CPI data
-          const maxIncrease = 0.05; // Placeholder - should be 5% + CPI
-          recommendations.push(
-            `Under Good Cause, rent increases are capped at 5% + CPI (approximately ${(maxIncrease * 100).toFixed(1)}%)`
-          );
-        }
-      }
-
-      const passed = violations.length === 0;
-
-      await prisma.complianceCheck.create({
-        data: {
-          id: generatePrefixedId('cpl'),
-          entityType: 'LEASE',
-          entityId: leaseId,
-          checkType: 'GOOD_CAUSE',
-          status: passed ? 'PASSED' : 'FAILED',
-          result: { actionType, reason, violations, recommendations },
-          checkedAt: new Date(),
-          checkedById: request.user?.id || 'system',
-        },
-      });
-
-      return reply.send({
-        success: true,
-        data: {
-          passed,
-          violations,
-          recommendations,
-          checkedAt: new Date().toISOString(),
+          marketId,
+          marketPack: marketPackId,
+          marketPackVersion: getMarketPackVersion(pack),
+          policyVersion: '1.0.0',
+          rules: pack.rules,
+          metadata: pack.metadata,
         },
       });
     }
   );
 }
 
-// Helper functions
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
+/**
+ * Get market configuration for an entity based on its address.
+ * Implements proper market detection from property/unit/listing address.
+ */
 async function getMarketConfigForEntity(
   entityType: string,
   entityId: string
-): Promise<Record<string, unknown> | null> {
-  // Determine market based on entity location
-  const marketId = 'NYC'; // Default to NYC
-
-  // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Implement proper market detection based on entity address
-
-  const config = await prisma.marketConfig.findFirst({
-    where: { marketId, isActive: true },
-  });
-
-  return config?.rules as Record<string, unknown> | null;
-}
-
-async function runComplianceCheck(
-  data: { entityType: string; entityId: string; checkType: string },
-  marketConfig: Record<string, unknown> | null
 ): Promise<{
-  passed: boolean;
-  violations: string[];
-  recommendations: string[];
+  marketId: string;
+  marketPackId: string;
+  pack: ReturnType<typeof getMarketPack>;
 }> {
-  const violations: string[] = [];
-  const recommendations: string[] = [];
+  let address: { city?: string; state?: string } | null = null;
 
-  // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Implement comprehensive compliance checks
-  // This is a placeholder implementation
-
-  switch (data.checkType) {
-    case 'FARE_ACT':
-      // Check for broker fee compliance
+  // Fetch address based on entity type
+  switch (entityType.toLowerCase()) {
+    case 'listing': {
+      const listing = await prisma.listing.findUnique({
+        where: { id: entityId },
+        include: { unit: { include: { property: true } } },
+      });
+      address = listing?.unit?.property?.address as { city?: string; state?: string } | null;
       break;
-    case 'FCHA':
-      // Fair Credit Housing Act checks
+    }
+    case 'lease': {
+      const lease = await prisma.lease.findUnique({
+        where: { id: entityId },
+        include: { unit: { include: { property: true } } },
+      });
+      address = lease?.unit?.property?.address as { city?: string; state?: string } | null;
       break;
-    case 'GOOD_CAUSE':
-      // Good Cause Eviction compliance
+    }
+    case 'property': {
+      const property = await prisma.property.findUnique({
+        where: { id: entityId },
+      });
+      address = property?.address as { city?: string; state?: string } | null;
       break;
-    case 'RENT_STABILIZATION':
-      // Rent stabilization rules
+    }
+    case 'unit': {
+      const unit = await prisma.unit.findUnique({
+        where: { id: entityId },
+        include: { property: true },
+      });
+      address = unit?.property?.address as { city?: string; state?: string } | null;
       break;
-    case 'BROKER_FEE':
-      // Broker fee regulations
+    }
+    case 'application': {
+      const application = await prisma.application.findUnique({
+        where: { id: entityId },
+        include: { listing: { include: { unit: { include: { property: true } } } } },
+      });
+      address = application?.listing?.unit?.property?.address as { city?: string; state?: string } | null;
       break;
-    case 'SECURITY_DEPOSIT':
-      // Security deposit limits
-      break;
-    case 'DISCLOSURE':
-      // Required disclosures
-      break;
+    }
   }
 
+  // Determine market ID from address
+  let marketId = 'us'; // Default to US standard
+
+  if (address) {
+    const city = (address.city || '').toLowerCase();
+    const state = (address.state || '').toLowerCase();
+
+    // NYC detection
+    if (
+      city.includes('new york') ||
+      city.includes('manhattan') ||
+      city.includes('brooklyn') ||
+      city.includes('queens') ||
+      city.includes('bronx') ||
+      city.includes('staten island') ||
+      (state === 'ny' && city.includes('nyc'))
+    ) {
+      marketId = 'nyc';
+    }
+    // UK detection
+    else if (
+      city.includes('london') ||
+      city.includes('manchester') ||
+      city.includes('birmingham') ||
+      state === 'england' ||
+      state === 'uk'
+    ) {
+      marketId = 'uk';
+    }
+  }
+
+  const marketPackId = getMarketPackIdFromMarket(marketId);
+  const pack = getMarketPack(marketPackId);
+
+  return { marketId, marketPackId, pack };
+}
+
+/**
+ * Run comprehensive compliance check based on check type.
+ */
+async function runComplianceCheck(
+  data: { entityType: string; entityId: string; checkType: string },
+  marketId: string,
+  pack: ReturnType<typeof getMarketPack>
+): Promise<{
+  passed: boolean;
+  severity: 'info' | 'warning' | 'violation' | 'critical';
+  title: string;
+  description: string;
+  violations: Array<{ code: string; message: string; severity: string }>;
+  recommendations: string[];
+  policyVersion: string;
+  marketPackVersion: string;
+  checksPerformed: string[];
+  evidence: Record<string, unknown>;
+}> {
+  const violations: Array<{ code: string; message: string; severity: string; evidence?: Record<string, unknown> }> = [];
+  const recommendations: string[] = [];
+  const checksPerformed: string[] = [data.checkType];
+  const evidence: Record<string, unknown> = { marketId };
+
+  switch (data.checkType) {
+    case 'fare_act': {
+      const listing = await prisma.listing.findUnique({
+        where: { id: data.entityId },
+      });
+      if (listing) {
+        const result = checkFAREActRules(
+          {
+            hasBrokerFee: listing.hasBrokerFee ?? false,
+            brokerFeeAmount: listing.brokerFee ? Number(listing.brokerFee) : undefined,
+            monthlyRent: Number(listing.rent),
+            incomeRequirementMultiplier: listing.incomeRequirement
+              ? Number(listing.incomeRequirement)
+              : undefined,
+            creditScoreThreshold: listing.creditScoreRequirement ?? undefined,
+          },
+          pack
+        );
+        violations.push(...result.violations);
+        recommendations.push(...result.fixes.map((f) => f.description));
+      }
+      break;
+    }
+
+    case 'fcha': {
+      const application = await prisma.application.findUnique({
+        where: { id: data.entityId },
+      });
+      if (application) {
+        const result = checkFCHARules(
+          {
+            currentStage: (application.status?.toLowerCase() || 'application_submitted') as FCHAStage,
+            attemptedAction: 'stage_transition',
+          },
+          pack
+        );
+        violations.push(...result.violations);
+        recommendations.push(...result.fixes.map((f) => f.description));
+      }
+      break;
+    }
+
+    case 'good_cause': {
+      const lease = await prisma.lease.findUnique({
+        where: { id: data.entityId },
+      });
+      if (lease) {
+        const cpiProvider = getCPIProvider();
+        const result = await checkGoodCauseRules(
+          {
+            checkType: 'rent_increase',
+            currentRent: Number(lease.monthlyRent),
+          },
+          pack,
+          cpiProvider
+        );
+        violations.push(...result.violations);
+        recommendations.push(...result.fixes.map((f) => f.description));
+
+        // Record CPI data source in evidence
+        const cpiFallback = result.violations.find(
+          (v) => v.code === 'GOOD_CAUSE_CPI_FALLBACK_USED'
+        );
+        if (cpiFallback) {
+          evidence.dataSource = 'fallback';
+          evidence.cpiFallbackReason = cpiFallback.evidence?.reason;
+        }
+      }
+      break;
+    }
+
+    case 'rent_stabilization': {
+      const lease = await prisma.lease.findUnique({
+        where: { id: data.entityId },
+        include: { unit: true },
+      });
+      if (lease) {
+        const result = checkRentStabilizationRules(
+          {
+            isRentStabilized: lease.unit?.isRentStabilized ?? false,
+            legalRentAmount: lease.legalRent ? Number(lease.legalRent) : undefined,
+            preferentialRentAmount: lease.preferentialRent
+              ? Number(lease.preferentialRent)
+              : undefined,
+          },
+          pack
+        );
+        violations.push(...result.violations);
+        recommendations.push(...result.fixes.map((f) => f.description));
+      }
+      break;
+    }
+
+    case 'broker_fee': {
+      const listing = await prisma.listing.findUnique({
+        where: { id: data.entityId },
+      });
+      if (listing) {
+        const result = checkBrokerFeeRules(
+          {
+            hasBrokerFee: listing.hasBrokerFee ?? false,
+            brokerFeeAmount: listing.brokerFee ? Number(listing.brokerFee) : undefined,
+            monthlyRent: Number(listing.rent),
+            paidBy: 'tenant',
+          },
+          pack
+        );
+        violations.push(...result.violations);
+        recommendations.push(...result.fixes.map((f) => f.description));
+      }
+      break;
+    }
+
+    case 'security_deposit': {
+      const listing = await prisma.listing.findUnique({
+        where: { id: data.entityId },
+      });
+      if (listing && listing.securityDeposit) {
+        const result = checkSecurityDepositRules(
+          {
+            securityDepositAmount: Number(listing.securityDeposit),
+            monthlyRent: Number(listing.rent),
+          },
+          pack
+        );
+        violations.push(...result.violations);
+        recommendations.push(...result.fixes.map((f) => f.description));
+      }
+      break;
+    }
+
+    case 'disclosure': {
+      const result = checkDisclosureRules(
+        {
+          entityType: data.entityType as 'listing' | 'application' | 'lease' | 'move_in',
+          deliveredDisclosures: [],
+          acknowledgedDisclosures: [],
+        },
+        pack
+      );
+      violations.push(...result.violations);
+      recommendations.push(...result.fixes.map((f) => f.description));
+      break;
+    }
+  }
+
+  const criticalViolations = violations.filter((v) => v.severity === 'critical');
+  const passed = criticalViolations.length === 0;
+
+  let severity: 'info' | 'warning' | 'violation' | 'critical' = 'info';
+  if (violations.some((v) => v.severity === 'critical')) severity = 'critical';
+  else if (violations.some((v) => v.severity === 'violation')) severity = 'violation';
+  else if (violations.some((v) => v.severity === 'warning')) severity = 'warning';
+
   return {
-    passed: violations.length === 0,
+    passed,
+    severity,
+    title: passed ? 'Compliance Check Passed' : `${violations.length} Compliance Issue(s) Found`,
+    description: passed
+      ? `All ${data.checkType} requirements met`
+      : violations.map((v) => v.message).join('; '),
     violations,
     recommendations,
+    policyVersion: '1.0.0',
+    marketPackVersion: getMarketPackVersion(pack),
+    checksPerformed,
+    evidence,
   };
+}
+
+/**
+ * Record gate result to audit log and compliance check.
+ */
+async function recordGateResult(
+  context: {
+    entityType: string;
+    entityId: string;
+    marketId: string;
+    action: string;
+    previousState?: Record<string, unknown>;
+    newState?: Record<string, unknown>;
+  },
+  result: GateResult,
+  actorId: string,
+  actorEmail: string,
+  requestId: string
+): Promise<string> {
+  // Create compliance check record
+  const worstSeverity = result.decision.violations.reduce<
+    'info' | 'warning' | 'violation' | 'critical'
+  >((worst, v) => {
+    const severityOrder = ['info', 'warning', 'violation', 'critical'];
+    return severityOrder.indexOf(v.severity) > severityOrder.indexOf(worst)
+      ? (v.severity as 'info' | 'warning' | 'violation' | 'critical')
+      : worst;
+  }, 'info');
+
+  const check = await prisma.complianceCheck.create({
+    data: {
+      id: generatePrefixedId('cpl'),
+      entityType: context.entityType,
+      entityId: context.entityId,
+      marketId: context.marketId,
+      checkType: result.decision.checksPerformed.join(','),
+      status: result.allowed ? 'passed' : 'failed',
+      severity: worstSeverity,
+      title: result.allowed
+        ? `Gate passed: ${context.action}`
+        : `Gate blocked: ${context.action}`,
+      description: result.blockedReason || 'All compliance checks passed',
+      result: result.decision,
+      details: {
+        violations: result.decision.violations,
+        fixes: result.decision.recommendedFixes,
+        policyVersion: result.decision.policyVersion,
+        marketPack: result.decision.marketPack,
+        marketPackVersion: result.decision.marketPackVersion,
+      },
+      checkedAt: new Date(),
+      checkedById: actorId,
+    },
+  });
+
+  // Create audit log entry
+  await createAuditLog({
+    actorId,
+    actorEmail,
+    action: `compliance_gate_${result.allowed ? 'passed' : 'blocked'}`,
+    entityType: context.entityType,
+    entityId: context.entityId,
+    changes: {
+      action: context.action,
+      previousState: context.previousState,
+      newState: context.newState,
+    },
+    metadata: {
+      complianceCheckId: check.id,
+      decision: result.decision,
+      blockedReason: result.blockedReason,
+    },
+    requestId,
+  });
+
+  return check.id;
+}
+
+/**
+ * Create an audit log entry.
+ */
+async function createAuditLog(entry: {
+  actorId?: string;
+  actorEmail: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  changes?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  requestId?: string;
+}): Promise<string> {
+  const auditLog = await prisma.auditLog.create({
+    data: {
+      id: generatePrefixedId('aud'),
+      actorId: entry.actorId,
+      actorEmail: entry.actorEmail,
+      action: entry.action,
+      entityType: entry.entityType,
+      entityId: entry.entityId,
+      changes: entry.changes,
+      metadata: entry.metadata,
+      requestId: entry.requestId,
+      timestamp: new Date(),
+    },
+  });
+
+  return auditLog.id;
 }
