@@ -319,3 +319,159 @@ export function createAllocationBatchId(): string {
   const random = randomUUID().substring(0, 8);
   return `alloc_${timestamp}_${random}`;
 }
+
+// =============================================================================
+// Rent Payment Waterfall
+// =============================================================================
+
+export interface RentPaymentAllocation {
+  grossAmount: number;
+  processingFee: number;
+  platformFee: number;
+  netToLandlord: number;
+  entries: LedgerEntry[];
+}
+
+/**
+ * Platform fee percentage for rent payments.
+ */
+export const RENT_PLATFORM_FEE_PERCENT = 1.5; // 1.5% platform fee
+export const STRIPE_FEE_PERCENT = 2.9;
+export const STRIPE_FEE_FIXED_CENTS = 30;
+
+/**
+ * Calculate Stripe processing fee for an amount.
+ */
+export function calculateStripeFee(amountCents: number): number {
+  return Math.round(amountCents * (STRIPE_FEE_PERCENT / 100) + STRIPE_FEE_FIXED_CENTS);
+}
+
+/**
+ * Build rent payment waterfall allocation.
+ * Waterfall order:
+ * 1. Stripe processing fee (deducted by Stripe)
+ * 2. Platform fee (percentage of gross)
+ * 3. Landlord payout (remainder)
+ */
+export function buildRentPaymentWaterfall(
+  grossAmountCents: number,
+  options: {
+    platformFeePercent?: number;
+    landlordAccountId?: string;
+    propertyId?: string;
+    leaseId?: string;
+  } = {}
+): RentPaymentAllocation {
+  const platformFeePercent = options.platformFeePercent ?? RENT_PLATFORM_FEE_PERCENT;
+
+  // Convert to dollars for ledger entries
+  const grossAmount = grossAmountCents / 100;
+
+  // Calculate fees
+  const processingFeeCents = calculateStripeFee(grossAmountCents);
+  const platformFeeCents = Math.round(grossAmountCents * (platformFeePercent / 100));
+  const netToLandlordCents = grossAmountCents - processingFeeCents - platformFeeCents;
+
+  const processingFee = processingFeeCents / 100;
+  const platformFee = platformFeeCents / 100;
+  const netToLandlord = netToLandlordCents / 100;
+
+  // Build ledger entries
+  const entries: LedgerEntry[] = [
+    // Debit Stripe Clearing (asset: money received)
+    { accountCode: 'STRIPE_CLEARING', amount: grossAmount, isDebit: true },
+
+    // Credit Accounts Receivable (asset decrease: payment received)
+    { accountCode: 'ACCOUNTS_RECEIVABLE', amount: grossAmount, isDebit: false },
+
+    // Debit Processing Fee Expense
+    { accountCode: 'PAYMENT_PROCESSING_FEE', amount: processingFee, isDebit: true },
+
+    // Credit Stripe Clearing (reduce by fee retained by Stripe)
+    { accountCode: 'STRIPE_CLEARING', amount: processingFee, isDebit: false },
+
+    // Debit Stripe Clearing (move platform fee out)
+    // Credit Platform Fee Revenue
+    { accountCode: 'PLATFORM_FEE_REVENUE', amount: platformFee, isDebit: false },
+    { accountCode: 'STRIPE_CLEARING', amount: platformFee, isDebit: false },
+    { accountCode: 'CASH', amount: platformFee, isDebit: true },
+
+    // Credit Accounts Payable (landlord payout liability)
+    { accountCode: 'ACCOUNTS_PAYABLE', amount: netToLandlord, isDebit: false },
+    { accountCode: 'STRIPE_CLEARING', amount: netToLandlord, isDebit: false },
+    { accountCode: 'CASH', amount: netToLandlord, isDebit: true },
+  ];
+
+  return {
+    grossAmount,
+    processingFee,
+    platformFee,
+    netToLandlord,
+    entries,
+  };
+}
+
+/**
+ * Build simplified rent payment entries (for webhook processing).
+ * Creates balanced double-entry for rent payment received.
+ */
+export function buildRentPaymentEntries(
+  amount: number,
+  processingFee: number,
+  platformFee: number
+): LedgerEntry[] {
+  const netToLandlord = amount - processingFee - platformFee;
+
+  return [
+    // Money received from tenant
+    { accountCode: 'STRIPE_CLEARING', amount, isDebit: true },
+    { accountCode: 'ACCOUNTS_RECEIVABLE', amount, isDebit: false },
+
+    // Processing fee expense
+    { accountCode: 'PAYMENT_PROCESSING_FEE', amount: processingFee, isDebit: true },
+    { accountCode: 'STRIPE_CLEARING', amount: processingFee, isDebit: false },
+
+    // Platform revenue
+    { accountCode: 'CASH', amount: platformFee, isDebit: true },
+    { accountCode: 'PLATFORM_FEE_REVENUE', amount: platformFee, isDebit: false },
+
+    // Landlord payout liability
+    { accountCode: 'CASH', amount: netToLandlord, isDebit: true },
+    { accountCode: 'ACCOUNTS_PAYABLE', amount: netToLandlord, isDebit: false },
+  ];
+}
+
+/**
+ * Build dispute hold entries.
+ * When a dispute is opened, we hold funds until resolution.
+ */
+export function buildDisputeHoldEntries(amount: number): LedgerEntry[] {
+  return [
+    // Move funds to held/disputed account
+    { accountCode: 'CASH', amount, isDebit: false },
+    { accountCode: 'SECURITY_DEPOSITS_HELD', amount, isDebit: true },
+  ];
+}
+
+/**
+ * Build dispute resolution entries.
+ * Won: release hold, Lost: record expense
+ */
+export function buildDisputeResolutionEntries(
+  amount: number,
+  won: boolean
+): LedgerEntry[] {
+  if (won) {
+    // Release hold back to cash
+    return [
+      { accountCode: 'SECURITY_DEPOSITS_HELD', amount, isDebit: false },
+      { accountCode: 'CASH', amount, isDebit: true },
+    ];
+  } else {
+    // Dispute lost - expense the amount
+    return [
+      { accountCode: 'SECURITY_DEPOSITS_HELD', amount, isDebit: false },
+      { accountCode: 'REFUND_EXPENSE', amount, isDebit: true },
+    ];
+  }
+}

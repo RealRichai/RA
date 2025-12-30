@@ -1,4 +1,10 @@
 import { prisma } from '@realriches/database';
+import {
+  generatePaymentIdempotencyKey,
+  createMockIdempotencyManager,
+  getPartnerProvider,
+  type IdempotencyManager,
+} from '@realriches/revenue-engine';
 import { generatePrefixedId, NotFoundError, ForbiddenError, ValidationError, AppError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -11,6 +17,28 @@ import {
   attachPaymentMethod,
   redactStripeData,
 } from '../../lib/stripe';
+
+// =============================================================================
+// Idempotency Manager (mock for now, use Redis in production)
+// =============================================================================
+
+let idempotencyManager: IdempotencyManager | null = null;
+
+function getIdempotencyManager(): IdempotencyManager {
+  if (!idempotencyManager) {
+    // In production, this would be initialized with Redis from app context
+    // For now, use the mock implementation
+    idempotencyManager = createMockIdempotencyManager();
+  }
+  return idempotencyManager;
+}
+
+/**
+ * Set the idempotency manager (for dependency injection in tests/production).
+ */
+export function setIdempotencyManager(manager: IdempotencyManager): void {
+  idempotencyManager = manager;
+}
 
 const CreatePaymentSchema = z.object({
   leaseId: z.string(),
@@ -207,6 +235,12 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
         tags: ['Payments'],
         security: [{ bearerAuth: [] }],
         params: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+        headers: {
+          type: 'object',
+          properties: {
+            'idempotency-key': { type: 'string', description: 'Optional idempotency key' },
+          },
+        },
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
@@ -222,20 +256,61 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
 
       const { paymentMethodId } = ProcessPaymentSchema.parse(request.body);
 
+      // Check idempotency - use provided key or generate from payment ID + user
+      const providedKey = request.headers['idempotency-key'] as string | undefined;
+      const idempotencyKey = providedKey || generatePaymentIdempotencyKey(
+        request.params.id,
+        `process:${request.user.id}`
+      );
+
+      const manager = getIdempotencyManager();
+      const idempotencyCheck = await manager.checkAndLock(idempotencyKey);
+
+      if (!idempotencyCheck.isNew) {
+        // Request already processed - return cached result
+        request.log.info({ idempotencyKey, status: idempotencyCheck.existingRecord?.status }, 'Idempotent request - returning cached result');
+
+        if (idempotencyCheck.existingRecord?.status === 'completed') {
+          const cachedPayment = await prisma.payment.findUnique({
+            where: { id: request.params.id },
+          });
+          return reply.send({
+            success: true,
+            data: cachedPayment,
+            idempotent: true,
+          });
+        } else if (idempotencyCheck.existingRecord?.status === 'failed') {
+          throw new AppError(
+            idempotencyCheck.existingRecord.error || 'Previous request failed',
+            'PAYMENT_FAILED',
+            400
+          );
+        } else {
+          // Still processing
+          return reply.status(409).send({
+            success: false,
+            error: { code: 'REQUEST_IN_PROGRESS', message: 'Payment is already being processed' },
+          });
+        }
+      }
+
       const payment = await prisma.payment.findUnique({
         where: { id: request.params.id },
         include: { lease: true },
       });
 
       if (!payment) {
+        await manager.recordFailed(idempotencyKey, '', 'Payment not found');
         throw new NotFoundError('Payment not found');
       }
 
       if (payment.lease.tenantId !== request.user.id) {
+        await manager.recordFailed(idempotencyKey, '', 'Access denied');
         throw new ForbiddenError('Access denied');
       }
 
       if (payment.status !== 'pending') {
+        await manager.recordFailed(idempotencyKey, '', 'Payment is not in pending status');
         throw new ValidationError('Payment is not in pending status');
       }
 
@@ -245,11 +320,13 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       });
 
       if (!paymentMethod || paymentMethod.userId !== request.user.id) {
+        await manager.recordFailed(idempotencyKey, '', 'Invalid payment method');
         throw new ValidationError('Invalid payment method');
       }
 
       // Check if Stripe is configured
       if (!isStripeConfigured()) {
+        await manager.recordFailed(idempotencyKey, '', 'Payment processing not configured');
         throw new AppError(
           'Payment processing is not configured',
           'PAYMENT_PROCESSING_UNAVAILABLE',
@@ -264,6 +341,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       });
 
       if (!user) {
+        await manager.recordFailed(idempotencyKey, '', 'User not found');
         throw new NotFoundError('User not found');
       }
 
@@ -291,8 +369,12 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
 
       // Verify the payment method has a Stripe payment method ID
       if (!paymentMethod.stripePaymentMethodId) {
+        await manager.recordFailed(idempotencyKey, '', 'Payment method not linked to Stripe');
         throw new ValidationError('Payment method not linked to Stripe');
       }
+
+      // Record processing started
+      await manager.recordProcessing(idempotencyKey, payment.id);
 
       // Update payment to processing status
       await prisma.payment.update({
@@ -326,10 +408,10 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
               processedAt: new Date(),
               stripePaymentIntentId: paymentIntent.id,
               stripeChargeId: paymentIntent.latest_charge as string | undefined,
-              transactionId: generatePrefixedId('txn'),
             },
           });
 
+          await manager.recordCompleted(idempotencyKey, payment.id, { status: 'completed' });
           return reply.send({ success: true, data: updatedPayment });
         } else if (paymentIntent.status === 'requires_action') {
           // Payment requires additional action (e.g., 3D Secure)
@@ -341,6 +423,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
             },
           });
 
+          await manager.recordCompleted(idempotencyKey, payment.id, { status: 'requires_action' });
           return reply.send({
             success: true,
             data: updatedPayment,
@@ -357,6 +440,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
             },
           });
 
+          await manager.recordCompleted(idempotencyKey, payment.id, { status: 'processing' });
           return reply.send({ success: true, data: updatedPayment });
         }
       } catch (error) {
@@ -374,6 +458,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           },
         });
 
+        await manager.recordFailed(idempotencyKey, payment.id, errorMessage);
         throw new AppError(errorMessage, 'PAYMENT_FAILED', 400);
       }
     }
@@ -604,7 +689,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
     '/deposit-alternative',
     {
       schema: {
-        description: 'Apply for deposit alternative (LeaseLock, Rhino)',
+        description: 'Apply for deposit alternative (LeaseLock, Rhino, Jetty)',
         tags: ['Payments'],
         security: [{ bearerAuth: [] }],
       },
@@ -624,32 +709,177 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
 
       const lease = await prisma.lease.findUnique({
         where: { id: data.leaseId },
+        include: {
+          unit: {
+            include: {
+              property: true,
+            },
+          },
+          tenant: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+            },
+          },
+        },
       });
 
       if (!lease || lease.tenantId !== request.user.id) {
         throw new ForbiddenError('Access denied');
       }
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with LeaseLock/Rhino API
-      // const quote = await leaselock.getQuote({ ... });
+      // Map provider string to partner provider enum
+      const providerMap: Record<string, 'leaselock' | 'rhino' | 'jetty'> = {
+        leaselock: 'leaselock',
+        rhino: 'rhino',
+        jetty: 'jetty',
+      };
+      const partnerProvider = providerMap[data.provider];
 
-      const depositAlt = await prisma.depositAlternative.create({
-        data: {
-          id: generatePrefixedId('da'),
+      if (!partnerProvider) {
+        throw new ValidationError(`Unknown deposit alternative provider: ${data.provider}`);
+      }
+
+      try {
+        // Get the partner provider adapter
+        const provider = getPartnerProvider(partnerProvider);
+
+        // Check if the provider is available
+        const isAvailable = await provider.isAvailable();
+        if (!isAvailable) {
+          request.log.warn({ provider: data.provider }, 'Partner provider not available');
+          // Fall through to create pending application - will be processed async
+        }
+
+        // Build quote request
+        const quoteRequest = {
+          productType: 'deposit_alternative' as const,
+          provider: partnerProvider,
+          applicantId: request.user.id,
           leaseId: data.leaseId,
-          userId: request.user.id,
-          provider: data.provider,
+          propertyId: lease.unit.propertyId,
+          unitId: lease.unitId,
           coverageAmount: data.coverageAmount,
-          monthlyPremium: data.coverageAmount * 0.02, // ~2% monthly premium estimate
-          status: 'pending',
-        },
-      });
+          term: calculateLeaseTerm(lease.startDate, lease.endDate),
+          startDate: new Date(lease.startDate),
+          applicantInfo: {
+            firstName: lease.tenant.firstName,
+            lastName: lease.tenant.lastName,
+            email: lease.tenant.email,
+            phone: lease.tenant.phone || undefined,
+          },
+          propertyInfo: {
+            address: lease.unit.property.address,
+            city: lease.unit.property.city,
+            state: lease.unit.property.state,
+            zip: lease.unit.property.zip,
+            monthlyRent: Number(lease.monthlyRent),
+            propertyType: lease.unit.property.type || 'residential',
+          },
+        };
 
-      return reply.status(201).send({
-        success: true,
-        data: depositAlt,
-        message: 'Application submitted. You will receive a decision shortly.',
-      });
+        // Request quote from partner
+        let quote;
+        let quoteStatus: 'pending' | 'approved' | 'declined' = 'pending';
+        let monthlyPremium = data.coverageAmount * 0.02; // Default 2% estimate
+        let providerQuoteId: string | undefined;
+
+        if (isAvailable) {
+          try {
+            quote = await provider.getQuote(quoteRequest);
+            request.log.info(
+              { provider: data.provider, quoteId: quote.quoteId, status: quote.status },
+              'Received quote from partner'
+            );
+
+            if (quote.status === 'success') {
+              quoteStatus = 'approved';
+              monthlyPremium = quote.premium || monthlyPremium;
+              providerQuoteId = quote.providerQuoteId;
+            } else if (quote.status === 'declined') {
+              quoteStatus = 'declined';
+            }
+            // 'pending_review' and 'error' stay as 'pending'
+          } catch (quoteError) {
+            request.log.error(
+              { error: quoteError, provider: data.provider },
+              'Failed to get quote from partner - application will be processed async'
+            );
+            // Continue with pending status
+          }
+        }
+
+        // Create deposit alternative record
+        const depositAlt = await prisma.depositAlternative.create({
+          data: {
+            id: generatePrefixedId('da'),
+            leaseId: data.leaseId,
+            userId: request.user.id,
+            provider: data.provider,
+            coverageAmount: data.coverageAmount,
+            monthlyPremium,
+            status: quoteStatus,
+            metadata: {
+              quoteId: quote?.quoteId,
+              providerQuoteId,
+              commissionRate: quote?.commissionRate,
+              commissionAmount: quote?.commissionAmount,
+              validUntil: quote?.validUntil?.toISOString(),
+              declineReason: quote?.declineReason,
+            },
+          },
+        });
+
+        const responseMessage =
+          quoteStatus === 'approved'
+            ? `Approved! Monthly premium: $${monthlyPremium.toFixed(2)}`
+            : quoteStatus === 'declined'
+              ? `Application declined: ${quote?.declineReason || 'See provider for details'}`
+              : 'Application submitted. You will receive a decision shortly.';
+
+        return reply.status(201).send({
+          success: true,
+          data: {
+            ...depositAlt,
+            quote: quote
+              ? {
+                  premium: quote.premium,
+                  premiumFrequency: quote.premiumFrequency,
+                  validUntil: quote.validUntil,
+                }
+              : undefined,
+          },
+          message: responseMessage,
+        });
+      } catch (error) {
+        request.log.error({ error, provider: data.provider }, 'Deposit alternative application error');
+
+        // Create a pending application even on error
+        const depositAlt = await prisma.depositAlternative.create({
+          data: {
+            id: generatePrefixedId('da'),
+            leaseId: data.leaseId,
+            userId: request.user.id,
+            provider: data.provider,
+            coverageAmount: data.coverageAmount,
+            monthlyPremium: data.coverageAmount * 0.02,
+            status: 'pending',
+            metadata: {
+              error: error instanceof Error ? error.message : 'Unknown error',
+              errorAt: new Date().toISOString(),
+            },
+          },
+        });
+
+        return reply.status(201).send({
+          success: true,
+          data: depositAlt,
+          message: 'Application submitted. Processing may take additional time.',
+        });
+      }
     }
   );
 
@@ -708,4 +938,18 @@ function getNextPaymentDate(dayOfMonth: number): Date {
     next.setMonth(next.getMonth() + 1);
   }
   return next;
+}
+
+/**
+ * Calculate lease term in months from start and end dates.
+ */
+function calculateLeaseTerm(startDate: Date, endDate: Date): number {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  const months =
+    (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+
+  // Round to nearest month (minimum 1)
+  return Math.max(1, Math.round(months));
 }
