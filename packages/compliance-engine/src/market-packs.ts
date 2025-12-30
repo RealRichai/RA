@@ -513,6 +513,383 @@ export const TX_STANDARD_V1: MarketPack = {
 };
 
 // ============================================================================
+// FL_STANDARD v1.0.0 - Florida Compliance Pack
+// ============================================================================
+
+export const FL_STANDARD_V1: MarketPack = {
+  id: 'FL_STANDARD',
+  name: 'Florida Standard Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'Florida compliance with Landlord Tenant Act, radon disclosure, and security deposit rules',
+  jurisdiction: 'Florida',
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 0, // No statutory limit in Florida
+      interestRequired: false, // Optional but must notify tenant if interest-bearing
+      separateAccountRequired: true, // Must be in Florida banking institution or surety bond
+      returnDays: 15, // 15 days if no deductions, 30 days with itemized deductions
+    },
+    rentIncrease: {
+      enabled: false, // No rent control in Florida
+      noticeRequired: true,
+      noticeDays: 15, // 15 days for month-to-month
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'lead_paint_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'radon_gas_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'landlord_identity_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'security_deposit_terms',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'fire_protection_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+    ],
+    noRentControl: {
+      enabled: true,
+      statePreemption: true,
+      citiesCannotEnact: true,
+      reference: 'Florida Statute § 166.043',
+    },
+  },
+  metadata: {
+    landlordTenantActReference: 'Florida Statutes Chapter 83 Part II',
+    legislativeReferences: [
+      'Florida Statutes § 83.49 (Security Deposits)',
+      'Florida Statutes § 83.50 (Disclosure)',
+      'Florida Statutes § 404.056 (Radon Gas Protection)',
+      'Florida Statutes § 166.043 (Rent Control Preemption)',
+    ],
+  },
+};
+
+// ============================================================================
+// IL_STANDARD v1.0.0 - Illinois Compliance Pack
+// ============================================================================
+
+export const IL_STANDARD_V1: MarketPack = {
+  id: 'IL_STANDARD',
+  name: 'Illinois Standard Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'Illinois compliance with RLTO (Chicago), security deposit interest, and state disclosures',
+  jurisdiction: 'Illinois',
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 1.5, // Chicago RLTO: 1.5 months max
+      interestRequired: true, // Chicago requires interest on deposits held > 6 months
+      separateAccountRequired: true, // Chicago requires federally insured interest-bearing account
+      returnDays: 30, // 30 days in Chicago, 45 days under state law
+    },
+    rentIncrease: {
+      enabled: false, // No statewide rent control
+      noticeRequired: true,
+      noticeDays: 30,
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'lead_paint_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'radon_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'bedbug_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'code_violations_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'utility_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'smoke_detector_notice',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'carbon_monoxide_detector_notice',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+    ],
+    chicagoRLTO: {
+      enabled: true,
+      securityDepositInterestRate: 'passbook_rate',
+      interestPaymentFrequency: 'annual',
+      summaryOfRightsRequired: true,
+      moveInMoveOutInspection: true,
+      tenantRemedies: [
+        'withhold_rent',
+        'repair_and_deduct',
+        'terminate_lease',
+        'sue_for_damages',
+      ],
+    },
+  },
+  metadata: {
+    rltoEffectiveDate: '1986-01-01',
+    legislativeReferences: [
+      'Chicago Municipal Code 5-12 (RLTO)',
+      '765 ILCS 705 (Security Deposit Return Act)',
+      '765 ILCS 715 (Security Deposit Interest Act)',
+      '420 ILCS 44 (Radon Awareness Act)',
+      '765 ILCS 735 (Bed Bug Disclosure Act)',
+    ],
+  },
+};
+
+// ============================================================================
+// WA_STANDARD v1.0.0 - Washington Compliance Pack
+// ============================================================================
+
+export const WA_STANDARD_V1: MarketPack = {
+  id: 'WA_STANDARD',
+  name: 'Washington Standard Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'Washington compliance with Residential Landlord-Tenant Act, just cause eviction, and tenant protections',
+  jurisdiction: 'Washington',
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 0, // No statutory limit
+      interestRequired: false,
+      separateAccountRequired: false,
+      returnDays: 21, // Must return within 21 days
+    },
+    rentIncrease: {
+      enabled: true,
+      noticeRequired: true,
+      noticeDays: 60, // 60 days written notice for month-to-month
+      goodCauseRequired: false, // Statewide, but Seattle has just cause
+    },
+    disclosures: [
+      {
+        type: 'lead_paint_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'mold_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'move_in_checklist',
+        requiredBefore: 'move_in',
+        signatureRequired: true,
+      },
+      {
+        type: 'deposit_location_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'fire_safety_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'landlord_contact_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+    ],
+    washingtonRCW: {
+      enabled: true,
+      moveInChecklist: {
+        required: true,
+        tenantSignatureRequired: true,
+        landlordMustProvide: true,
+      },
+      depositDeductionRules: {
+        itemizedStatementRequired: true,
+        photoDocumentationRecommended: true,
+        normalWearExcluded: true,
+      },
+      retaliationProtection: {
+        enabled: true,
+        protectedActivities: [
+          'complaint_to_government',
+          'tenant_organization',
+          'legal_action',
+        ],
+        presumptionPeriodDays: 90,
+      },
+    },
+    seattleJustCause: {
+      enabled: true, // Applies in Seattle
+      validEvictionReasons: [
+        'non_payment',
+        'lease_violation',
+        'waste_or_nuisance',
+        'illegal_activity',
+        'owner_occupancy',
+        'substantial_rehabilitation',
+        'demolition',
+        'change_of_use',
+      ],
+      relocationAssistance: {
+        required: true,
+        conditions: ['no_fault_eviction', 'substantial_rent_increase'],
+      },
+    },
+  },
+  metadata: {
+    rcwEffectiveDate: '1973-01-01',
+    seattleJustCauseEffectiveDate: '2020-01-01',
+    legislativeReferences: [
+      'RCW 59.18 (Residential Landlord-Tenant Act)',
+      'RCW 59.18.260 (Deposit Return)',
+      'RCW 59.18.230 (Checklist Requirement)',
+      'RCW 59.18.240 (Rent Increase Notice)',
+      'Seattle Municipal Code 22.206 (Just Cause Eviction)',
+    ],
+  },
+};
+
+// ============================================================================
+// CO_STANDARD v1.0.0 - Colorado Compliance Pack
+// ============================================================================
+
+export const CO_STANDARD_V1: MarketPack = {
+  id: 'CO_STANDARD',
+  name: 'Colorado Standard Compliance',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'Colorado compliance with security deposit limits, warranty of habitability, and required disclosures',
+  jurisdiction: 'Colorado',
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 0, // No statutory limit
+      interestRequired: false,
+      separateAccountRequired: false,
+      returnDays: 30, // 30 days standard, up to 60 if specified in lease
+    },
+    rentIncrease: {
+      enabled: false, // No rent control in Colorado
+      noticeRequired: true,
+      noticeDays: 21, // 21 days for month-to-month (10 days if week-to-week)
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'lead_paint_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'meth_contamination_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'bed_bug_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'gas_appliance_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: false,
+      },
+      {
+        type: 'security_deposit_terms',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+    ],
+    coloradoWarrantyOfHabitability: {
+      enabled: true,
+      landlordObligations: [
+        'waterproofing_and_weather_protection',
+        'plumbing_in_good_working_order',
+        'heating_facilities',
+        'electrical_lighting',
+        'common_areas_clean_and_safe',
+        'adequate_trash_receptacles',
+        'running_water_and_hot_water',
+        'locks_on_doors_and_windows',
+        'compliance_with_codes',
+      ],
+      tenantRemedies: [
+        'repair_and_deduct',
+        'rent_withholding',
+        'lease_termination',
+        'damages',
+      ],
+      noticeRequired: true,
+      noticeDays: 10, // Written notice before remedies
+    },
+    noRentControl: {
+      enabled: true,
+      statePreemption: true,
+      citiesCannotEnact: true,
+      reference: 'Colorado Revised Statutes § 38-12-301',
+    },
+  },
+  metadata: {
+    habitabilityActEffectiveDate: '2008-01-01',
+    legislativeReferences: [
+      'Colorado Revised Statutes § 38-12-101 to 38-12-104 (Security Deposits)',
+      'Colorado Revised Statutes § 38-12-503 (Warranty of Habitability)',
+      'Colorado Revised Statutes § 38-12-301 (Rent Control Preemption)',
+      'Colorado Revised Statutes § 25-18.5-101 (Methamphetamine Disclosure)',
+      'Colorado Revised Statutes § 38-12-1001 (Bed Bug Disclosure)',
+    ],
+  },
+};
+
+// ============================================================================
 // Market Pack Registry
 // ============================================================================
 
@@ -521,6 +898,10 @@ export const MARKET_PACKS: Record<MarketPackId, MarketPack> = {
   US_STANDARD: US_STANDARD_V1,
   CA_STANDARD: CA_STANDARD_V1,
   TX_STANDARD: TX_STANDARD_V1,
+  FL_STANDARD: FL_STANDARD_V1,
+  IL_STANDARD: IL_STANDARD_V1,
+  WA_STANDARD: WA_STANDARD_V1,
+  CO_STANDARD: CO_STANDARD_V1,
   UK_GDPR: UK_GDPR_V1,
 };
 
@@ -587,6 +968,69 @@ export function getMarketPackIdFromMarket(marketId: string): MarketPackId {
     'frisco': 'TX_STANDARD',
     'mckinney': 'TX_STANDARD',
     'denton': 'TX_STANDARD',
+    // Florida markets
+    'fl': 'FL_STANDARD',
+    'florida': 'FL_STANDARD',
+    'miami': 'FL_STANDARD',
+    'orlando': 'FL_STANDARD',
+    'tampa': 'FL_STANDARD',
+    'jacksonville': 'FL_STANDARD',
+    'fort_lauderdale': 'FL_STANDARD',
+    'st_petersburg': 'FL_STANDARD',
+    'hialeah': 'FL_STANDARD',
+    'tallahassee': 'FL_STANDARD',
+    'cape_coral': 'FL_STANDARD',
+    'fort_myers': 'FL_STANDARD',
+    'pembroke_pines': 'FL_STANDARD',
+    'hollywood': 'FL_STANDARD',
+    'gainesville': 'FL_STANDARD',
+    // Illinois markets
+    'il': 'IL_STANDARD',
+    'illinois': 'IL_STANDARD',
+    'chicago': 'IL_STANDARD',
+    'aurora': 'IL_STANDARD',
+    'naperville': 'IL_STANDARD',
+    'joliet': 'IL_STANDARD',
+    'rockford': 'IL_STANDARD',
+    'springfield': 'IL_STANDARD',
+    'elgin': 'IL_STANDARD',
+    'peoria': 'IL_STANDARD',
+    'champaign': 'IL_STANDARD',
+    'waukegan': 'IL_STANDARD',
+    'cicero': 'IL_STANDARD',
+    'evanston': 'IL_STANDARD',
+    // Washington markets
+    'wa': 'WA_STANDARD',
+    'washington': 'WA_STANDARD',
+    'seattle': 'WA_STANDARD',
+    'spokane': 'WA_STANDARD',
+    'tacoma': 'WA_STANDARD',
+    'vancouver': 'WA_STANDARD',
+    'bellevue': 'WA_STANDARD',
+    'kent': 'WA_STANDARD',
+    'everett': 'WA_STANDARD',
+    'renton': 'WA_STANDARD',
+    'spokane_valley': 'WA_STANDARD',
+    'federal_way': 'WA_STANDARD',
+    'kirkland': 'WA_STANDARD',
+    'bellingham': 'WA_STANDARD',
+    'olympia': 'WA_STANDARD',
+    // Colorado markets
+    'co': 'CO_STANDARD',
+    'colorado': 'CO_STANDARD',
+    'denver': 'CO_STANDARD',
+    'colorado_springs': 'CO_STANDARD',
+    'aurora_co': 'CO_STANDARD',
+    'fort_collins': 'CO_STANDARD',
+    'lakewood': 'CO_STANDARD',
+    'thornton': 'CO_STANDARD',
+    'arvada': 'CO_STANDARD',
+    'westminster': 'CO_STANDARD',
+    'pueblo': 'CO_STANDARD',
+    'centennial': 'CO_STANDARD',
+    'boulder': 'CO_STANDARD',
+    'greeley': 'CO_STANDARD',
+    'longmont': 'CO_STANDARD',
     // UK markets
     'uk': 'UK_GDPR',
     'united_kingdom': 'UK_GDPR',

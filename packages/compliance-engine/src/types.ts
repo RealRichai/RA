@@ -121,6 +121,10 @@ export const MarketPackIdSchema = z.enum([
   'US_STANDARD',
   'CA_STANDARD',
   'TX_STANDARD',
+  'FL_STANDARD',
+  'IL_STANDARD',
+  'WA_STANDARD',
+  'CO_STANDARD',
   'UK_GDPR',
 ]);
 
@@ -260,6 +264,55 @@ export const NoRentControlRuleSchema = z.object({
   reference: z.string().optional(),
 });
 
+// Chicago RLTO Schema (Illinois)
+export const ChicagoRLTORuleSchema = z.object({
+  enabled: z.boolean(),
+  securityDepositInterestRate: z.string().optional(),
+  interestPaymentFrequency: z.string().optional(),
+  summaryOfRightsRequired: z.boolean().optional(),
+  moveInMoveOutInspection: z.boolean().optional(),
+  tenantRemedies: z.array(z.string()).optional(),
+});
+
+// Washington RCW Schema
+export const WashingtonRCWRuleSchema = z.object({
+  enabled: z.boolean(),
+  moveInChecklist: z.object({
+    required: z.boolean(),
+    tenantSignatureRequired: z.boolean().optional(),
+    landlordMustProvide: z.boolean().optional(),
+  }).optional(),
+  depositDeductionRules: z.object({
+    itemizedStatementRequired: z.boolean().optional(),
+    photoDocumentationRecommended: z.boolean().optional(),
+    normalWearExcluded: z.boolean().optional(),
+  }).optional(),
+  retaliationProtection: z.object({
+    enabled: z.boolean(),
+    protectedActivities: z.array(z.string()).optional(),
+    presumptionPeriodDays: z.number().optional(),
+  }).optional(),
+});
+
+// Seattle Just Cause Schema
+export const SeattleJustCauseRuleSchema = z.object({
+  enabled: z.boolean(),
+  validEvictionReasons: z.array(z.string()).optional(),
+  relocationAssistance: z.object({
+    required: z.boolean(),
+    conditions: z.array(z.string()).optional(),
+  }).optional(),
+});
+
+// Colorado Warranty of Habitability Schema
+export const ColoradoWarrantyOfHabitabilitySchema = z.object({
+  enabled: z.boolean(),
+  landlordObligations: z.array(z.string()).optional(),
+  tenantRemedies: z.array(z.string()).optional(),
+  noticeRequired: z.boolean().optional(),
+  noticeDays: z.number().optional(),
+});
+
 export const MarketPackRulesSchema = z.object({
   brokerFee: BrokerFeeRuleSchema,
   securityDeposit: SecurityDepositRuleSchema,
@@ -284,6 +337,10 @@ export const MarketPackRulesSchema = z.object({
   ab1482: AB1482RuleSchema.optional(), // California Tenant Protection Act
   texasPropertyCode: TexasPropertyCodeRuleSchema.optional(), // Texas Property Code
   noRentControl: NoRentControlRuleSchema.optional(), // State rent control preemption
+  chicagoRLTO: ChicagoRLTORuleSchema.optional(), // Illinois Chicago RLTO
+  washingtonRCW: WashingtonRCWRuleSchema.optional(), // Washington RCW 59.18
+  seattleJustCause: SeattleJustCauseRuleSchema.optional(), // Seattle Just Cause Eviction
+  coloradoWarrantyOfHabitability: ColoradoWarrantyOfHabitabilitySchema.optional(), // Colorado Warranty
 });
 
 export type MarketPackRules = z.infer<typeof MarketPackRulesSchema>;
