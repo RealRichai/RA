@@ -1,7 +1,28 @@
+/**
+ * Marketing Routes
+ *
+ * Endpoints for marketing services:
+ * - Asset generation (flyers, brochures, social posts)
+ * - Media upload and management
+ * - Video tour generation
+ * - 3DGS virtual tour generation
+ * - Template marketplace
+ *
+ * All endpoints use the MarketingService which orchestrates
+ * provider integrations with fallback to mock providers.
+ */
+
 import { prisma } from '@realriches/database';
 import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+
+import { MarketingService } from './marketing.service';
+import type { AssetType, VideoStyle } from './providers/provider.types';
+
+// =============================================================================
+// Request Schemas
+// =============================================================================
 
 const CreateMarketingAssetSchema = z.object({
   listingId: z.string(),
@@ -18,8 +39,85 @@ const UploadMediaSchema = z.object({
   order: z.number().int().optional(),
 });
 
+const VideoTourSchema = z.object({
+  propertyId: z.string(),
+  style: z.enum(['cinematic', 'modern', 'luxury', 'cozy', 'minimal']).optional(),
+  musicTrack: z.string().optional(),
+  voiceoverScript: z.string().optional(),
+});
+
+const ThreeDGSTourSchema = z.object({
+  propertyId: z.string(),
+  sourceImages: z.array(z.string()).min(20),
+  quality: z.enum(['standard', 'high', 'ultra']).optional(),
+  includeFloorPlan: z.boolean().optional(),
+});
+
+const PurchaseTemplateSchema = z.object({
+  paymentMethodId: z.string(),
+});
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+function sendServiceResponse<T>(
+  reply: FastifyReply,
+  response: { success: boolean; data?: T; error?: { code: string; message: string }; meta?: unknown },
+  successStatus = 200
+): FastifyReply {
+  if (!response.success) {
+    const statusCode =
+      response.error?.code === 'NOT_FOUND'
+        ? 404
+        : response.error?.code === 'FORBIDDEN'
+          ? 403
+          : response.error?.code === 'AUTH_REQUIRED'
+            ? 401
+            : 400;
+
+    return reply.status(statusCode).send({
+      success: false,
+      error: response.error,
+    });
+  }
+
+  return reply.status(successStatus).send({
+    success: true,
+    data: response.data,
+    meta: response.meta,
+  });
+}
+
+// =============================================================================
+// Routes
+// =============================================================================
+
 export async function marketingRoutes(app: FastifyInstance): Promise<void> {
-  // List marketing templates
+  const marketingService = new MarketingService(app);
+
+  // ===========================================================================
+  // Provider Status (Admin/Debug)
+  // ===========================================================================
+
+  app.get(
+    '/status',
+    {
+      schema: {
+        description: 'Get marketing provider status',
+        tags: ['Marketing'],
+      },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const status = marketingService.getProviderStatus();
+      return reply.send({ success: true, data: status });
+    }
+  );
+
+  // ===========================================================================
+  // TEMPLATES
+  // ===========================================================================
+
   app.get(
     '/templates',
     {
@@ -60,7 +158,10 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Generate marketing asset
+  // ===========================================================================
+  // ASSET GENERATION
+  // ===========================================================================
+
   app.post(
     '/assets/generate',
     {
@@ -75,78 +176,17 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-        });
-      }
-
       const data = CreateMarketingAssetSchema.parse(request.body);
-
-      // Get listing details for asset generation
-      const listing = await prisma.listing.findUnique({
-        where: { id: data.listingId },
-        include: {
-          unit: { include: { property: true } },
-          media: { orderBy: { order: 'asc' } },
-        },
+      const response = await marketingService.generateAsset(request, {
+        listingId: data.listingId,
+        type: data.type as AssetType,
+        templateId: data.templateId,
+        customizations: data.customizations,
       });
-
-      if (!listing) {
-        throw new NotFoundError('Listing not found');
-      }
-
-      // Get template if specified
-      let template = null;
-      if (data.templateId) {
-        template = await prisma.marketingTemplate.findUnique({
-          where: { id: data.templateId },
-        });
-      }
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Generate actual marketing asset
-      // Use template + listing data to generate flyer/brochure/etc.
-      // For now, create a placeholder asset
-
-      const asset = await prisma.marketingAsset.create({
-        data: {
-          id: generatePrefixedId('mkt'),
-          listingId: data.listingId,
-          type: data.type,
-          templateId: data.templateId,
-          status: 'generating',
-          fileUrl: null,
-          metadata: {
-            customizations: data.customizations,
-            listingTitle: listing.title,
-            propertyAddress: listing.unit.property.address,
-          },
-          createdById: request.user.id,
-        },
-      });
-
-      // Simulate async generation
-      // In production, this would be a background job
-      setTimeout(async () => {
-        await prisma.marketingAsset.update({
-          where: { id: asset.id },
-          data: {
-            status: 'completed',
-            fileUrl: `https://storage.example.com/marketing/${asset.id}.pdf`,
-          },
-        });
-      }, 2000);
-
-      return reply.status(201).send({
-        success: true,
-        data: asset,
-        message: 'Asset generation started. Check back shortly.',
-      });
+      return sendServiceResponse(reply, response, 201);
     }
   );
 
-  // List marketing assets
   app.get(
     '/assets',
     {
@@ -199,7 +239,10 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Upload property media
+  // ===========================================================================
+  // MEDIA UPLOAD
+  // ===========================================================================
+
   app.post(
     '/media',
     {
@@ -222,54 +265,51 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
 
       // Handle multipart upload
       const parts = request.parts();
-      let fileUrl = '';
-      let thumbnailUrl = '';
+      let fileData: Buffer | null = null;
+      let filename = '';
+      let mimetype = '';
       const metadata: Record<string, unknown> = {};
 
       for await (const part of parts) {
         if (part.type === 'file') {
-          // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Upload to S3/MinIO
-          fileUrl = `https://storage.example.com/media/${generatePrefixedId('med')}-${part.filename}`;
-          thumbnailUrl = fileUrl.replace('.', '-thumb.');
+          const chunks: Buffer[] = [];
+          for await (const chunk of part.file) {
+            chunks.push(chunk);
+          }
+          fileData = Buffer.concat(chunks);
+          filename = part.filename;
+          mimetype = part.mimetype;
         } else {
           metadata[part.fieldname] = part.value;
         }
       }
 
+      if (!fileData) {
+        return reply.status(400).send({
+          success: false,
+          error: { code: 'NO_FILE', message: 'No file provided' },
+        });
+      }
+
       const data = UploadMediaSchema.parse(metadata);
 
-      // Verify property ownership
-      const property = await prisma.property.findUnique({
-        where: { id: data.propertyId },
-      });
-
-      if (!property) {
-        throw new NotFoundError('Property not found');
-      }
-
-      if (property.ownerId !== request.user.id && request.user.role !== 'admin') {
-        throw new ForbiddenError('Access denied');
-      }
-
-      const media = await prisma.propertyMedia.create({
-        data: {
-          id: generatePrefixedId('med'),
-          propertyId: data.propertyId,
-          type: data.type,
-          url: fileUrl,
-          thumbnailUrl,
-          title: data.title,
-          description: data.description,
-          order: data.order || 0,
-          uploadedById: request.user.id,
+      const response = await marketingService.uploadMedia(request, {
+        propertyId: data.propertyId,
+        type: data.type,
+        file: {
+          data: fileData,
+          filename,
+          mimetype,
         },
+        title: data.title,
+        description: data.description,
+        order: data.order,
       });
 
-      return reply.status(201).send({ success: true, data: media });
+      return sendServiceResponse(reply, response, 201);
     }
   );
 
-  // List property media
   app.get(
     '/media/:propertyId',
     {
@@ -293,7 +333,10 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Generate video tour
+  // ===========================================================================
+  // VIDEO TOUR GENERATION
+  // ===========================================================================
+
   app.post(
     '/video-tour/generate',
     {
@@ -308,63 +351,21 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-        });
-      }
-
-      const { propertyId, style, musicTrack, voiceoverScript } = (request.body as {
-        propertyId: string;
-        style?: string;
-        musicTrack?: string;
-        voiceoverScript?: string;
-      }) || {};
-
-      const property = await prisma.property.findUnique({
-        where: { id: propertyId },
-        include: { media: { where: { type: { in: ['photo', 'video'] } } } },
+      const data = VideoTourSchema.parse(request.body);
+      const response = await marketingService.generateVideoTour(request, {
+        propertyId: data.propertyId,
+        style: data.style as VideoStyle,
+        musicTrack: data.musicTrack,
+        voiceoverScript: data.voiceoverScript,
       });
-
-      if (!property) {
-        throw new NotFoundError('Property not found');
-      }
-
-      if (property.ownerId !== request.user.id && request.user.role !== 'admin') {
-        throw new ForbiddenError('Access denied');
-      }
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with video generation API
-      // This would use AI to create cinematic tours from photos/videos
-
-      const videoTour = await prisma.propertyMedia.create({
-        data: {
-          id: generatePrefixedId('med'),
-          propertyId,
-          type: 'video',
-          url: '', // Will be populated when generation completes
-          title: 'AI-Generated Video Tour',
-          description: `Style: ${style || 'cinematic'}`,
-          metadata: {
-            status: 'generating',
-            style,
-            musicTrack,
-            voiceoverScript,
-          },
-          uploadedById: request.user.id,
-        },
-      });
-
-      return reply.status(201).send({
-        success: true,
-        data: videoTour,
-        message: 'Video tour generation started. This may take several minutes.',
-      });
+      return sendServiceResponse(reply, response, 201);
     }
   );
 
-  // Create 3D/VR tour
+  // ===========================================================================
+  // 3D/VR TOUR GENERATION
+  // ===========================================================================
+
   app.post(
     '/3d-tour/create',
     {
@@ -379,46 +380,21 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-        });
-      }
-
-      const { propertyId, sourceImages } = (request.body as {
-        propertyId: string;
-        sourceImages: string[];
-      }) || {};
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with 3DGS generation service
-      // Would use Gaussian Splatting to create immersive 3D environments
-
-      const tour = await prisma.propertyMedia.create({
-        data: {
-          id: generatePrefixedId('med'),
-          propertyId,
-          type: 'virtual_tour',
-          url: '', // Will be populated when processing completes
-          title: '3D Virtual Tour',
-          metadata: {
-            status: 'processing',
-            sourceImageCount: sourceImages?.length || 0,
-            technology: '3DGS',
-          },
-          uploadedById: request.user.id,
-        },
+      const data = ThreeDGSTourSchema.parse(request.body);
+      const response = await marketingService.generate3DGSTour(request, {
+        propertyId: data.propertyId,
+        sourceImages: data.sourceImages,
+        quality: data.quality,
+        includeFloorPlan: data.includeFloorPlan,
       });
-
-      return reply.status(201).send({
-        success: true,
-        data: tour,
-        message: '3D tour processing started. This may take up to 30 minutes.',
-      });
+      return sendServiceResponse(reply, response, 201);
     }
   );
 
-  // Template marketplace
+  // ===========================================================================
+  // TEMPLATE MARKETPLACE
+  // ===========================================================================
+
   app.get(
     '/marketplace',
     {
@@ -463,7 +439,6 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Purchase template
   app.post(
     '/marketplace/:templateId/purchase',
     {
@@ -482,43 +457,12 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest<{ Params: { templateId: string } }>, reply: FastifyReply) => {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-        });
-      }
-
-      const template = await prisma.marketingTemplate.findUnique({
-        where: { id: request.params.templateId },
+      const body = PurchaseTemplateSchema.parse(request.body);
+      const response = await marketingService.purchaseTemplate(request, {
+        templateId: request.params.templateId,
+        paymentMethodId: body.paymentMethodId,
       });
-
-      if (!template) {
-        throw new NotFoundError('Template not found');
-      }
-
-      if (!template.isPremium) {
-        return reply.send({
-          success: true,
-          data: template,
-          message: 'This template is free to use',
-        });
-      }
-
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Process payment via Stripe
-      // const payment = await stripe.paymentIntents.create({ ... });
-
-      // Record purchase
-      await prisma.marketingTemplate.update({
-        where: { id: template.id },
-        data: { downloads: { increment: 1 } },
-      });
-
-      return reply.send({
-        success: true,
-        data: template,
-        message: 'Template purchased successfully',
-      });
+      return sendServiceResponse(reply, response);
     }
   );
 }
