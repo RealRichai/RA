@@ -62,7 +62,7 @@ describe('ConsoleEmailProvider', () => {
 
       const sentMessages = provider.getSentMessages();
       expect(sentMessages).toHaveLength(1);
-      expect(sentMessages[0].id).toBe('msg_track123');
+      expect(sentMessages[0]?.id).toBe('msg_track123');
     });
 
     it('should return last message', async () => {

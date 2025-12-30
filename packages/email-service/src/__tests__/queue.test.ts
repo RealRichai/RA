@@ -28,8 +28,8 @@ describe('DLQHandler', () => {
 
       const records = handler.getRecords();
       expect(records).toHaveLength(1);
-      expect(records[0].messageId).toBe('msg_failed1');
-      expect(records[0].error).toBe('Test error');
+      expect(records[0]?.messageId).toBe('msg_failed1');
+      expect(records[0]?.error).toBe('Test error');
     });
 
     it('should track attempts', async () => {

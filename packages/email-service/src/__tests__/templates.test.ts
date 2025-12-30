@@ -29,6 +29,7 @@ describe('Template Engine', () => {
         description: 'A test template',
         subject: 'Hello {{name}}',
         requiredFields: ['name'],
+        defaultPriority: 'normal',
         html: (data) => `<h1>Hello ${data.name}</h1>`,
       };
 
@@ -48,6 +49,7 @@ describe('Template Engine', () => {
         description: 'Test rendering',
         subject: (data) => `Welcome ${data.userName}`,
         requiredFields: ['userName'],
+        defaultPriority: 'normal',
         html: (data) => `<p>Welcome, ${data.userName}!</p>`,
         text: (data) => `Welcome, ${data.userName}!`,
       };
@@ -74,6 +76,7 @@ describe('Template Engine', () => {
         description: 'Test required fields',
         subject: 'Test',
         requiredFields: ['required'],
+        defaultPriority: 'normal',
         html: (data) => `<p>${data.required}</p>`,
       };
 
@@ -91,6 +94,7 @@ describe('Template Engine', () => {
         description: 'Test auto text generation',
         subject: 'Test',
         requiredFields: ['content'],
+        defaultPriority: 'normal',
         html: (data) => `<p>${data.content}</p>`,
       };
 
