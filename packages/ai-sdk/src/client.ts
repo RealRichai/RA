@@ -7,8 +7,9 @@
 
 import { createAnthropicProvider } from './adapters/anthropic';
 import { createConsoleProvider } from './adapters/console';
+import { createOpenAIProvider } from './adapters/openai';
 import type { ILLMProvider } from './adapters/provider-interface';
-import { LLMBudgetExceededError } from './adapters/provider-interface';
+import { LLMBudgetExceededError, LLMProviderError } from './adapters/provider-interface';
 import { getAgentRunService } from './ledger/agent-run';
 import type { AgentRunServiceConfig } from './ledger/agent-run';
 import { gateAIOutput } from './policy/gate';
@@ -29,6 +30,8 @@ import type {
 export interface AIClientConfig {
   /** Default provider to use */
   defaultProvider: LLMProvider;
+  /** Fallback provider to use if default fails (optional) */
+  fallbackProvider?: LLMProvider;
   /** Provider-specific configurations */
   providers?: {
     anthropic?: LLMProviderConfig;
@@ -57,24 +60,32 @@ export interface AIClientConfig {
 export class AIClient {
   private providers: Map<LLMProvider, ILLMProvider> = new Map();
   private defaultProvider: LLMProvider;
+  private fallbackProvider?: LLMProvider;
   private budgetConfig: BudgetConfig;
   private enablePolicyGate: boolean;
   private blockOnPolicyViolation: boolean;
 
   constructor(config: AIClientConfig) {
     this.defaultProvider = config.defaultProvider;
+    this.fallbackProvider = config.fallbackProvider;
     this.budgetConfig = config.budget || {};
     this.enablePolicyGate = config.enablePolicyGate ?? true;
     this.blockOnPolicyViolation = config.blockOnPolicyViolation ?? false;
 
     // Initialize providers
-    if (config.providers?.anthropic || config.defaultProvider === 'anthropic') {
+    if (config.providers?.anthropic || config.defaultProvider === 'anthropic' || config.fallbackProvider === 'anthropic') {
       this.providers.set(
         'anthropic',
         createAnthropicProvider(config.providers?.anthropic)
       );
     }
-    if (config.providers?.console || config.defaultProvider === 'console') {
+    if (config.providers?.openai || config.defaultProvider === 'openai' || config.fallbackProvider === 'openai') {
+      this.providers.set(
+        'openai',
+        createOpenAIProvider(config.providers?.openai)
+      );
+    }
+    if (config.providers?.console || config.defaultProvider === 'console' || config.fallbackProvider === 'console') {
       this.providers.set(
         'console',
         createConsoleProvider(config.providers?.console)
@@ -97,7 +108,7 @@ export class AIClient {
    * 1. Budget check
    * 2. Redact prompt
    * 3. Start agent run log
-   * 4. Execute completion
+   * 4. Execute completion (with fallback on provider failure)
    * 5. Redact output
    * 6. Policy gate check
    * 7. Record completion
@@ -151,8 +162,8 @@ export class AIClient {
       // Mark as processing
       await ledger.markProcessing(run.id);
 
-      // 4. Execute completion with redacted messages
-      const response = await provider.complete({
+      // 4. Execute completion with redacted messages (with fallback)
+      const response = await this.executeWithFallback(provider, {
         ...request,
         messages: redactedMessages,
       });
@@ -224,6 +235,32 @@ export class AIClient {
           (error as { code?: string }).code || 'UNKNOWN_ERROR',
           error.message
         );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Execute completion with fallback provider on failure.
+   */
+  private async executeWithFallback(
+    provider: ILLMProvider,
+    request: CompletionRequest
+  ): Promise<CompletionResponse> {
+    try {
+      return await provider.complete(request);
+    } catch (error) {
+      // Only fallback on provider errors (rate limits, timeouts, etc.)
+      if (this.fallbackProvider && error instanceof LLMProviderError && error.retryable) {
+        const fallbackProvider = this.providers.get(this.fallbackProvider);
+        if (fallbackProvider) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `Primary provider ${provider.providerId} failed, falling back to ${this.fallbackProvider}:`,
+            error.message
+          );
+          return await fallbackProvider.complete(request);
+        }
       }
       throw error;
     }
@@ -312,6 +349,7 @@ export class AIClient {
 
 /**
  * Create an AI client with configuration.
+ * Default: Claude/Anthropic as primary with OpenAI fallback in production.
  */
 export function createAIClient(config?: Partial<AIClientConfig>): AIClient {
   const isProduction = process.env['NODE_ENV'] === 'production';
@@ -319,9 +357,14 @@ export function createAIClient(config?: Partial<AIClientConfig>): AIClient {
   return new AIClient({
     defaultProvider:
       config?.defaultProvider || (isProduction ? 'anthropic' : 'console'),
+    fallbackProvider:
+      config?.fallbackProvider || (isProduction ? 'openai' : undefined),
     providers: {
       anthropic: config?.providers?.anthropic || {
         apiKey: process.env['ANTHROPIC_API_KEY'] || '',
+      },
+      openai: config?.providers?.openai || {
+        apiKey: process.env['OPENAI_API_KEY'] || '',
       },
       console: config?.providers?.console || {},
     },

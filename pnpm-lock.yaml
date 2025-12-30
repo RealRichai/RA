@@ -323,6 +323,9 @@ importers:
       '@realriches/utils':
         specifier: workspace:*
         version: link:../utils
+      openai:
+        specifier: ^4.24.1
+        version: 4.104.0(zod@3.25.76)
       zod:
         specifier: ^3.22.0
         version: 3.25.76

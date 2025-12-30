@@ -18,6 +18,7 @@ export * from './types';
 export {
   createProvider,
   createAnthropicProvider,
+  createOpenAIProvider,
   createConsoleProvider,
   type ILLMProvider,
   BaseLLMProvider,

@@ -9,6 +9,7 @@ import swaggerUI from '@fastify/swagger-ui';
 import { getConfig } from '@realriches/config';
 import type { FastifyInstance } from 'fastify';
 
+import { aiPlugin } from './ai';
 import { auditPlugin } from './audit';
 import { authPlugin } from './auth';
 import { emailPlugin } from './email';
@@ -88,6 +89,9 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
 
   // Email service (depends on Redis)
   await app.register(emailPlugin);
+
+  // AI client (Claude/OpenAI with fallback)
+  await app.register(aiPlugin);
 
   // Auth decorators
   await app.register(authPlugin);

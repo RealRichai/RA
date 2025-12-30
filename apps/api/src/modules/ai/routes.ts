@@ -1,5 +1,5 @@
 import { prisma, type Prisma } from '@realriches/database';
-import { generatePrefixedId, NotFoundError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -24,7 +24,8 @@ const SendMessageSchema = z.object({
 
 const MaintenanceTriageSchema = z.object({
   description: z.string().min(1),
-  unitId: z.string(),
+  propertyId: z.string(),
+  unitId: z.string().optional(),
   images: z.array(z.string()).optional(),
   urgencyHint: z.enum(['low', 'normal', 'high', 'emergency']).optional(),
 });
@@ -40,10 +41,17 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
         security: [{ bearerAuth: [] }],
       },
       preHandler: async (request, reply) => {
-        await app.authenticate(request, reply, { optional: true });
+        await app.authenticate(request, reply);
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
       const data = CreateConversationSchema.parse(request.body);
 
       // Build initial context for HF-CTS
@@ -56,12 +64,14 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       const conversation = await prisma.aIConversation.create({
         data: {
           id: generatePrefixedId('conv'),
-          userId: request.user?.id,
+          agentType: 'assistant',
+          model: 'claude-3-5-sonnet',
           contextType: data.contextType,
           entityType: data.entityType,
           entityId: data.entityId,
           context: context as Prisma.InputJsonValue,
-          status: 'ACTIVE',
+          status: 'active',
+          user: { connect: { id: request.user.id } },
         },
       });
 
@@ -70,7 +80,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
         data: {
           id: generatePrefixedId('msg'),
           conversationId: conversation.id,
-          role: 'SYSTEM',
+          role: 'system',
           content: generateSystemPrompt(data.contextType, context),
         },
       });
@@ -80,7 +90,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
         data: {
           conversationId: conversation.id,
           contextType: conversation.contextType,
-          welcomeMessage: getWelcomeMessage(data.contextType),
+          welcomeMessage: getWelcomeMessage(data.contextType || 'general_support'),
         },
       });
     }
@@ -121,28 +131,37 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
         data: {
           id: generatePrefixedId('msg'),
           conversationId: conversation.id,
-          role: 'USER',
+          role: 'user',
           content,
-          attachments,
+          attachments: (attachments || []) as Prisma.InputJsonValue,
         },
       });
 
-      // Generate AI response using HF-CTS
-      const aiResponse = await generateAIResponse(conversation, content);
+      // Generate AI response using AIClient
+      const aiResponse = await generateAIResponse(app, conversation, content);
 
       // Store AI response
       const assistantMessage = await prisma.aIMessage.create({
         data: {
           id: generatePrefixedId('msg'),
           conversationId: conversation.id,
-          role: 'ASSISTANT',
+          role: 'assistant',
           content: aiResponse.content,
           metadata: (aiResponse.metadata ?? {}) as Prisma.InputJsonValue,
         },
       });
 
-      // Update conversation context with new information
-      await updateConversationContext(conversation.id, content, aiResponse);
+      // Update conversation last message time
+      await prisma.aIConversation.update({
+        where: { id: conversation.id },
+        data: {
+          lastMessageAt: new Date(),
+          context: {
+            ...(conversation.context as object || {}),
+            lastIntent: aiResponse.metadata?.intent,
+          } as Prisma.InputJsonValue,
+        },
+      });
 
       return reply.send({
         success: true,
@@ -173,7 +192,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
         where: { id: request.params.id },
         include: {
           messages: {
-            where: { role: { not: 'SYSTEM' } },
+            where: { role: { not: 'system' } },
             orderBy: { createdAt: 'asc' },
           },
         },
@@ -210,57 +229,54 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
 
       const data = MaintenanceTriageSchema.parse(request.body);
 
-      // Verify unit access
-      const unit = await prisma.unit.findUnique({
-        where: { id: data.unitId },
-        include: { property: true },
+      // Verify property access
+      const property = await prisma.property.findUnique({
+        where: { id: data.propertyId },
       });
 
-      if (!unit) {
-        throw new NotFoundError('Unit not found');
+      if (!property) {
+        throw new NotFoundError('Property not found');
       }
 
-      // Perform AI triage
-      const triageResult = await performMaintenanceTriage(data);
-
-      // Store triage result
-      const triage = await prisma.maintenanceTriage.create({
+      // Create a conversation for the triage
+      const conversation = await prisma.aIConversation.create({
         data: {
-          id: generatePrefixedId('trg'),
-          unitId: data.unitId,
-          reportedById: request.user.id,
-          description: data.description,
-          images: data.images || [],
-          category: triageResult.category,
-          urgency: triageResult.urgency,
-          estimatedCost: triageResult.estimatedCost,
-          suggestedVendorType: triageResult.suggestedVendorType,
-          aiAnalysis: triageResult.analysis,
+          id: generatePrefixedId('conv'),
+          agentType: 'maintenance_triage',
+          model: 'claude-3-5-sonnet',
+          contextType: 'maintenance_request',
+          status: 'active',
+          user: { connect: { id: request.user.id } },
         },
       });
 
-      // Auto-create work order if urgent
-      let workOrder = null;
-      if (triageResult.urgency === 'emergency' || triageResult.urgency === 'high') {
-        workOrder = await prisma.workOrder.create({
-          data: {
-            id: generatePrefixedId('wo'),
-            unitId: data.unitId,
-            reportedById: request.user.id,
-            title: triageResult.suggestedTitle,
-            description: data.description,
-            category: triageResult.category as any,
-            priority: triageResult.urgency as any,
-            status: 'submitted',
-          },
-        });
-      }
+      // Perform AI triage using AIClient
+      const triageResult = await performMaintenanceTriage(app, data, property);
+
+      // Store triage result in MaintenanceTriage
+      const triage = await prisma.maintenanceTriage.create({
+        data: {
+          id: generatePrefixedId('trg'),
+          conversationId: conversation.id,
+          reportedBy: request.user.id,
+          propertyId: data.propertyId,
+          unitId: data.unitId,
+          description: data.description,
+          issueType: triageResult.category,
+          issueCategory: triageResult.category,
+          urgency: triageResult.urgency,
+          urgencyReason: triageResult.analysis,
+          issueDescription: triageResult.analysis,
+          images: data.images || [],
+          aiDiagnosis: triageResult.analysis,
+          suggestedActions: triageResult.recommendations as Prisma.InputJsonValue,
+        },
+      });
 
       return reply.send({
         success: true,
         data: {
           triage,
-          workOrder,
           recommendations: triageResult.recommendations,
         },
       });
@@ -285,6 +301,10 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
 
       const conversation = await prisma.aIConversation.findUnique({
         where: { id: request.params.id },
+        include: {
+          user: { select: { email: true, firstName: true } },
+          messages: { orderBy: { createdAt: 'desc' }, take: 5 },
+        },
       });
 
       if (!conversation) {
@@ -295,7 +315,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       await prisma.aIConversation.update({
         where: { id: conversation.id },
         data: {
-          status: 'HANDOFF_REQUESTED',
+          status: 'handoff_requested',
           handoffReason: reason,
           handoffRequestedAt: new Date(),
         },
@@ -306,13 +326,14 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
         data: {
           id: generatePrefixedId('msg'),
           conversationId: conversation.id,
-          role: 'SYSTEM',
+          role: 'system',
           content: `Handoff requested: ${reason || 'User requested human assistance'}`,
           metadata: { handoffReason: reason } as Prisma.InputJsonValue,
         },
       });
 
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Notify support team of handoff request
+      // Notify support team via email
+      await notifyHandoffRequest(app, conversation, reason);
 
       return reply.send({
         success: true,
@@ -324,7 +345,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Voice session (placeholder for Twilio/WebRTC integration)
+  // Voice session (placeholder - requires Twilio/WebRTC infrastructure)
   app.post(
     '/voice/session',
     {
@@ -338,13 +359,13 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Implement Twilio/WebRTC voice integration
+      // Voice integration requires Twilio/WebRTC infrastructure setup
       return reply.send({
         success: true,
         data: {
           sessionId: generatePrefixedId('vcs'),
-          message: 'Voice AI feature coming soon',
-          status: 'NOT_IMPLEMENTED',
+          message: 'Voice AI requires Twilio/WebRTC infrastructure configuration',
+          status: 'INFRASTRUCTURE_REQUIRED',
         },
       });
     }
@@ -365,7 +386,7 @@ async function buildContext(data: {
 
   if (data.entityType && data.entityId) {
     switch (data.entityType) {
-      case 'LISTING':
+      case 'listing':
         const listing = await prisma.listing.findUnique({
           where: { id: data.entityId },
           include: {
@@ -389,7 +410,7 @@ async function buildContext(data: {
         }
         break;
 
-      case 'PROPERTY':
+      case 'property':
         const property = await prisma.property.findUnique({
           where: { id: data.entityId },
           include: { units: true },
@@ -404,7 +425,7 @@ async function buildContext(data: {
         }
         break;
 
-      case 'WORK_ORDER':
+      case 'work_order':
         const workOrder = await prisma.workOrder.findUnique({
           where: { id: data.entityId },
           include: { unit: { include: { property: true } } },
@@ -426,32 +447,33 @@ async function buildContext(data: {
 }
 
 function generateSystemPrompt(
-  contextType: string,
+  contextType: string | null,
   context: Record<string, unknown>
 ): string {
   const basePrompt = `You are an AI assistant for RealRiches, an AI-powered real estate platform.
 You help users with property management, leasing, and maintenance tasks.
 Always be helpful, professional, and comply with fair housing laws.
-Never discriminate based on protected classes.`;
+Never discriminate based on protected classes (race, color, religion, national origin, sex, familial status, disability).
+Never suggest or endorse illegal fees or practices.`;
 
   switch (contextType) {
-    case 'LEASING_INQUIRY':
+    case 'leasing_inquiry':
       return `${basePrompt}
 You are helping with a leasing inquiry.
 ${context.listing ? `Property: ${JSON.stringify(context.listing)}` : ''}
 Help the user learn about the property and schedule viewings.`;
 
-    case 'MAINTENANCE_REQUEST':
+    case 'maintenance_request':
       return `${basePrompt}
 You are helping with a maintenance request.
 ${context.workOrder ? `Work Order: ${JSON.stringify(context.workOrder)}` : ''}
 Help diagnose issues and escalate emergencies appropriately.`;
 
-    case 'PROPERTY_TOUR':
+    case 'property_tour':
       return `${basePrompt}
 You are a virtual tour guide.
 ${context.property ? `Property: ${JSON.stringify(context.property)}` : ''}
-Provide engaging information about the property and neighborhood.`;
+Provide engaging information about the property.`;
 
     default:
       return basePrompt;
@@ -460,92 +482,207 @@ Provide engaging information about the property and neighborhood.`;
 
 function getWelcomeMessage(contextType: string): string {
   switch (contextType) {
-    case 'LEASING_INQUIRY':
+    case 'leasing_inquiry':
       return "Hi! I'm here to help you with your leasing inquiry. What would you like to know about this property?";
-    case 'MAINTENANCE_REQUEST':
+    case 'maintenance_request':
       return "Hi! I can help you report a maintenance issue. Please describe the problem you're experiencing.";
-    case 'PROPERTY_TOUR':
+    case 'property_tour':
       return "Welcome! I'll be your virtual guide today. What would you like to see first?";
     default:
-      return "Hi! How can I assist you today?";
+      return 'Hi! How can I assist you today?';
   }
 }
 
 async function generateAIResponse(
-  conversation: { id: string; contextType: string; context: unknown; messages: { role: string; content: string }[] },
+  app: FastifyInstance,
+  conversation: {
+    id: string;
+    contextType: string | null;
+    context: Prisma.JsonValue;
+    messages: { role: string; content: string }[];
+    entityId?: string | null;
+  },
   userMessage: string
 ): Promise<{
   content: string;
   metadata?: Record<string, unknown>;
   suggestedActions?: string[];
 }> {
-  // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with OpenAI/Anthropic API
-  // This is a placeholder implementation
+  const context = (conversation.context || {}) as Record<string, unknown>;
 
-  const context = conversation.context as Record<string, unknown>;
+  // Build messages for AIClient
+  const messages = [
+    { role: 'system' as const, content: generateSystemPrompt(conversation.contextType, context) },
+    ...conversation.messages.slice(-10).map((m) => ({
+      role: m.role.toLowerCase() as 'user' | 'assistant',
+      content: m.content,
+    })),
+    { role: 'user' as const, content: userMessage },
+  ];
 
-  // Simple response logic for demo
-  const lowerMessage = userMessage.toLowerCase();
+  try {
+    // Use AIClient for completion with PII redaction and policy gate
+    const response = await app.aiClient.complete({
+      messages,
+      model: 'claude-3-5-sonnet',
+      context: {
+        conversationId: conversation.id,
+        entityId: conversation.entityId || undefined,
+        marketId: 'US_STANDARD',
+      },
+      config: {
+        maxTokens: 1024,
+        temperature: 0.7,
+      },
+    });
 
-  if (lowerMessage.includes('schedule') || lowerMessage.includes('tour') || lowerMessage.includes('viewing')) {
+    // Extract suggested actions from response
+    const suggestedActions = extractSuggestedActions(response.content, conversation.contextType);
+
     return {
-      content: "I'd be happy to help you schedule a viewing! What dates and times work best for you?",
-      suggestedActions: ['Schedule for tomorrow', 'Schedule for this weekend', 'See available times'],
+      content: response.content,
+      metadata: {
+        agentRunId: response.agentRunId,
+        model: response.model,
+        tokensUsed: response.tokensUsed,
+        processingTimeMs: response.processingTimeMs,
+      },
+      suggestedActions,
+    };
+  } catch (error) {
+    logger.error({ error, conversationId: conversation.id }, 'AI completion failed');
+
+    // Fallback to simple response on error
+    return {
+      content: "I apologize, but I'm having trouble processing your request. Let me connect you with a team member who can help.",
+      suggestedActions: ['Talk to a person', 'Try again'],
     };
   }
+}
 
-  if (lowerMessage.includes('price') || lowerMessage.includes('rent') || lowerMessage.includes('cost')) {
-    const listing = context.listing as Record<string, unknown> | undefined;
-    if (listing) {
-      return {
-        content: `The monthly rent for this unit is $${listing.rent}. Would you like to know about move-in costs?`,
-        suggestedActions: ['Move-in costs', 'Application process', 'Schedule viewing'],
-      };
+function extractSuggestedActions(
+  responseContent: string,
+  contextType: string | null
+): string[] {
+  const lowerContent = responseContent.toLowerCase();
+
+  if (contextType === 'leasing_inquiry') {
+    if (lowerContent.includes('schedule') || lowerContent.includes('viewing') || lowerContent.includes('tour')) {
+      return ['Schedule for tomorrow', 'Schedule for this weekend', 'See available times'];
     }
+    if (lowerContent.includes('application') || lowerContent.includes('apply')) {
+      return ['Start application', 'View requirements', 'Talk to an agent'];
+    }
+    return ['Property details', 'Schedule viewing', 'Talk to an agent'];
   }
 
-  if (lowerMessage.includes('emergency') || lowerMessage.includes('urgent') || lowerMessage.includes('leak') || lowerMessage.includes('fire')) {
-    return {
-      content: "I understand this may be urgent. For emergencies like fire or gas leaks, please call 911 immediately. For urgent maintenance, I'll connect you with our emergency line. Would you like me to escalate this?",
-      suggestedActions: ['Escalate to emergency', 'Not an emergency', 'Talk to a person'],
-    };
+  if (contextType === 'maintenance_request') {
+    if (lowerContent.includes('emergency') || lowerContent.includes('urgent')) {
+      return ['Escalate to emergency', 'Call emergency line', 'Talk to a person'];
+    }
+    return ['Submit work order', 'Add photos', 'Talk to a person'];
   }
 
-  return {
-    content: "I'm here to help! Could you tell me more about what you're looking for?",
-    suggestedActions: ['Property details', 'Schedule viewing', 'Talk to an agent'],
-  };
+  return ['Learn more', 'Talk to a person'];
 }
 
-async function updateConversationContext(
-  conversationId: string,
-  userMessage: string,
-  aiResponse: { content: string; metadata?: Record<string, unknown> }
-): Promise<void> {
-  // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Implement context extraction and update
-  // Extract intents, entities, and preferences from conversation
-}
-
-async function performMaintenanceTriage(data: {
-  description: string;
-  unitId: string;
-  images?: string[];
-  urgencyHint?: string;
-}): Promise<{
+async function performMaintenanceTriage(
+  app: FastifyInstance,
+  data: {
+    description: string;
+    propertyId: string;
+    unitId?: string;
+    images?: string[];
+    urgencyHint?: string;
+  },
+  property: { id: string; name: string; address: string }
+): Promise<{
   category: string;
-  urgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'EMERGENCY';
+  urgency: string;
   estimatedCost: { min: number; max: number };
   suggestedVendorType: string;
   suggestedTitle: string;
   analysis: string;
   recommendations: string[];
 }> {
-  // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Integrate with AI model for image analysis
-  // This is a placeholder implementation
+  const triagePrompt = `You are a maintenance triage expert. Analyze this maintenance request.
 
+Property: ${property.name} at ${property.address}
+${data.unitId ? `Unit: ${data.unitId}` : ''}
+Description: ${data.description}
+${data.images?.length ? `Images provided: ${data.images.length}` : 'No images'}
+${data.urgencyHint ? `User indicated urgency: ${data.urgencyHint}` : ''}
+
+Return ONLY a JSON object with:
+- category: PLUMBING, ELECTRICAL, HVAC, APPLIANCE, STRUCTURAL, GENERAL, EMERGENCY
+- urgency: LOW, MEDIUM, HIGH, or EMERGENCY
+- estimatedCost: { min: number, max: number } in dollars
+- suggestedVendorType: type of vendor needed
+- suggestedTitle: short title for work order (max 60 chars)
+- analysis: 2-3 sentence analysis of the issue
+- recommendations: array of 3 recommended actions for the tenant`;
+
+  try {
+    const response = await app.aiClient.complete({
+      messages: [
+        { role: 'system', content: 'You are a maintenance triage expert. Return only valid JSON.' },
+        { role: 'user', content: triagePrompt },
+      ],
+      model: 'claude-3-5-sonnet',
+      context: {
+        entityType: 'property',
+        entityId: property.id,
+        marketId: 'US_STANDARD',
+      },
+      config: { maxTokens: 512, temperature: 0.3 },
+    });
+
+    const parsed = tryParseJSON(response.content);
+    if (parsed && parsed.category && parsed.urgency) {
+      return {
+        category: String(parsed.category),
+        urgency: String(parsed.urgency),
+        estimatedCost: (parsed.estimatedCost as { min: number; max: number }) || { min: 50, max: 300 },
+        suggestedVendorType: String(parsed.suggestedVendorType || 'HANDYMAN'),
+        suggestedTitle: String(parsed.suggestedTitle || `Maintenance: ${data.description.slice(0, 40)}`),
+        analysis: String(parsed.analysis || 'AI analysis in progress.'),
+        recommendations: (parsed.recommendations as string[]) || ['Document with photos', 'Contact property manager'],
+      };
+    }
+  } catch (error) {
+    logger.error({ error, propertyId: property.id }, 'AI triage failed');
+  }
+
+  // Fallback to keyword-based triage
+  return keywordBasedTriage(data);
+}
+
+function tryParseJSON(str: string): Record<string, unknown> | null {
+  try {
+    const jsonMatch = str.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function keywordBasedTriage(data: {
+  description: string;
+  urgencyHint?: string;
+}): {
+  category: string;
+  urgency: string;
+  estimatedCost: { min: number; max: number };
+  suggestedVendorType: string;
+  suggestedTitle: string;
+  analysis: string;
+  recommendations: string[];
+} {
   const desc = data.description.toLowerCase();
 
-  // Simple keyword-based triage
   if (desc.includes('fire') || desc.includes('gas') || desc.includes('flood') || desc.includes('no heat')) {
     return {
       category: 'EMERGENCY',
@@ -554,11 +691,7 @@ async function performMaintenanceTriage(data: {
       suggestedVendorType: 'EMERGENCY_SERVICES',
       suggestedTitle: 'Emergency: ' + data.description.slice(0, 50),
       analysis: 'This issue requires immediate attention due to safety concerns.',
-      recommendations: [
-        'Contact emergency services if immediate danger',
-        'Evacuate if necessary',
-        'Document damage with photos',
-      ],
+      recommendations: ['Contact emergency services if immediate danger', 'Evacuate if necessary', 'Document damage with photos'],
     };
   }
 
@@ -570,11 +703,7 @@ async function performMaintenanceTriage(data: {
       suggestedVendorType: 'PLUMBER',
       suggestedTitle: 'Plumbing: ' + data.description.slice(0, 50),
       analysis: 'Plumbing issue detected. Recommend professional inspection.',
-      recommendations: [
-        'Turn off water supply if possible',
-        'Place bucket under active leaks',
-        'Take photos of affected areas',
-      ],
+      recommendations: ['Turn off water supply if possible', 'Place bucket under active leaks', 'Take photos of affected areas'],
     };
   }
 
@@ -586,26 +715,53 @@ async function performMaintenanceTriage(data: {
       suggestedVendorType: 'ELECTRICIAN',
       suggestedTitle: 'Electrical: ' + data.description.slice(0, 50),
       analysis: 'Electrical issue detected. Safety inspection recommended.',
-      recommendations: [
-        'Do not attempt DIY electrical repairs',
-        'Avoid using affected outlets',
-        'Check circuit breaker',
-      ],
+      recommendations: ['Do not attempt DIY electrical repairs', 'Avoid using affected outlets', 'Check circuit breaker'],
     };
   }
 
-  // Default
   return {
     category: 'GENERAL',
-    urgency: data.urgencyHint as 'LOW' | 'MEDIUM' | 'HIGH' | 'EMERGENCY' || 'LOW',
+    urgency: data.urgencyHint?.toUpperCase() || 'LOW',
     estimatedCost: { min: 50, max: 300 },
     suggestedVendorType: 'HANDYMAN',
     suggestedTitle: 'Maintenance: ' + data.description.slice(0, 50),
     analysis: 'General maintenance issue. Standard service request.',
-    recommendations: [
-      'Document issue with photos',
-      'Note when issue first occurred',
-      'Check if issue affects multiple units',
-    ],
+    recommendations: ['Document issue with photos', 'Note when issue first occurred', 'Check if issue affects multiple units'],
   };
+}
+
+async function notifyHandoffRequest(
+  app: FastifyInstance,
+  conversation: {
+    id: string;
+    contextType: string | null;
+    user?: { email: string | null; firstName: string | null } | null;
+    messages: { content: string; role: string }[];
+  },
+  reason?: string
+): Promise<void> {
+  try {
+    const lastMessages = conversation.messages
+      .slice(0, 5)
+      .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
+      .join('\n');
+
+    await app.emailService.send({
+      templateId: 'system:support-handoff',
+      to: process.env['SUPPORT_EMAIL'] || 'support@realriches.com',
+      data: {
+        conversationId: conversation.id,
+        contextType: conversation.contextType || 'general_support',
+        userName: conversation.user?.firstName || 'Guest',
+        userEmail: conversation.user?.email || 'Unknown',
+        reason: reason || 'User requested human assistance',
+        recentMessages: lastMessages,
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    logger.info({ conversationId: conversation.id }, 'Handoff notification queued');
+  } catch (error) {
+    logger.error({ error, conversationId: conversation.id }, 'Failed to send handoff notification');
+  }
 }

@@ -7,11 +7,13 @@
 export * from './provider-interface';
 export { AnthropicProvider, createAnthropicProvider } from './anthropic';
 export { ConsoleLLMProvider, createConsoleProvider } from './console';
+export { OpenAIProvider, createOpenAIProvider } from './openai';
 
 import type { LLMProvider, LLMProviderConfig } from '../types';
 
 import { createAnthropicProvider } from './anthropic';
 import { createConsoleProvider } from './console';
+import { createOpenAIProvider } from './openai';
 import type { ILLMProvider } from './provider-interface';
 
 /**
@@ -24,15 +26,10 @@ export function createProvider(
   if (provider === 'anthropic') {
     return createAnthropicProvider(config);
   }
-  if (provider === 'console') {
-    return createConsoleProvider(config);
-  }
   if (provider === 'openai') {
-    // Fallback to console for unimplemented providers
-    // eslint-disable-next-line no-console
-    console.warn(
-      `Provider '${provider}' not implemented, falling back to console`
-    );
+    return createOpenAIProvider(config);
+  }
+  if (provider === 'console') {
     return createConsoleProvider(config);
   }
   throw new Error(`Unknown LLM provider: ${String(provider)}`);
