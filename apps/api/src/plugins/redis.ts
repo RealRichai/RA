@@ -13,9 +13,10 @@ declare module 'fastify' {
 const redisPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
   const config = getConfig();
 
+  const enableTls = config.redis.tls === true;
   const redis = new Redis(config.redis.url, {
     password: config.redis.password || undefined,
-    tls: config.redis.tls ? {} : undefined,
+    ...(enableTls && { tls: {} }),
     maxRetriesPerRequest: 3,
     retryStrategy: (times) => {
       if (times > 5) {

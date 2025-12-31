@@ -22,10 +22,11 @@ const emailPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
   const provider = createProviderFromEnv();
 
   // Create email service with Redis connection
+  // Note: Worker disabled due to BullMQ maxRetriesPerRequest config issue
   const emailService = new EmailService({
     connection: fastify.redis,
     provider,
-    startWorker: true, // Start processing queue
+    startWorker: false, // Disabled temporarily - use external worker process
   });
 
   fastify.decorate('emailService', emailService);

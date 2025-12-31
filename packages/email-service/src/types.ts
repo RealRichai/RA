@@ -165,7 +165,7 @@ export interface EmailQueueConfig {
 }
 
 export const DEFAULT_QUEUE_CONFIG: Required<EmailQueueConfig> = {
-  queueName: 'email:send',
+  queueName: 'email-send',
   concurrency: 5,
   maxRetries: 3,
   retryDelay: 1000,

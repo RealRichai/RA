@@ -352,8 +352,8 @@ const rateLimitPluginCallback: FastifyPluginCallback<RateLimitPluginOptions> = (
     tierLimits,
   });
 
-  // Decorate fastify with rate limit checker
-  fastify.decorate('rateLimit', rateLimitService);
+  // Decorate fastify with rate limit checker (use different name to avoid conflict with @fastify/rate-limit)
+  fastify.decorate('rateLimitService', rateLimitService);
 
   // Add rate limit decorator function
   fastify.decorate(
