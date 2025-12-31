@@ -1,5 +1,27 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import {
+  prisma,
+  Prisma,
+  type HOAAssociationType as PrismaHOAAssociationType,
+  type HOAAssessmentFrequency as PrismaHOAAssessmentFrequency,
+  type HOAAssessmentStatus as PrismaHOAAssessmentStatus,
+  type HOAAssessmentType as PrismaHOAAssessmentType,
+  type HOAViolationType as PrismaHOAViolationType,
+  type HOAViolationStatus as PrismaHOAViolationStatus,
+  type HOAArchitecturalRequestStatus as PrismaHOAArchitecturalRequestStatus,
+  type HOAMeetingStatus as PrismaHOAMeetingStatus,
+  type HOADocumentType as PrismaHOADocumentType,
+} from '@realriches/database';
+
+// Helper to convert Prisma Decimal to number
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
 
 // ============================================================================
 // TYPES
@@ -145,15 +167,140 @@ interface AssociationDocument {
 }
 
 // ============================================================================
-// IN-MEMORY STORAGE
+// DATABASE STORAGE (Prisma)
 // ============================================================================
 
-const associations = new Map<string, Association>();
-const assessments = new Map<string, Assessment>();
-const violations = new Map<string, Violation>();
-const architecturalRequests = new Map<string, ArchitecturalRequest>();
-const boardMeetings = new Map<string, BoardMeeting>();
-const associationDocuments = new Map<string, AssociationDocument>();
+// Convert Prisma HOAAssociation to interface type
+function toAssociation(record: Awaited<ReturnType<typeof prisma.hOAAssociation.findFirst>>): Association | null {
+  if (!record) return null;
+  return {
+    id: record.id,
+    name: record.name,
+    type: record.type as AssociationType,
+    propertyId: record.propertyId,
+    managementCompany: record.managementCompany ?? undefined,
+    contactEmail: record.contactEmail ?? undefined,
+    contactPhone: record.contactPhone ?? undefined,
+    website: record.website ?? undefined,
+    portalUrl: record.portalUrl ?? undefined,
+    portalCredentials: record.portalCredentials ?? undefined,
+    regularAssessment: toNumber(record.regularAssessment),
+    assessmentFrequency: record.assessmentFrequency as AssessmentFrequency,
+    specialAssessments: record.specialAssessments as SpecialAssessment[],
+    rules: record.rules as AssociationRule[],
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+  };
+}
+
+// Convert Prisma HOAAssessment to interface type
+function toAssessment(record: Awaited<ReturnType<typeof prisma.hOAAssessment.findFirst>>): Assessment | null {
+  if (!record) return null;
+  return {
+    id: record.id,
+    associationId: record.associationId,
+    propertyId: record.propertyId,
+    unitId: record.unitId ?? undefined,
+    type: record.type as 'regular' | 'special',
+    description: record.description,
+    amount: toNumber(record.amount),
+    dueDate: record.dueDate.toISOString().split('T')[0],
+    status: record.status as AssessmentStatus,
+    paidAmount: toNumber(record.paidAmount),
+    paidDate: record.paidDate?.toISOString(),
+    lateFee: record.lateFee ? toNumber(record.lateFee) : undefined,
+    paymentReference: record.paymentReference ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+  };
+}
+
+// Convert Prisma HOAViolation to interface type
+function toViolation(record: Awaited<ReturnType<typeof prisma.hOAViolation.findFirst>>): Violation | null {
+  if (!record) return null;
+  return {
+    id: record.id,
+    associationId: record.associationId,
+    propertyId: record.propertyId,
+    unitId: record.unitId ?? undefined,
+    tenantId: record.tenantId ?? undefined,
+    type: record.type as ViolationType,
+    ruleId: record.ruleId ?? undefined,
+    description: record.description,
+    reportedDate: record.reportedDate.toISOString(),
+    reportedBy: record.reportedBy ?? undefined,
+    status: record.status as ViolationStatus,
+    fineAmount: record.fineAmount ? toNumber(record.fineAmount) : undefined,
+    fineDueDate: record.fineDueDate?.toISOString().split('T')[0],
+    finePaid: record.finePaid,
+    photos: record.photos as string[],
+    timeline: record.timeline as ViolationEvent[],
+    resolvedDate: record.resolvedDate?.toISOString(),
+    resolutionNotes: record.resolutionNotes ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+  };
+}
+
+// Convert Prisma HOAArchitecturalRequest to interface type
+function toArchitecturalRequest(record: Awaited<ReturnType<typeof prisma.hOAArchitecturalRequest.findFirst>>): ArchitecturalRequest | null {
+  if (!record) return null;
+  return {
+    id: record.id,
+    associationId: record.associationId,
+    propertyId: record.propertyId,
+    unitId: record.unitId ?? undefined,
+    requestType: record.requestType,
+    description: record.description,
+    proposedChanges: record.proposedChanges,
+    estimatedCost: record.estimatedCost ? toNumber(record.estimatedCost) : undefined,
+    contractor: record.contractor ?? undefined,
+    startDate: record.startDate?.toISOString().split('T')[0],
+    endDate: record.endDate?.toISOString().split('T')[0],
+    status: record.status as RequestStatus,
+    submittedDate: record.submittedDate.toISOString(),
+    reviewDate: record.reviewDate?.toISOString(),
+    reviewNotes: record.reviewNotes ?? undefined,
+    approvedBy: record.approvedBy ?? undefined,
+    conditions: record.conditions as string[] | undefined,
+    documents: record.documents as string[],
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+  };
+}
+
+// Convert Prisma HOABoardMeeting to interface type
+function toBoardMeeting(record: Awaited<ReturnType<typeof prisma.hOABoardMeeting.findFirst>>): BoardMeeting | null {
+  if (!record) return null;
+  return {
+    id: record.id,
+    associationId: record.associationId,
+    title: record.title,
+    date: record.date.toISOString(),
+    location: record.location ?? undefined,
+    virtualLink: record.virtualLink ?? undefined,
+    agenda: record.agenda as string[],
+    minutes: record.minutes ?? undefined,
+    attendees: record.attendees as string[],
+    status: record.status as 'scheduled' | 'completed' | 'cancelled',
+    createdAt: record.createdAt.toISOString(),
+  };
+}
+
+// Convert Prisma HOADocument to interface type
+function toAssociationDocument(record: Awaited<ReturnType<typeof prisma.hOADocument.findFirst>>): AssociationDocument | null {
+  if (!record) return null;
+  return {
+    id: record.id,
+    associationId: record.associationId,
+    name: record.name,
+    type: record.type as 'ccr' | 'bylaws' | 'rules' | 'minutes' | 'budget' | 'insurance' | 'other',
+    fileUrl: record.fileUrl,
+    effectiveDate: record.effectiveDate?.toISOString().split('T')[0],
+    uploadedBy: record.uploadedBy,
+    createdAt: record.createdAt.toISOString(),
+  };
+}
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -427,18 +574,25 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = AssociationSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const association: Association = {
-        id: `hoa_${Date.now()}`,
-        ...data,
-        specialAssessments: [],
-        rules: [],
-        createdAt: now,
-        updatedAt: now,
-      };
+      const record = await prisma.hOAAssociation.create({
+        data: {
+          name: data.name,
+          type: data.type as PrismaHOAAssociationType,
+          propertyId: data.propertyId,
+          managementCompany: data.managementCompany,
+          contactEmail: data.contactEmail,
+          contactPhone: data.contactPhone,
+          website: data.website,
+          portalUrl: data.portalUrl,
+          regularAssessment: data.regularAssessment,
+          assessmentFrequency: data.assessmentFrequency as PrismaHOAAssessmentFrequency,
+          specialAssessments: [],
+          rules: [],
+        },
+      });
 
-      associations.set(association.id, association);
+      const association = toAssociation(record);
       return reply.status(201).send(association);
     }
   );
@@ -450,14 +604,16 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       request: FastifyRequest<{ Querystring: { propertyId?: string; type?: string } }>,
       reply
     ) => {
-      let results = Array.from(associations.values());
-
+      const where: Prisma.HOAAssociationWhereInput = {};
       if (request.query.propertyId) {
-        results = results.filter((a) => a.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.type) {
-        results = results.filter((a) => a.type === request.query.type);
+        where.type = request.query.type as PrismaHOAAssociationType;
       }
+
+      const records = await prisma.hOAAssociation.findMany({ where });
+      const results = records.map(r => toAssociation(r)).filter((a): a is Association => a !== null);
 
       // Add annual cost calculation
       const associationsWithCost = results.map((a) => ({
@@ -473,14 +629,18 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const association = associations.get(request.params.id);
+      const record = await prisma.hOAAssociation.findUnique({
+        where: { id: request.params.id },
+      });
+      const association = toAssociation(record);
       if (!association) {
         return reply.status(404).send({ error: 'Association not found' });
       }
 
-      const assocAssessments = Array.from(assessments.values()).filter(
-        (a) => a.associationId === association.id
-      );
+      const assessmentRecords = await prisma.hOAAssessment.findMany({
+        where: { associationId: association.id },
+      });
+      const assocAssessments = assessmentRecords.map(r => toAssessment(r)).filter((a): a is Assessment => a !== null);
 
       return reply.send({
         ...association,
@@ -500,14 +660,30 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const association = associations.get(request.params.id);
-      if (!association) {
+      const existing = await prisma.hOAAssociation.findUnique({
+        where: { id: request.params.id },
+      });
+      if (!existing) {
         return reply.status(404).send({ error: 'Association not found' });
       }
 
-      Object.assign(association, request.body, { updatedAt: new Date().toISOString() });
-      associations.set(association.id, association);
-      return reply.send(association);
+      const updateData: Prisma.HOAAssociationUpdateInput = {};
+      if (request.body.name !== undefined) updateData.name = request.body.name;
+      if (request.body.type !== undefined) updateData.type = request.body.type as PrismaHOAAssociationType;
+      if (request.body.managementCompany !== undefined) updateData.managementCompany = request.body.managementCompany;
+      if (request.body.contactEmail !== undefined) updateData.contactEmail = request.body.contactEmail;
+      if (request.body.contactPhone !== undefined) updateData.contactPhone = request.body.contactPhone;
+      if (request.body.website !== undefined) updateData.website = request.body.website;
+      if (request.body.portalUrl !== undefined) updateData.portalUrl = request.body.portalUrl;
+      if (request.body.regularAssessment !== undefined) updateData.regularAssessment = request.body.regularAssessment;
+      if (request.body.assessmentFrequency !== undefined) updateData.assessmentFrequency = request.body.assessmentFrequency as PrismaHOAAssessmentFrequency;
+
+      const updated = await prisma.hOAAssociation.update({
+        where: { id: request.params.id },
+        data: updateData,
+      });
+
+      return reply.send(toAssociation(updated));
     }
   );
 
@@ -521,8 +697,10 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const association = associations.get(request.params.id);
-      if (!association) {
+      const existing = await prisma.hOAAssociation.findUnique({
+        where: { id: request.params.id },
+      });
+      if (!existing) {
         return reply.status(404).send({ error: 'Association not found' });
       }
 
@@ -532,9 +710,13 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
         ...data,
       };
 
-      association.specialAssessments.push(specialAssessment);
-      association.updatedAt = new Date().toISOString();
-      associations.set(association.id, association);
+      const currentSpecialAssessments = existing.specialAssessments as SpecialAssessment[];
+      const updated = await prisma.hOAAssociation.update({
+        where: { id: request.params.id },
+        data: {
+          specialAssessments: [...currentSpecialAssessments, specialAssessment] as unknown as Prisma.JsonValue,
+        },
+      });
 
       return reply.status(201).send(specialAssessment);
     }
@@ -550,8 +732,10 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const association = associations.get(request.params.id);
-      if (!association) {
+      const existing = await prisma.hOAAssociation.findUnique({
+        where: { id: request.params.id },
+      });
+      if (!existing) {
         return reply.status(404).send({ error: 'Association not found' });
       }
 
@@ -561,9 +745,13 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
         ...data,
       };
 
-      association.rules.push(rule);
-      association.updatedAt = new Date().toISOString();
-      associations.set(association.id, association);
+      const currentRules = existing.rules as AssociationRule[];
+      const updated = await prisma.hOAAssociation.update({
+        where: { id: request.params.id },
+        data: {
+          rules: [...currentRules, rule] as unknown as Prisma.JsonValue,
+        },
+      });
 
       return reply.status(201).send(rule);
     }
@@ -579,7 +767,10 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const association = associations.get(request.params.id);
+      const record = await prisma.hOAAssociation.findUnique({
+        where: { id: request.params.id },
+      });
+      const association = toAssociation(record);
       if (!association) {
         return reply.status(404).send({ error: 'Association not found' });
       }
@@ -610,19 +801,22 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = AssessmentSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const assessment: Assessment = {
-        id: `assess_${Date.now()}`,
-        ...data,
-        status: 'pending',
-        paidAmount: 0,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const record = await prisma.hOAAssessment.create({
+        data: {
+          associationId: data.associationId,
+          propertyId: data.propertyId,
+          unitId: data.unitId,
+          type: data.type as PrismaHOAAssessmentType,
+          description: data.description,
+          amount: data.amount,
+          dueDate: new Date(data.dueDate),
+          status: 'pending' as PrismaHOAAssessmentStatus,
+          paidAmount: 0,
+        },
+      });
 
-      assessments.set(assessment.id, assessment);
-      return reply.status(201).send(assessment);
+      return reply.status(201).send(toAssessment(record));
     }
   );
 
@@ -635,17 +829,19 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(assessments.values());
-
+      const where: Prisma.HOAAssessmentWhereInput = {};
       if (request.query.associationId) {
-        results = results.filter((a) => a.associationId === request.query.associationId);
+        where.associationId = request.query.associationId;
       }
       if (request.query.propertyId) {
-        results = results.filter((a) => a.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.status) {
-        results = results.filter((a) => a.status === request.query.status);
+        where.status = request.query.status as PrismaHOAAssessmentStatus;
       }
+
+      const records = await prisma.hOAAssessment.findMany({ where });
+      const results = records.map(r => toAssessment(r)).filter((a): a is Assessment => a !== null);
 
       // Calculate late fees
       const assessmentsWithFees = results.map((a) => ({
@@ -670,20 +866,28 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const assessment = assessments.get(request.params.id);
-      if (!assessment) {
+      const existing = await prisma.hOAAssessment.findUnique({
+        where: { id: request.params.id },
+      });
+      if (!existing) {
         return reply.status(404).send({ error: 'Assessment not found' });
       }
 
       const data = PaymentSchema.parse(request.body);
-      assessment.paidAmount += data.amount;
-      assessment.paidDate = new Date().toISOString();
-      assessment.paymentReference = data.paymentReference;
-      assessment.status = assessment.paidAmount >= assessment.amount ? 'paid' : 'partial';
-      assessment.updatedAt = new Date().toISOString();
+      const newPaidAmount = toNumber(existing.paidAmount) + data.amount;
+      const newStatus = newPaidAmount >= toNumber(existing.amount) ? 'paid' : 'partial';
 
-      assessments.set(assessment.id, assessment);
-      return reply.send(assessment);
+      const updated = await prisma.hOAAssessment.update({
+        where: { id: request.params.id },
+        data: {
+          paidAmount: newPaidAmount,
+          paidDate: new Date(),
+          paymentReference: data.paymentReference,
+          status: newStatus as PrismaHOAAssessmentStatus,
+        },
+      });
+
+      return reply.send(toAssessment(updated));
     }
   );
 
@@ -699,28 +903,37 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = ViolationSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
+      const nowStr = now.toISOString();
 
-      const violation: Violation = {
-        id: `vio_${Date.now()}`,
-        ...data,
-        reportedDate: now,
-        status: 'open',
-        finePaid: false,
-        timeline: [
-          {
-            id: `ve_${Date.now()}`,
-            date: now,
-            action: 'reported',
-            notes: 'Violation reported',
-          },
-        ],
-        createdAt: now,
-        updatedAt: now,
-      };
+      const initialTimeline: ViolationEvent[] = [
+        {
+          id: `ve_${Date.now()}`,
+          date: nowStr,
+          action: 'reported',
+          notes: 'Violation reported',
+        },
+      ];
 
-      violations.set(violation.id, violation);
-      return reply.status(201).send(violation);
+      const record = await prisma.hOAViolation.create({
+        data: {
+          associationId: data.associationId,
+          propertyId: data.propertyId,
+          unitId: data.unitId,
+          tenantId: data.tenantId,
+          type: data.type as PrismaHOAViolationType,
+          ruleId: data.ruleId,
+          description: data.description,
+          reportedDate: now,
+          reportedBy: data.reportedBy,
+          status: 'open' as PrismaHOAViolationStatus,
+          finePaid: false,
+          photos: data.photos as unknown as Prisma.JsonValue,
+          timeline: initialTimeline as unknown as Prisma.JsonValue,
+        },
+      });
+
+      return reply.status(201).send(toViolation(record));
     }
   );
 
@@ -738,20 +951,22 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(violations.values());
-
+      const where: Prisma.HOAViolationWhereInput = {};
       if (request.query.associationId) {
-        results = results.filter((v) => v.associationId === request.query.associationId);
+        where.associationId = request.query.associationId;
       }
       if (request.query.propertyId) {
-        results = results.filter((v) => v.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.status) {
-        results = results.filter((v) => v.status === request.query.status);
+        where.status = request.query.status as PrismaHOAViolationStatus;
       }
       if (request.query.type) {
-        results = results.filter((v) => v.type === request.query.type);
+        where.type = request.query.type as PrismaHOAViolationType;
       }
+
+      const records = await prisma.hOAViolation.findMany({ where });
+      const results = records.map(r => toViolation(r)).filter((v): v is Violation => v !== null);
 
       // Add escalation info
       const violationsWithEscalation = results.map((v) => ({
@@ -767,7 +982,10 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/violations/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const violation = violations.get(request.params.id);
+      const record = await prisma.hOAViolation.findUnique({
+        where: { id: request.params.id },
+      });
+      const violation = toViolation(record);
       if (!violation) {
         return reply.status(404).send({ error: 'Violation not found' });
       }
@@ -789,41 +1007,50 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const violation = violations.get(request.params.id);
-      if (!violation) {
+      const existing = await prisma.hOAViolation.findUnique({
+        where: { id: request.params.id },
+      });
+      if (!existing) {
         return reply.status(404).send({ error: 'Violation not found' });
       }
 
       const data = ViolationActionSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
+      const nowStr = now.toISOString();
 
       const event: ViolationEvent = {
         id: `ve_${Date.now()}`,
-        date: now,
+        date: nowStr,
         action: data.action,
         notes: data.notes,
       };
 
-      violation.timeline.push(event);
+      const currentTimeline = existing.timeline as ViolationEvent[];
+      const updateData: Prisma.HOAViolationUpdateInput = {
+        timeline: [...currentTimeline, event] as unknown as Prisma.JsonValue,
+      };
 
       // Update status based on action
       if (data.action === 'warning_sent') {
-        violation.status = 'warning_sent';
+        updateData.status = 'warning_sent' as PrismaHOAViolationStatus;
       } else if (data.action === 'fine_issued') {
-        violation.status = 'fine_issued';
-        violation.fineAmount = data.fineAmount;
-        violation.fineDueDate = data.fineDueDate;
+        updateData.status = 'fine_issued' as PrismaHOAViolationStatus;
+        updateData.fineAmount = data.fineAmount;
+        updateData.fineDueDate = data.fineDueDate ? new Date(data.fineDueDate) : undefined;
       } else if (data.action === 'resolved') {
-        violation.status = 'resolved';
-        violation.resolvedDate = now;
-        violation.resolutionNotes = data.notes;
+        updateData.status = 'resolved' as PrismaHOAViolationStatus;
+        updateData.resolvedDate = now;
+        updateData.resolutionNotes = data.notes;
       } else if (data.action === 'escalated') {
-        violation.status = 'escalated';
+        updateData.status = 'escalated' as PrismaHOAViolationStatus;
       }
 
-      violation.updatedAt = now;
-      violations.set(violation.id, violation);
-      return reply.send(violation);
+      const updated = await prisma.hOAViolation.update({
+        where: { id: request.params.id },
+        data: updateData,
+      });
+
+      return reply.send(toViolation(updated));
     }
   );
 
@@ -831,22 +1058,31 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/violations/:id/pay-fine',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const violation = violations.get(request.params.id);
-      if (!violation) {
+      const existing = await prisma.hOAViolation.findUnique({
+        where: { id: request.params.id },
+      });
+      if (!existing) {
         return reply.status(404).send({ error: 'Violation not found' });
       }
 
-      violation.finePaid = true;
-      violation.timeline.push({
+      const now = new Date();
+      const currentTimeline = existing.timeline as ViolationEvent[];
+      const newEvent: ViolationEvent = {
         id: `ve_${Date.now()}`,
-        date: new Date().toISOString(),
+        date: now.toISOString(),
         action: 'fine_paid',
-        notes: `Fine of $${violation.fineAmount} paid`,
-      });
-      violation.updatedAt = new Date().toISOString();
+        notes: `Fine of $${toNumber(existing.fineAmount)} paid`,
+      };
 
-      violations.set(violation.id, violation);
-      return reply.send(violation);
+      const updated = await prisma.hOAViolation.update({
+        where: { id: request.params.id },
+        data: {
+          finePaid: true,
+          timeline: [...currentTimeline, newEvent] as unknown as Prisma.JsonValue,
+        },
+      });
+
+      return reply.send(toViolation(updated));
     }
   );
 
@@ -862,19 +1098,27 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = ArchitecturalRequestSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      const archRequest: ArchitecturalRequest = {
-        id: `ar_${Date.now()}`,
-        ...data,
-        status: 'submitted',
-        submittedDate: now,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const record = await prisma.hOAArchitecturalRequest.create({
+        data: {
+          associationId: data.associationId,
+          propertyId: data.propertyId,
+          unitId: data.unitId,
+          requestType: data.requestType,
+          description: data.description,
+          proposedChanges: data.proposedChanges,
+          estimatedCost: data.estimatedCost,
+          contractor: data.contractor,
+          startDate: data.startDate ? new Date(data.startDate) : undefined,
+          endDate: data.endDate ? new Date(data.endDate) : undefined,
+          status: 'submitted' as PrismaHOAArchitecturalRequestStatus,
+          submittedDate: now,
+          documents: data.documents as unknown as Prisma.JsonValue,
+        },
+      });
 
-      architecturalRequests.set(archRequest.id, archRequest);
-      return reply.status(201).send(archRequest);
+      return reply.status(201).send(toArchitecturalRequest(record));
     }
   );
 
@@ -887,17 +1131,19 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(architecturalRequests.values());
-
+      const where: Prisma.HOAArchitecturalRequestWhereInput = {};
       if (request.query.associationId) {
-        results = results.filter((r) => r.associationId === request.query.associationId);
+        where.associationId = request.query.associationId;
       }
       if (request.query.propertyId) {
-        results = results.filter((r) => r.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.status) {
-        results = results.filter((r) => r.status === request.query.status);
+        where.status = request.query.status as PrismaHOAArchitecturalRequestStatus;
       }
+
+      const records = await prisma.hOAArchitecturalRequest.findMany({ where });
+      const results = records.map(r => toArchitecturalRequest(r)).filter((r): r is ArchitecturalRequest => r !== null);
 
       return reply.send({ requests: results });
     }
@@ -913,20 +1159,25 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const archRequest = architecturalRequests.get(request.params.id);
-      if (!archRequest) {
+      const existing = await prisma.hOAArchitecturalRequest.findUnique({
+        where: { id: request.params.id },
+      });
+      if (!existing) {
         return reply.status(404).send({ error: 'Request not found' });
       }
 
       const data = RequestReviewSchema.parse(request.body);
-      archRequest.status = data.status;
-      archRequest.reviewDate = new Date().toISOString();
-      archRequest.reviewNotes = data.reviewNotes;
-      archRequest.conditions = data.conditions;
-      archRequest.updatedAt = new Date().toISOString();
+      const updated = await prisma.hOAArchitecturalRequest.update({
+        where: { id: request.params.id },
+        data: {
+          status: data.status as PrismaHOAArchitecturalRequestStatus,
+          reviewDate: new Date(),
+          reviewNotes: data.reviewNotes,
+          conditions: data.conditions as unknown as Prisma.JsonValue,
+        },
+      });
 
-      architecturalRequests.set(archRequest.id, archRequest);
-      return reply.send(archRequest);
+      return reply.send(toArchitecturalRequest(updated));
     }
   );
 
@@ -943,16 +1194,20 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
     ) => {
       const data = BoardMeetingSchema.parse(request.body);
 
-      const meeting: BoardMeeting = {
-        id: `mtg_${Date.now()}`,
-        ...data,
-        attendees: [],
-        status: 'scheduled',
-        createdAt: new Date().toISOString(),
-      };
+      const record = await prisma.hOABoardMeeting.create({
+        data: {
+          associationId: data.associationId,
+          title: data.title,
+          date: new Date(data.date),
+          location: data.location,
+          virtualLink: data.virtualLink,
+          agenda: data.agenda as unknown as Prisma.JsonValue,
+          attendees: [],
+          status: 'scheduled' as PrismaHOAMeetingStatus,
+        },
+      });
 
-      boardMeetings.set(meeting.id, meeting);
-      return reply.status(201).send(meeting);
+      return reply.status(201).send(toBoardMeeting(record));
     }
   );
 
@@ -965,16 +1220,21 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(boardMeetings.values());
-
+      const where: Prisma.HOABoardMeetingWhereInput = {};
       if (request.query.associationId) {
-        results = results.filter((m) => m.associationId === request.query.associationId);
+        where.associationId = request.query.associationId;
       }
       if (request.query.status) {
-        results = results.filter((m) => m.status === request.query.status);
+        where.status = request.query.status as PrismaHOAMeetingStatus;
       }
 
-      return reply.send({ meetings: results.sort((a, b) => b.date.localeCompare(a.date)) });
+      const records = await prisma.hOABoardMeeting.findMany({
+        where,
+        orderBy: { date: 'desc' },
+      });
+      const results = records.map(r => toBoardMeeting(r)).filter((m): m is BoardMeeting => m !== null);
+
+      return reply.send({ meetings: results });
     }
   );
 
@@ -988,17 +1248,24 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const meeting = boardMeetings.get(request.params.id);
-      if (!meeting) {
+      const existing = await prisma.hOABoardMeeting.findUnique({
+        where: { id: request.params.id },
+      });
+      if (!existing) {
         return reply.status(404).send({ error: 'Meeting not found' });
       }
 
-      if (request.body.minutes) meeting.minutes = request.body.minutes;
-      if (request.body.attendees) meeting.attendees = request.body.attendees;
-      if (request.body.status) meeting.status = request.body.status as BoardMeeting['status'];
+      const updateData: Prisma.HOABoardMeetingUpdateInput = {};
+      if (request.body.minutes) updateData.minutes = request.body.minutes;
+      if (request.body.attendees) updateData.attendees = request.body.attendees as unknown as Prisma.JsonValue;
+      if (request.body.status) updateData.status = request.body.status as PrismaHOAMeetingStatus;
 
-      boardMeetings.set(meeting.id, meeting);
-      return reply.send(meeting);
+      const updated = await prisma.hOABoardMeeting.update({
+        where: { id: request.params.id },
+        data: updateData,
+      });
+
+      return reply.send(toBoardMeeting(updated));
     }
   );
 
@@ -1016,15 +1283,18 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       const data = DocumentSchema.parse(request.body);
       const user = (request as unknown as { user?: { id: string } }).user;
 
-      const doc: AssociationDocument = {
-        id: `doc_${Date.now()}`,
-        ...data,
-        uploadedBy: user?.id || 'system',
-        createdAt: new Date().toISOString(),
-      };
+      const record = await prisma.hOADocument.create({
+        data: {
+          associationId: data.associationId,
+          name: data.name,
+          type: data.type as PrismaHOADocumentType,
+          fileUrl: data.fileUrl,
+          effectiveDate: data.effectiveDate ? new Date(data.effectiveDate) : undefined,
+          uploadedBy: user?.id || 'system',
+        },
+      });
 
-      associationDocuments.set(doc.id, doc);
-      return reply.status(201).send(doc);
+      return reply.status(201).send(toAssociationDocument(record));
     }
   );
 
@@ -1037,26 +1307,18 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(associationDocuments.values());
-
+      const where: Prisma.HOADocumentWhereInput = {};
       if (request.query.associationId) {
-        results = results.filter((d) => d.associationId === request.query.associationId);
+        where.associationId = request.query.associationId;
       }
       if (request.query.type) {
-        results = results.filter((d) => d.type === request.query.type);
+        where.type = request.query.type as PrismaHOADocumentType;
       }
+
+      const records = await prisma.hOADocument.findMany({ where });
+      const results = records.map(r => toAssociationDocument(r)).filter((d): d is AssociationDocument => d !== null);
 
       return reply.send({ documents: results });
     }
   );
 }
-
-// Export for testing
-export {
-  associations,
-  assessments,
-  violations,
-  architecturalRequests,
-  boardMeetings,
-  associationDocuments,
-};

@@ -1,193 +1,19 @@
 import { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-type KeyType = 'master' | 'unit' | 'common_area' | 'mailbox' | 'storage' | 'gate' | 'amenity' | 'emergency';
-type KeyStatus = 'available' | 'assigned' | 'lost' | 'damaged' | 'retired' | 'pending_return';
-type AccessDeviceType = 'fob' | 'card' | 'remote' | 'keypad_code' | 'biometric' | 'mobile_credential';
-type AccessLevel = 'resident' | 'staff' | 'maintenance' | 'vendor' | 'emergency' | 'master';
-type AuditEventType = 'assigned' | 'returned' | 'lost' | 'replaced' | 'deactivated' | 'access_granted' | 'access_denied' | 'code_changed';
-
-export interface PhysicalKey {
-  id: string;
-  propertyId: string;
-  keyNumber: string;
-  type: KeyType;
-  status: KeyStatus;
-  brand?: string;
-  cutCode?: string;
-  copies: number;
-  unitId?: string;
-  description?: string;
-  lastAssignedTo?: string;
-  lastAssignedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AccessDevice {
-  id: string;
-  propertyId: string;
-  deviceId: string;
-  type: AccessDeviceType;
-  status: 'active' | 'inactive' | 'lost' | 'expired' | 'suspended';
-  accessLevel: AccessLevel;
-  assignedTo?: string;
-  assignedToType?: 'tenant' | 'staff' | 'vendor';
-  assignedAt?: string;
-  expiresAt?: string;
-  accessZones: string[];
-  pin?: string;
-  mobileCredentialId?: string;
-  lastUsedAt?: string;
-  usageCount: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AccessZone {
-  id: string;
-  propertyId: string;
-  name: string;
-  description?: string;
-  type: 'building' | 'floor' | 'unit' | 'amenity' | 'parking' | 'restricted';
-  parentZoneId?: string;
-  accessPoints: string[];
-  requiredLevel: AccessLevel;
-  scheduleRestrictions?: {
-    dayOfWeek: number[];
-    startTime: string;
-    endTime: string;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AccessPoint {
-  id: string;
-  propertyId: string;
-  zoneId: string;
-  name: string;
-  type: 'door' | 'gate' | 'turnstile' | 'elevator' | 'intercom';
-  location: string;
-  hardwareType: string;
-  hardwareId?: string;
-  ipAddress?: string;
-  isOnline: boolean;
-  lastOnlineAt?: string;
-  status: 'active' | 'maintenance' | 'offline' | 'disabled';
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface KeyAssignment {
-  id: string;
-  keyId?: string;
-  deviceId?: string;
-  assignedTo: string;
-  assignedToType: 'tenant' | 'staff' | 'vendor' | 'contractor';
-  assignedBy: string;
-  assignedAt: string;
-  returnedAt?: string;
-  returnedTo?: string;
-  status: 'active' | 'returned' | 'lost' | 'pending_return';
-  depositAmount?: number;
-  depositPaid: boolean;
-  depositRefunded: boolean;
-  notes?: string;
-  acknowledgementSigned: boolean;
-  acknowledgementSignedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AccessAuditLog {
-  id: string;
-  propertyId: string;
-  eventType: AuditEventType;
-  keyId?: string;
-  deviceId?: string;
-  accessPointId?: string;
-  zoneId?: string;
-  userId: string;
-  userType: 'tenant' | 'staff' | 'vendor' | 'system';
-  success: boolean;
-  failureReason?: string;
-  ipAddress?: string;
-  userAgent?: string;
-  location?: string;
-  metadata?: Record<string, unknown>;
-  occurredAt: string;
-  createdAt: string;
-}
-
-export interface LockoutEvent {
-  id: string;
-  propertyId: string;
-  tenantId: string;
-  unitId: string;
-  requestedAt: string;
-  resolvedAt?: string;
-  resolvedBy?: string;
-  method?: 'master_key' | 'locksmith' | 'code_reset' | 'credential_reissue';
-  fee?: number;
-  feePaid: boolean;
-  notes?: string;
-  status: 'pending' | 'in_progress' | 'resolved' | 'cancelled';
-  createdAt: string;
-}
-
-export interface KeyRequest {
-  id: string;
-  propertyId: string;
-  requestedBy: string;
-  requestType: 'new_key' | 'replacement' | 'additional_copy' | 'access_upgrade' | 'temporary_access';
-  keyType?: KeyType;
-  deviceType?: AccessDeviceType;
-  reason: string;
-  status: 'pending' | 'approved' | 'denied' | 'fulfilled';
-  approvedBy?: string;
-  approvedAt?: string;
-  deniedReason?: string;
-  fulfillmentNotes?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface TemporaryAccess {
-  id: string;
-  propertyId: string;
-  grantedTo: string;
-  grantedToType: 'guest' | 'vendor' | 'contractor' | 'delivery';
-  grantedBy: string;
-  accessZones: string[];
-  accessCode?: string;
-  validFrom: string;
-  validTo: string;
-  maxUses?: number;
-  currentUses: number;
-  status: 'active' | 'expired' | 'revoked' | 'exhausted';
-  notes?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// ============================================================================
-// IN-MEMORY STORES
-// ============================================================================
-
-export const physicalKeys = new Map<string, PhysicalKey>();
-export const accessDevices = new Map<string, AccessDevice>();
-export const accessZones = new Map<string, AccessZone>();
-export const accessPoints = new Map<string, AccessPoint>();
-export const keyAssignments = new Map<string, KeyAssignment>();
-export const accessAuditLogs = new Map<string, AccessAuditLog>();
-export const lockoutEvents = new Map<string, LockoutEvent>();
-export const keyRequests = new Map<string, KeyRequest>();
-export const temporaryAccesses = new Map<string, TemporaryAccess>();
+import {
+  prisma,
+  type KeyType,
+  type KeyStatus,
+  type AccessDeviceType,
+  type AccessDeviceStatus,
+  type AccessLevel,
+  type AccessZoneType,
+  type AccessPointType,
+  type AccessPointStatus,
+  type AuditEventType,
+  type LockoutStatus,
+  type TemporaryAccessStatus,
+} from '@realriches/database';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -216,61 +42,10 @@ export function generateDeviceId(): string {
   return id;
 }
 
-export function isAccessValid(
-  device: AccessDevice,
-  zone: AccessZone,
-  timestamp?: Date
-): { valid: boolean; reason?: string } {
-  const now = timestamp || new Date();
-
-  // Check device status
-  if (device.status !== 'active') {
-    return { valid: false, reason: `Device is ${device.status}` };
-  }
-
-  // Check expiration
-  if (device.expiresAt && new Date(device.expiresAt) < now) {
-    return { valid: false, reason: 'Device has expired' };
-  }
-
-  // Check zone access
-  if (!device.accessZones.includes(zone.id)) {
-    return { valid: false, reason: 'Device not authorized for this zone' };
-  }
-
-  // Check access level
-  const levelHierarchy: AccessLevel[] = ['resident', 'staff', 'maintenance', 'vendor', 'emergency', 'master'];
-  const deviceLevelIndex = levelHierarchy.indexOf(device.accessLevel);
-  const requiredLevelIndex = levelHierarchy.indexOf(zone.requiredLevel);
-
-  if (deviceLevelIndex < requiredLevelIndex && device.accessLevel !== 'master') {
-    return { valid: false, reason: 'Insufficient access level' };
-  }
-
-  // Check schedule restrictions
-  if (zone.scheduleRestrictions) {
-    const dayOfWeek = now.getDay();
-    if (!zone.scheduleRestrictions.dayOfWeek.includes(dayOfWeek)) {
-      return { valid: false, reason: 'Access not allowed on this day' };
-    }
-
-    const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-    if (currentTime < zone.scheduleRestrictions.startTime || currentTime > zone.scheduleRestrictions.endTime) {
-      return { valid: false, reason: 'Access not allowed at this time' };
-    }
-  }
-
-  return { valid: true };
-}
-
-export function getKeyInventory(propertyId: string): {
-  total: number;
-  byType: Record<string, number>;
-  byStatus: Record<string, number>;
-  assignedCount: number;
-  availableCount: number;
-} {
-  const keys = Array.from(physicalKeys.values()).filter((k) => k.propertyId === propertyId);
+export async function getKeyInventory(propertyId: string) {
+  const keys = await prisma.propertyKey.findMany({
+    where: { propertyId },
+  });
 
   const byType: Record<string, number> = {};
   const byStatus: Record<string, number> = {};
@@ -289,14 +64,10 @@ export function getKeyInventory(propertyId: string): {
   };
 }
 
-export function getDeviceStats(propertyId: string): {
-  total: number;
-  byType: Record<string, number>;
-  byStatus: Record<string, number>;
-  activeCount: number;
-  expiringSoon: number;
-} {
-  const devices = Array.from(accessDevices.values()).filter((d) => d.propertyId === propertyId);
+export async function getDeviceStats(propertyId: string) {
+  const devices = await prisma.accessDevice.findMany({
+    where: { propertyId },
+  });
 
   const byType: Record<string, number> = {};
   const byStatus: Record<string, number> = {};
@@ -311,8 +82,7 @@ export function getDeviceStats(propertyId: string): {
     byStatus[device.status] = (byStatus[device.status] || 0) + 1;
 
     if (device.expiresAt) {
-      const expiresAt = new Date(device.expiresAt);
-      if (expiresAt <= thirtyDaysFromNow && expiresAt > new Date()) {
+      if (device.expiresAt <= thirtyDaysFromNow && device.expiresAt > new Date()) {
         expiringSoon++;
       }
     }
@@ -327,26 +97,20 @@ export function getDeviceStats(propertyId: string): {
   };
 }
 
-export function getAccessActivitySummary(
+export async function getAccessActivitySummary(
   propertyId: string,
   startDate?: string,
   endDate?: string
-): {
-  totalEvents: number;
-  successfulAccess: number;
-  deniedAccess: number;
-  byEventType: Record<string, number>;
-  byZone: Record<string, number>;
-  peakHours: { hour: number; count: number }[];
-} {
-  let logs = Array.from(accessAuditLogs.values()).filter((l) => l.propertyId === propertyId);
+) {
+  const whereClause: Record<string, unknown> = { propertyId };
 
-  if (startDate) {
-    logs = logs.filter((l) => l.occurredAt >= startDate);
+  if (startDate || endDate) {
+    whereClause.occurredAt = {};
+    if (startDate) (whereClause.occurredAt as Record<string, Date>).gte = new Date(startDate);
+    if (endDate) (whereClause.occurredAt as Record<string, Date>).lte = new Date(endDate);
   }
-  if (endDate) {
-    logs = logs.filter((l) => l.occurredAt <= endDate);
-  }
+
+  const logs = await prisma.accessAuditLog.findMany({ where: whereClause });
 
   const byEventType: Record<string, number> = {};
   const byZone: Record<string, number> = {};
@@ -359,7 +123,7 @@ export function getAccessActivitySummary(
       byZone[log.zoneId] = (byZone[log.zoneId] || 0) + 1;
     }
 
-    const hour = new Date(log.occurredAt).getHours();
+    const hour = log.occurredAt.getHours();
     hourCounts[hour] = (hourCounts[hour] || 0) + 1;
   });
 
@@ -378,66 +142,37 @@ export function getAccessActivitySummary(
   };
 }
 
-export function checkTemporaryAccess(accessId: string): { valid: boolean; reason?: string } {
-  const access = temporaryAccesses.get(accessId);
-  if (!access) {
-    return { valid: false, reason: 'Access not found' };
-  }
-
-  const now = new Date();
-  const validFrom = new Date(access.validFrom);
-  const validTo = new Date(access.validTo);
-
-  if (access.status !== 'active') {
-    return { valid: false, reason: `Access is ${access.status}` };
-  }
-
-  if (now < validFrom) {
-    return { valid: false, reason: 'Access not yet valid' };
-  }
-
-  if (now > validTo) {
-    return { valid: false, reason: 'Access has expired' };
-  }
-
-  if (access.maxUses && access.currentUses >= access.maxUses) {
-    return { valid: false, reason: 'Maximum uses exceeded' };
-  }
-
-  return { valid: true };
-}
-
 // ============================================================================
 // SCHEMAS
 // ============================================================================
 
 const KeySchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   keyNumber: z.string().optional(),
   type: z.enum(['master', 'unit', 'common_area', 'mailbox', 'storage', 'gate', 'amenity', 'emergency']),
   brand: z.string().optional(),
   cutCode: z.string().optional(),
   copies: z.number().int().positive().default(1),
-  unitId: z.string().optional(),
+  unitId: z.string().uuid().optional(),
   description: z.string().optional(),
 });
 
 const DeviceSchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   type: z.enum(['fob', 'card', 'remote', 'keypad_code', 'biometric', 'mobile_credential']),
   accessLevel: z.enum(['resident', 'staff', 'maintenance', 'vendor', 'emergency', 'master']),
-  accessZones: z.array(z.string()),
+  accessZones: z.array(z.string().uuid()),
   expiresAt: z.string().optional(),
   pin: z.string().optional(),
 });
 
 const ZoneSchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   name: z.string(),
   description: z.string().optional(),
   type: z.enum(['building', 'floor', 'unit', 'amenity', 'parking', 'restricted']),
-  parentZoneId: z.string().optional(),
-  accessPoints: z.array(z.string()).default([]),
+  parentZoneId: z.string().uuid().optional(),
+  accessPoints: z.array(z.string().uuid()).default([]),
   requiredLevel: z.enum(['resident', 'staff', 'maintenance', 'vendor', 'emergency', 'master']),
   scheduleRestrictions: z.object({
     dayOfWeek: z.array(z.number().int().min(0).max(6)),
@@ -447,8 +182,8 @@ const ZoneSchema = z.object({
 });
 
 const AccessPointSchema = z.object({
-  propertyId: z.string(),
-  zoneId: z.string(),
+  propertyId: z.string().uuid(),
+  zoneId: z.string().uuid(),
   name: z.string(),
   type: z.enum(['door', 'gate', 'turnstile', 'elevator', 'intercom']),
   location: z.string(),
@@ -458,11 +193,11 @@ const AccessPointSchema = z.object({
 });
 
 const AssignmentSchema = z.object({
-  keyId: z.string().optional(),
-  deviceId: z.string().optional(),
-  assignedTo: z.string(),
+  keyId: z.string().uuid().optional(),
+  deviceId: z.string().uuid().optional(),
+  assignedTo: z.string().uuid(),
   assignedToType: z.enum(['tenant', 'staff', 'vendor', 'contractor']),
-  assignedBy: z.string(),
+  assignedBy: z.string().uuid(),
   depositAmount: z.number().nonnegative().optional(),
   depositPaid: z.boolean().default(false),
   notes: z.string().optional(),
@@ -470,11 +205,11 @@ const AssignmentSchema = z.object({
 });
 
 const TemporaryAccessSchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   grantedTo: z.string(),
   grantedToType: z.enum(['guest', 'vendor', 'contractor', 'delivery']),
-  grantedBy: z.string(),
-  accessZones: z.array(z.string()),
+  grantedBy: z.string().uuid(),
+  accessZones: z.array(z.string().uuid()),
   validFrom: z.string(),
   validTo: z.string(),
   maxUses: z.number().int().positive().optional(),
@@ -482,8 +217,8 @@ const TemporaryAccessSchema = z.object({
 });
 
 const KeyRequestSchema = z.object({
-  propertyId: z.string(),
-  requestedBy: z.string(),
+  propertyId: z.string().uuid(),
+  requestedBy: z.string().uuid(),
   requestType: z.enum(['new_key', 'replacement', 'additional_copy', 'access_upgrade', 'temporary_access']),
   keyType: z.enum(['master', 'unit', 'common_area', 'mailbox', 'storage', 'gate', 'amenity', 'emergency']).optional(),
   deviceType: z.enum(['fob', 'card', 'remote', 'keypad_code', 'biometric', 'mobile_credential']).optional(),
@@ -491,9 +226,9 @@ const KeyRequestSchema = z.object({
 });
 
 const LockoutSchema = z.object({
-  propertyId: z.string(),
-  tenantId: z.string(),
-  unitId: z.string(),
+  propertyId: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  unitId: z.string().uuid(),
   notes: z.string().optional(),
 });
 
@@ -514,18 +249,21 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = KeySchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const key: PhysicalKey = {
-        id: `key_${Date.now()}`,
-        keyNumber: data.keyNumber || generateKeyNumber(),
-        ...data,
-        status: 'available',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const key = await prisma.propertyKey.create({
+        data: {
+          propertyId: data.propertyId,
+          keyNumber: data.keyNumber || generateKeyNumber(),
+          type: data.type as KeyType,
+          status: 'available',
+          brand: data.brand,
+          cutCode: data.cutCode,
+          copies: data.copies,
+          unitId: data.unitId,
+          description: data.description,
+        },
+      });
 
-      physicalKeys.set(key.id, key);
       return reply.status(201).send(key);
     }
   );
@@ -535,24 +273,20 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
     '/keys',
     async (
       request: FastifyRequest<{
-        Querystring: { propertyId?: string; type?: KeyType; status?: KeyStatus; unitId?: string };
+        Querystring: { propertyId?: string; type?: string; status?: string; unitId?: string };
       }>,
       reply
     ) => {
-      let keys = Array.from(physicalKeys.values());
+      const { propertyId, type, status, unitId } = request.query;
 
-      if (request.query.propertyId) {
-        keys = keys.filter((k) => k.propertyId === request.query.propertyId);
-      }
-      if (request.query.type) {
-        keys = keys.filter((k) => k.type === request.query.type);
-      }
-      if (request.query.status) {
-        keys = keys.filter((k) => k.status === request.query.status);
-      }
-      if (request.query.unitId) {
-        keys = keys.filter((k) => k.unitId === request.query.unitId);
-      }
+      const keys = await prisma.propertyKey.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(type ? { type: type as KeyType } : {}),
+          ...(status ? { status: status as KeyStatus } : {}),
+          ...(unitId ? { unitId } : {}),
+        },
+      });
 
       return reply.send(keys);
     }
@@ -565,33 +299,42 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       request: FastifyRequest<{ Querystring: { propertyId: string } }>,
       reply
     ) => {
-      const stats = getKeyInventory(request.query.propertyId);
+      const stats = await getKeyInventory(request.query.propertyId);
       return reply.send(stats);
     }
   );
 
-  // Update key status
+  // Update key
   app.patch(
     '/keys/:id',
     async (
       request: FastifyRequest<{
         Params: { id: string };
-        Body: Partial<PhysicalKey>;
+        Body: Partial<{ status: string; brand: string; cutCode: string; copies: number; description: string; notes: string }>;
       }>,
       reply
     ) => {
-      const key = physicalKeys.get(request.params.id);
+      const key = await prisma.propertyKey.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!key) {
         return reply.status(404).send({ error: 'Key not found' });
       }
 
-      const updated: PhysicalKey = {
-        ...key,
-        ...request.body,
-        updatedAt: new Date().toISOString(),
-      };
+      const { status, brand, cutCode, copies, description, notes } = request.body;
+      const updated = await prisma.propertyKey.update({
+        where: { id: request.params.id },
+        data: {
+          ...(status !== undefined && { status: status as KeyStatus }),
+          ...(brand !== undefined && { brand }),
+          ...(cutCode !== undefined && { cutCode }),
+          ...(copies !== undefined && { copies }),
+          ...(description !== undefined && { description }),
+          ...(notes !== undefined && { notes }),
+        },
+      });
 
-      physicalKeys.set(key.id, updated);
       return reply.send(updated);
     }
   );
@@ -608,19 +351,21 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = DeviceSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const device: AccessDevice = {
-        id: `acd_${Date.now()}`,
-        deviceId: generateDeviceId(),
-        ...data,
-        status: 'active',
-        usageCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const device = await prisma.accessDevice.create({
+        data: {
+          propertyId: data.propertyId,
+          deviceId: generateDeviceId(),
+          type: data.type as AccessDeviceType,
+          status: 'active',
+          accessLevel: data.accessLevel as AccessLevel,
+          accessZones: data.accessZones,
+          expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
+          pin: data.pin,
+          usageCount: 0,
+        },
+      });
 
-      accessDevices.set(device.id, device);
       return reply.status(201).send(device);
     }
   );
@@ -632,27 +377,23 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       request: FastifyRequest<{
         Querystring: {
           propertyId?: string;
-          type?: AccessDeviceType;
+          type?: string;
           status?: string;
           assignedTo?: string;
         };
       }>,
       reply
     ) => {
-      let devices = Array.from(accessDevices.values());
+      const { propertyId, type, status, assignedTo } = request.query;
 
-      if (request.query.propertyId) {
-        devices = devices.filter((d) => d.propertyId === request.query.propertyId);
-      }
-      if (request.query.type) {
-        devices = devices.filter((d) => d.type === request.query.type);
-      }
-      if (request.query.status) {
-        devices = devices.filter((d) => d.status === request.query.status);
-      }
-      if (request.query.assignedTo) {
-        devices = devices.filter((d) => d.assignedTo === request.query.assignedTo);
-      }
+      const devices = await prisma.accessDevice.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(type ? { type: type as AccessDeviceType } : {}),
+          ...(status ? { status: status as AccessDeviceStatus } : {}),
+          ...(assignedTo ? { assignedTo } : {}),
+        },
+      });
 
       return reply.send(devices);
     }
@@ -665,7 +406,7 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       request: FastifyRequest<{ Querystring: { propertyId: string } }>,
       reply
     ) => {
-      const stats = getDeviceStats(request.query.propertyId);
+      const stats = await getDeviceStats(request.query.propertyId);
       return reply.send(stats);
     }
   );
@@ -680,20 +421,24 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const device = accessDevices.get(request.params.id);
+      const device = await prisma.accessDevice.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!device) {
         return reply.status(404).send({ error: 'Device not found' });
       }
 
-      const now = new Date().toISOString();
+      const updated = await prisma.accessDevice.update({
+        where: { id: request.params.id },
+        data: {
+          assignedTo: request.body.assignedTo,
+          assignedToType: request.body.assignedToType,
+          assignedAt: new Date(),
+        },
+      });
 
-      device.assignedTo = request.body.assignedTo;
-      device.assignedToType = request.body.assignedToType as 'tenant' | 'staff' | 'vendor';
-      device.assignedAt = now;
-      device.updatedAt = now;
-
-      accessDevices.set(device.id, device);
-      return reply.send(device);
+      return reply.send(updated);
     }
   );
 
@@ -707,34 +452,36 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const device = accessDevices.get(request.params.id);
+      const device = await prisma.accessDevice.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!device) {
         return reply.status(404).send({ error: 'Device not found' });
       }
 
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      device.status = 'inactive';
-      device.updatedAt = now;
+      const updated = await prisma.accessDevice.update({
+        where: { id: request.params.id },
+        data: { status: 'inactive' },
+      });
 
       // Log the deactivation
-      const log: AccessAuditLog = {
-        id: `aal_${Date.now()}`,
-        propertyId: device.propertyId,
-        eventType: 'deactivated',
-        deviceId: device.id,
-        userId: 'system',
-        userType: 'system',
-        success: true,
-        metadata: { reason: request.body.reason },
-        occurredAt: now,
-        createdAt: now,
-      };
+      await prisma.accessAuditLog.create({
+        data: {
+          propertyId: device.propertyId,
+          eventType: 'deactivated',
+          deviceId: device.id,
+          userId: 'system',
+          userType: 'system',
+          success: true,
+          metadata: { reason: request.body.reason },
+          occurredAt: now,
+        },
+      });
 
-      accessAuditLogs.set(log.id, log);
-      accessDevices.set(device.id, device);
-
-      return reply.send(device);
+      return reply.send(updated);
     }
   );
 
@@ -750,16 +497,20 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = ZoneSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const zone: AccessZone = {
-        id: `acz_${Date.now()}`,
-        ...data,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const zone = await prisma.accessZone.create({
+        data: {
+          propertyId: data.propertyId,
+          name: data.name,
+          description: data.description,
+          type: data.type as AccessZoneType,
+          parentZoneId: data.parentZoneId,
+          accessPointIds: data.accessPoints,
+          requiredLevel: data.requiredLevel as AccessLevel,
+          scheduleRestrictions: data.scheduleRestrictions,
+        },
+      });
 
-      accessZones.set(zone.id, zone);
       return reply.status(201).send(zone);
     }
   );
@@ -773,14 +524,14 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let zones = Array.from(accessZones.values());
+      const { propertyId, type } = request.query;
 
-      if (request.query.propertyId) {
-        zones = zones.filter((z) => z.propertyId === request.query.propertyId);
-      }
-      if (request.query.type) {
-        zones = zones.filter((z) => z.type === request.query.type);
-      }
+      const zones = await prisma.accessZone.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(type ? { type: type as AccessZoneType } : {}),
+        },
+      });
 
       return reply.send(zones);
     }
@@ -798,27 +549,33 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = AccessPointSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      const point: AccessPoint = {
-        id: `acp_${Date.now()}`,
-        ...data,
-        isOnline: true,
-        lastOnlineAt: now,
-        status: 'active',
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      accessPoints.set(point.id, point);
+      const point = await prisma.accessPoint.create({
+        data: {
+          propertyId: data.propertyId,
+          zoneId: data.zoneId,
+          name: data.name,
+          type: data.type as AccessPointType,
+          location: data.location,
+          hardwareType: data.hardwareType,
+          hardwareId: data.hardwareId,
+          ipAddress: data.ipAddress,
+          isOnline: true,
+          lastOnlineAt: now,
+          status: 'active',
+        },
+      });
 
       // Add to zone's access points
-      const zone = accessZones.get(data.zoneId);
-      if (zone) {
-        zone.accessPoints.push(point.id);
-        zone.updatedAt = now;
-        accessZones.set(zone.id, zone);
-      }
+      await prisma.accessZone.update({
+        where: { id: data.zoneId },
+        data: {
+          accessPointIds: {
+            push: point.id,
+          },
+        },
+      });
 
       return reply.status(201).send(point);
     }
@@ -833,17 +590,15 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let points = Array.from(accessPoints.values());
+      const { propertyId, zoneId, status } = request.query;
 
-      if (request.query.propertyId) {
-        points = points.filter((p) => p.propertyId === request.query.propertyId);
-      }
-      if (request.query.zoneId) {
-        points = points.filter((p) => p.zoneId === request.query.zoneId);
-      }
-      if (request.query.status) {
-        points = points.filter((p) => p.status === request.query.status);
-      }
+      const points = await prisma.accessPoint.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(zoneId ? { zoneId } : {}),
+          ...(status ? { status: status as AccessPointStatus } : {}),
+        },
+      });
 
       return reply.send(points);
     }
@@ -855,28 +610,36 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
     async (
       request: FastifyRequest<{
         Params: { id: string };
-        Body: { status: 'active' | 'maintenance' | 'offline' | 'disabled'; isOnline?: boolean };
+        Body: { status: string; isOnline?: boolean };
       }>,
       reply
     ) => {
-      const point = accessPoints.get(request.params.id);
+      const point = await prisma.accessPoint.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!point) {
         return reply.status(404).send({ error: 'Access point not found' });
       }
 
-      const now = new Date().toISOString();
+      const now = new Date();
+      const updateData: Record<string, unknown> = {
+        status: request.body.status as AccessPointStatus,
+      };
 
-      point.status = request.body.status;
       if (request.body.isOnline !== undefined) {
-        point.isOnline = request.body.isOnline;
+        updateData.isOnline = request.body.isOnline;
         if (request.body.isOnline) {
-          point.lastOnlineAt = now;
+          updateData.lastOnlineAt = now;
         }
       }
-      point.updatedAt = now;
 
-      accessPoints.set(point.id, point);
-      return reply.send(point);
+      const updated = await prisma.accessPoint.update({
+        where: { id: request.params.id },
+        data: updateData,
+      });
+
+      return reply.send(updated);
     }
   );
 
@@ -892,69 +655,90 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = AssignmentSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
 
       if (!data.keyId && !data.deviceId) {
         return reply.status(400).send({ error: 'Either keyId or deviceId is required' });
       }
 
+      let propertyId = '';
+
       // Update key status if key assignment
       if (data.keyId) {
-        const key = physicalKeys.get(data.keyId);
+        const key = await prisma.propertyKey.findUnique({
+          where: { id: data.keyId },
+        });
+
         if (!key) {
           return reply.status(404).send({ error: 'Key not found' });
         }
-        key.status = 'assigned';
-        key.lastAssignedTo = data.assignedTo;
-        key.lastAssignedAt = now;
-        key.updatedAt = now;
-        physicalKeys.set(key.id, key);
+
+        propertyId = key.propertyId;
+
+        await prisma.propertyKey.update({
+          where: { id: data.keyId },
+          data: {
+            status: 'assigned',
+            lastAssignedTo: data.assignedTo,
+            lastAssignedAt: now,
+          },
+        });
       }
 
       // Update device if device assignment
       if (data.deviceId) {
-        const device = accessDevices.get(data.deviceId);
+        const device = await prisma.accessDevice.findUnique({
+          where: { id: data.deviceId },
+        });
+
         if (!device) {
           return reply.status(404).send({ error: 'Device not found' });
         }
-        device.assignedTo = data.assignedTo;
-        device.assignedToType = data.assignedToType as 'tenant' | 'staff' | 'vendor';
-        device.assignedAt = now;
-        device.updatedAt = now;
-        accessDevices.set(device.id, device);
+
+        propertyId = device.propertyId;
+
+        await prisma.accessDevice.update({
+          where: { id: data.deviceId },
+          data: {
+            assignedTo: data.assignedTo,
+            assignedToType: data.assignedToType,
+            assignedAt: now,
+          },
+        });
       }
 
-      const assignment: KeyAssignment = {
-        id: `kas_${Date.now()}`,
-        ...data,
-        assignedAt: now,
-        status: 'active',
-        depositRefunded: false,
-        acknowledgementSignedAt: data.acknowledgementSigned ? now : undefined,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      keyAssignments.set(assignment.id, assignment);
+      const assignment = await prisma.keyAssignment.create({
+        data: {
+          keyId: data.keyId,
+          deviceId: data.deviceId,
+          assignedTo: data.assignedTo,
+          assignedToType: data.assignedToType,
+          assignedBy: data.assignedBy,
+          assignedAt: now,
+          status: 'active',
+          depositAmount: data.depositAmount,
+          depositPaid: data.depositPaid,
+          depositRefunded: false,
+          notes: data.notes,
+          acknowledgementSigned: data.acknowledgementSigned,
+          acknowledgementSignedAt: data.acknowledgementSigned ? now : null,
+        },
+      });
 
       // Log the assignment
-      const log: AccessAuditLog = {
-        id: `aal_${Date.now()}`,
-        propertyId: data.keyId
-          ? physicalKeys.get(data.keyId)?.propertyId || ''
-          : accessDevices.get(data.deviceId!)?.propertyId || '',
-        eventType: 'assigned',
-        keyId: data.keyId,
-        deviceId: data.deviceId,
-        userId: data.assignedBy,
-        userType: 'staff',
-        success: true,
-        metadata: { assignedTo: data.assignedTo, assignedToType: data.assignedToType },
-        occurredAt: now,
-        createdAt: now,
-      };
-
-      accessAuditLogs.set(log.id, log);
+      await prisma.accessAuditLog.create({
+        data: {
+          propertyId,
+          eventType: 'assigned',
+          keyId: data.keyId,
+          deviceId: data.deviceId,
+          userId: data.assignedBy,
+          userType: 'staff',
+          success: true,
+          metadata: { assignedTo: data.assignedTo, assignedToType: data.assignedToType },
+          occurredAt: now,
+        },
+      });
 
       return reply.status(201).send(assignment);
     }
@@ -970,64 +754,76 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const assignment = keyAssignments.get(request.params.id);
+      const assignment = await prisma.keyAssignment.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!assignment) {
         return reply.status(404).send({ error: 'Assignment not found' });
       }
 
-      const now = new Date().toISOString();
-
-      assignment.status = 'returned';
-      assignment.returnedAt = now;
-      assignment.returnedTo = request.body.returnedTo;
-      if (request.body.refundDeposit && assignment.depositPaid) {
-        assignment.depositRefunded = true;
-      }
-      assignment.updatedAt = now;
+      const now = new Date();
+      let propertyId = '';
 
       // Update key status
       if (assignment.keyId) {
-        const key = physicalKeys.get(assignment.keyId);
+        const key = await prisma.propertyKey.findUnique({
+          where: { id: assignment.keyId },
+        });
+
         if (key) {
-          key.status = 'available';
-          key.updatedAt = now;
-          physicalKeys.set(key.id, key);
+          propertyId = key.propertyId;
+          await prisma.propertyKey.update({
+            where: { id: assignment.keyId },
+            data: { status: 'available' },
+          });
         }
       }
 
       // Clear device assignment
       if (assignment.deviceId) {
-        const device = accessDevices.get(assignment.deviceId);
+        const device = await prisma.accessDevice.findUnique({
+          where: { id: assignment.deviceId },
+        });
+
         if (device) {
-          device.assignedTo = undefined;
-          device.assignedToType = undefined;
-          device.assignedAt = undefined;
-          device.updatedAt = now;
-          accessDevices.set(device.id, device);
+          propertyId = device.propertyId;
+          await prisma.accessDevice.update({
+            where: { id: assignment.deviceId },
+            data: {
+              assignedTo: null,
+              assignedToType: null,
+              assignedAt: null,
+            },
+          });
         }
       }
 
-      keyAssignments.set(assignment.id, assignment);
+      const updated = await prisma.keyAssignment.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'returned',
+          returnedAt: now,
+          returnedTo: request.body.returnedTo,
+          depositRefunded: request.body.refundDeposit && assignment.depositPaid,
+        },
+      });
 
       // Log the return
-      const log: AccessAuditLog = {
-        id: `aal_${Date.now()}`,
-        propertyId: assignment.keyId
-          ? physicalKeys.get(assignment.keyId)?.propertyId || ''
-          : accessDevices.get(assignment.deviceId!)?.propertyId || '',
-        eventType: 'returned',
-        keyId: assignment.keyId,
-        deviceId: assignment.deviceId,
-        userId: request.body.returnedTo,
-        userType: 'staff',
-        success: true,
-        occurredAt: now,
-        createdAt: now,
-      };
+      await prisma.accessAuditLog.create({
+        data: {
+          propertyId,
+          eventType: 'returned',
+          keyId: assignment.keyId,
+          deviceId: assignment.deviceId,
+          userId: request.body.returnedTo,
+          userType: 'staff',
+          success: true,
+          occurredAt: now,
+        },
+      });
 
-      accessAuditLogs.set(log.id, log);
-
-      return reply.send(assignment);
+      return reply.send(updated);
     }
   );
 
@@ -1041,58 +837,70 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const assignment = keyAssignments.get(request.params.id);
+      const assignment = await prisma.keyAssignment.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!assignment) {
         return reply.status(404).send({ error: 'Assignment not found' });
       }
 
-      const now = new Date().toISOString();
-
-      assignment.status = 'lost';
-      assignment.notes = request.body.notes;
-      assignment.updatedAt = now;
+      const now = new Date();
+      let propertyId = '';
 
       // Update key/device status
       if (assignment.keyId) {
-        const key = physicalKeys.get(assignment.keyId);
+        const key = await prisma.propertyKey.findUnique({
+          where: { id: assignment.keyId },
+        });
+
         if (key) {
-          key.status = 'lost';
-          key.updatedAt = now;
-          physicalKeys.set(key.id, key);
+          propertyId = key.propertyId;
+          await prisma.propertyKey.update({
+            where: { id: assignment.keyId },
+            data: { status: 'lost' },
+          });
         }
       }
 
       if (assignment.deviceId) {
-        const device = accessDevices.get(assignment.deviceId);
+        const device = await prisma.accessDevice.findUnique({
+          where: { id: assignment.deviceId },
+        });
+
         if (device) {
-          device.status = 'lost';
-          device.updatedAt = now;
-          accessDevices.set(device.id, device);
+          propertyId = device.propertyId;
+          await prisma.accessDevice.update({
+            where: { id: assignment.deviceId },
+            data: { status: 'lost' },
+          });
         }
       }
 
-      keyAssignments.set(assignment.id, assignment);
+      const updated = await prisma.keyAssignment.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'lost',
+          notes: request.body.notes,
+        },
+      });
 
       // Log the lost report
-      const log: AccessAuditLog = {
-        id: `aal_${Date.now()}`,
-        propertyId: assignment.keyId
-          ? physicalKeys.get(assignment.keyId)?.propertyId || ''
-          : accessDevices.get(assignment.deviceId!)?.propertyId || '',
-        eventType: 'lost',
-        keyId: assignment.keyId,
-        deviceId: assignment.deviceId,
-        userId: request.body.reportedBy,
-        userType: 'staff',
-        success: true,
-        metadata: { notes: request.body.notes },
-        occurredAt: now,
-        createdAt: now,
-      };
+      await prisma.accessAuditLog.create({
+        data: {
+          propertyId,
+          eventType: 'lost',
+          keyId: assignment.keyId,
+          deviceId: assignment.deviceId,
+          userId: request.body.reportedBy,
+          userType: 'staff',
+          success: true,
+          metadata: { notes: request.body.notes },
+          occurredAt: now,
+        },
+      });
 
-      accessAuditLogs.set(log.id, log);
-
-      return reply.send(assignment);
+      return reply.send(updated);
     }
   );
 
@@ -1105,20 +913,16 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let assignments = Array.from(keyAssignments.values());
+      const { assignedTo, status, keyId, deviceId } = request.query;
 
-      if (request.query.assignedTo) {
-        assignments = assignments.filter((a) => a.assignedTo === request.query.assignedTo);
-      }
-      if (request.query.status) {
-        assignments = assignments.filter((a) => a.status === request.query.status);
-      }
-      if (request.query.keyId) {
-        assignments = assignments.filter((a) => a.keyId === request.query.keyId);
-      }
-      if (request.query.deviceId) {
-        assignments = assignments.filter((a) => a.deviceId === request.query.deviceId);
-      }
+      const assignments = await prisma.keyAssignment.findMany({
+        where: {
+          ...(assignedTo ? { assignedTo } : {}),
+          ...(status ? { status } : {}),
+          ...(keyId ? { keyId } : {}),
+          ...(deviceId ? { deviceId } : {}),
+        },
+      });
 
       return reply.send(assignments);
     }
@@ -1136,19 +940,24 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = TemporaryAccessSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const access: TemporaryAccess = {
-        id: `tac_${Date.now()}`,
-        ...data,
-        accessCode: generateAccessCode(8),
-        currentUses: 0,
-        status: 'active',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const access = await prisma.temporaryAccess.create({
+        data: {
+          propertyId: data.propertyId,
+          grantedTo: data.grantedTo,
+          grantedToType: data.grantedToType,
+          grantedBy: data.grantedBy,
+          accessZones: data.accessZones,
+          accessCode: generateAccessCode(8),
+          validFrom: new Date(data.validFrom),
+          validTo: new Date(data.validTo),
+          maxUses: data.maxUses,
+          currentUses: 0,
+          status: 'active',
+          notes: data.notes,
+        },
+      });
 
-      temporaryAccesses.set(access.id, access);
       return reply.status(201).send(access);
     }
   );
@@ -1157,21 +966,47 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/temporary-access/:id/validate',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const result = checkTemporaryAccess(request.params.id);
+      const access = await prisma.temporaryAccess.findUnique({
+        where: { id: request.params.id },
+      });
 
-      if (result.valid) {
-        const access = temporaryAccesses.get(request.params.id)!;
-        access.currentUses++;
-        access.updatedAt = new Date().toISOString();
-
-        if (access.maxUses && access.currentUses >= access.maxUses) {
-          access.status = 'exhausted';
-        }
-
-        temporaryAccesses.set(access.id, access);
+      if (!access) {
+        return reply.send({ valid: false, reason: 'Access not found' });
       }
 
-      return reply.send(result);
+      const now = new Date();
+
+      if (access.status !== 'active') {
+        return reply.send({ valid: false, reason: `Access is ${access.status}` });
+      }
+
+      if (now < access.validFrom) {
+        return reply.send({ valid: false, reason: 'Access not yet valid' });
+      }
+
+      if (now > access.validTo) {
+        return reply.send({ valid: false, reason: 'Access has expired' });
+      }
+
+      if (access.maxUses && access.currentUses >= access.maxUses) {
+        return reply.send({ valid: false, reason: 'Maximum uses exceeded' });
+      }
+
+      // Increment uses
+      let newStatus: TemporaryAccessStatus = 'active';
+      if (access.maxUses && access.currentUses + 1 >= access.maxUses) {
+        newStatus = 'exhausted';
+      }
+
+      await prisma.temporaryAccess.update({
+        where: { id: request.params.id },
+        data: {
+          currentUses: access.currentUses + 1,
+          status: newStatus,
+        },
+      });
+
+      return reply.send({ valid: true });
     }
   );
 
@@ -1179,16 +1014,20 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/temporary-access/:id/revoke',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const access = temporaryAccesses.get(request.params.id);
+      const access = await prisma.temporaryAccess.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!access) {
         return reply.status(404).send({ error: 'Temporary access not found' });
       }
 
-      access.status = 'revoked';
-      access.updatedAt = new Date().toISOString();
+      const updated = await prisma.temporaryAccess.update({
+        where: { id: request.params.id },
+        data: { status: 'revoked' },
+      });
 
-      temporaryAccesses.set(access.id, access);
-      return reply.send(access);
+      return reply.send(updated);
     }
   );
 
@@ -1201,17 +1040,15 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let accesses = Array.from(temporaryAccesses.values());
+      const { propertyId, status, grantedTo } = request.query;
 
-      if (request.query.propertyId) {
-        accesses = accesses.filter((a) => a.propertyId === request.query.propertyId);
-      }
-      if (request.query.status) {
-        accesses = accesses.filter((a) => a.status === request.query.status);
-      }
-      if (request.query.grantedTo) {
-        accesses = accesses.filter((a) => a.grantedTo === request.query.grantedTo);
-      }
+      const accesses = await prisma.temporaryAccess.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(status ? { status: status as TemporaryAccessStatus } : {}),
+          ...(grantedTo ? { grantedTo } : {}),
+        },
+      });
 
       return reply.send(accesses);
     }
@@ -1229,17 +1066,18 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = KeyRequestSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const keyRequest: KeyRequest = {
-        id: `krq_${Date.now()}`,
-        ...data,
-        status: 'pending',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const keyRequest = await prisma.keyRequest.create({
+        data: {
+          propertyId: data.propertyId,
+          tenantId: data.requestedBy,
+          requestType: data.requestType,
+          keyType: data.keyType as KeyType | undefined,
+          reason: data.reason,
+          status: 'pending',
+        },
+      });
 
-      keyRequests.set(keyRequest.id, keyRequest);
       return reply.status(201).send(keyRequest);
     }
   );
@@ -1254,26 +1092,27 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const keyRequest = keyRequests.get(request.params.id);
+      const keyRequest = await prisma.keyRequest.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!keyRequest) {
         return reply.status(404).send({ error: 'Request not found' });
       }
 
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      if (request.body.approved) {
-        keyRequest.status = 'approved';
-        keyRequest.approvedBy = request.body.decidedBy;
-        keyRequest.approvedAt = now;
-      } else {
-        keyRequest.status = 'denied';
-        keyRequest.deniedReason = request.body.reason;
-      }
+      const updated = await prisma.keyRequest.update({
+        where: { id: request.params.id },
+        data: {
+          status: request.body.approved ? 'approved' : 'denied',
+          processedAt: now,
+          processedBy: request.body.decidedBy,
+          notes: request.body.reason,
+        },
+      });
 
-      keyRequest.updatedAt = now;
-      keyRequests.set(keyRequest.id, keyRequest);
-
-      return reply.send(keyRequest);
+      return reply.send(updated);
     }
   );
 
@@ -1286,17 +1125,15 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let requests = Array.from(keyRequests.values());
+      const { propertyId, status, requestedBy } = request.query;
 
-      if (request.query.propertyId) {
-        requests = requests.filter((r) => r.propertyId === request.query.propertyId);
-      }
-      if (request.query.status) {
-        requests = requests.filter((r) => r.status === request.query.status);
-      }
-      if (request.query.requestedBy) {
-        requests = requests.filter((r) => r.requestedBy === request.query.requestedBy);
-      }
+      const requests = await prisma.keyRequest.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(status ? { status } : {}),
+          ...(requestedBy ? { tenantId: requestedBy } : {}),
+        },
+      });
 
       return reply.send(requests);
     }
@@ -1314,18 +1151,20 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = LockoutSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      const lockout: LockoutEvent = {
-        id: `lck_${Date.now()}`,
-        ...data,
-        requestedAt: now,
-        status: 'pending',
-        feePaid: false,
-        createdAt: now,
-      };
+      const lockout = await prisma.lockoutEvent.create({
+        data: {
+          propertyId: data.propertyId,
+          tenantId: data.tenantId,
+          unitId: data.unitId,
+          requestedAt: now,
+          status: 'pending',
+          feePaid: false,
+          notes: data.notes,
+        },
+      });
 
-      lockoutEvents.set(lockout.id, lockout);
       return reply.status(201).send(lockout);
     }
   );
@@ -1338,29 +1177,34 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
         Params: { id: string };
         Body: {
           resolvedBy: string;
-          method: 'master_key' | 'locksmith' | 'code_reset' | 'credential_reissue';
+          method: string;
           fee?: number;
           notes?: string;
         };
       }>,
       reply
     ) => {
-      const lockout = lockoutEvents.get(request.params.id);
+      const lockout = await prisma.lockoutEvent.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!lockout) {
         return reply.status(404).send({ error: 'Lockout event not found' });
       }
 
-      const now = new Date().toISOString();
+      const updated = await prisma.lockoutEvent.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'resolved',
+          resolvedAt: new Date(),
+          resolvedBy: request.body.resolvedBy,
+          method: request.body.method,
+          fee: request.body.fee,
+          notes: request.body.notes,
+        },
+      });
 
-      lockout.status = 'resolved';
-      lockout.resolvedAt = now;
-      lockout.resolvedBy = request.body.resolvedBy;
-      lockout.method = request.body.method;
-      lockout.fee = request.body.fee;
-      lockout.notes = request.body.notes;
-
-      lockoutEvents.set(lockout.id, lockout);
-      return reply.send(lockout);
+      return reply.send(updated);
     }
   );
 
@@ -1373,17 +1217,15 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let lockouts = Array.from(lockoutEvents.values());
+      const { propertyId, tenantId, status } = request.query;
 
-      if (request.query.propertyId) {
-        lockouts = lockouts.filter((l) => l.propertyId === request.query.propertyId);
-      }
-      if (request.query.tenantId) {
-        lockouts = lockouts.filter((l) => l.tenantId === request.query.tenantId);
-      }
-      if (request.query.status) {
-        lockouts = lockouts.filter((l) => l.status === request.query.status);
-      }
+      const lockouts = await prisma.lockoutEvent.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(tenantId ? { tenantId } : {}),
+          ...(status ? { status: status as LockoutStatus } : {}),
+        },
+      });
 
       return reply.send(lockouts);
     }
@@ -1409,29 +1251,25 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let logs = Array.from(accessAuditLogs.values());
+      const { propertyId, eventType, userId, startDate, endDate, limit } = request.query;
 
-      if (request.query.propertyId) {
-        logs = logs.filter((l) => l.propertyId === request.query.propertyId);
-      }
-      if (request.query.eventType) {
-        logs = logs.filter((l) => l.eventType === request.query.eventType);
-      }
-      if (request.query.userId) {
-        logs = logs.filter((l) => l.userId === request.query.userId);
-      }
-      if (request.query.startDate) {
-        logs = logs.filter((l) => l.occurredAt >= request.query.startDate!);
-      }
-      if (request.query.endDate) {
-        logs = logs.filter((l) => l.occurredAt <= request.query.endDate!);
-      }
-
-      logs = logs.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
-
-      if (request.query.limit) {
-        logs = logs.slice(0, parseInt(request.query.limit));
-      }
+      const logs = await prisma.accessAuditLog.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(eventType ? { eventType: eventType as AuditEventType } : {}),
+          ...(userId ? { userId } : {}),
+          ...(startDate || endDate
+            ? {
+                occurredAt: {
+                  ...(startDate ? { gte: new Date(startDate) } : {}),
+                  ...(endDate ? { lte: new Date(endDate) } : {}),
+                },
+              }
+            : {}),
+        },
+        orderBy: { occurredAt: 'desc' },
+        take: limit ? parseInt(limit) : undefined,
+      });
 
       return reply.send(logs);
     }
@@ -1446,7 +1284,7 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const summary = getAccessActivitySummary(
+      const summary = await getAccessActivitySummary(
         request.query.propertyId,
         request.query.startDate,
         request.query.endDate
@@ -1466,50 +1304,72 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
           accessPointId: string;
           zoneId: string;
           userId: string;
-          userType: 'tenant' | 'staff' | 'vendor' | 'system';
+          userType: string;
         };
       }>,
       reply
     ) => {
-      const now = new Date().toISOString();
+      const now = new Date();
+      const { propertyId, deviceId, accessPointId, zoneId, userId, userType } = request.body;
 
-      const device = accessDevices.get(request.body.deviceId);
-      const zone = accessZones.get(request.body.zoneId);
+      const device = await prisma.accessDevice.findUnique({
+        where: { id: deviceId },
+      });
+
+      const zone = await prisma.accessZone.findUnique({
+        where: { id: zoneId },
+      });
 
       let success = false;
       let failureReason: string | undefined;
 
-      if (device && zone) {
-        const validation = isAccessValid(device, zone);
-        success = validation.valid;
-        failureReason = validation.reason;
-
-        if (success) {
-          device.lastUsedAt = now;
-          device.usageCount++;
-          device.updatedAt = now;
-          accessDevices.set(device.id, device);
-        }
+      if (!device) {
+        failureReason = 'Device not found';
+      } else if (!zone) {
+        failureReason = 'Zone not found';
+      } else if (device.status !== 'active') {
+        failureReason = `Device is ${device.status}`;
+      } else if (device.expiresAt && device.expiresAt < now) {
+        failureReason = 'Device has expired';
+      } else if (!device.accessZones.includes(zoneId)) {
+        failureReason = 'Device not authorized for this zone';
       } else {
-        failureReason = !device ? 'Device not found' : 'Zone not found';
+        // Check access level
+        const levelHierarchy: AccessLevel[] = ['resident', 'staff', 'maintenance', 'vendor', 'emergency', 'master'];
+        const deviceLevelIndex = levelHierarchy.indexOf(device.accessLevel);
+        const requiredLevelIndex = levelHierarchy.indexOf(zone.requiredLevel);
+
+        if (deviceLevelIndex < requiredLevelIndex && device.accessLevel !== 'master') {
+          failureReason = 'Insufficient access level';
+        } else {
+          success = true;
+
+          // Update device usage
+          await prisma.accessDevice.update({
+            where: { id: deviceId },
+            data: {
+              lastUsedAt: now,
+              usageCount: device.usageCount + 1,
+            },
+          });
+        }
       }
 
-      const log: AccessAuditLog = {
-        id: `aal_${Date.now()}`,
-        propertyId: request.body.propertyId,
-        eventType: success ? 'access_granted' : 'access_denied',
-        deviceId: request.body.deviceId,
-        accessPointId: request.body.accessPointId,
-        zoneId: request.body.zoneId,
-        userId: request.body.userId,
-        userType: request.body.userType,
-        success,
-        failureReason,
-        occurredAt: now,
-        createdAt: now,
-      };
+      const log = await prisma.accessAuditLog.create({
+        data: {
+          propertyId,
+          eventType: success ? 'access_granted' : 'access_denied',
+          deviceId,
+          accessPointId,
+          zoneId,
+          userId,
+          userType,
+          success,
+          failureReason,
+          occurredAt: now,
+        },
+      });
 
-      accessAuditLogs.set(log.id, log);
       return reply.status(201).send(log);
     }
   );

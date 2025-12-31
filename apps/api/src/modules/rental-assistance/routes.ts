@@ -1,65 +1,21 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
+import {
+  prisma,
+  type AssistanceProgramType,
+  type AssistanceApplicationStatus,
+  type VoucherStatus,
+  type AssistanceInspectionType,
+  type AssistanceInspectionResult,
+  type AssistancePaymentStatus,
+  type CertificationType,
+  type CertificationStatus,
+} from '@realriches/database';
+
 // ============================================================================
 // TYPES
 // ============================================================================
-
-type ProgramType = 'section_8' | 'erap' | 'local_assistance' | 'hcv' | 'pbv' | 'other';
-type ApplicationStatus =
-  | 'draft'
-  | 'submitted'
-  | 'pending_documents'
-  | 'under_review'
-  | 'approved'
-  | 'denied'
-  | 'expired'
-  | 'withdrawn';
-type VoucherStatus = 'pending' | 'active' | 'suspended' | 'terminated' | 'expired' | 'ported_out';
-type InspectionType = 'initial' | 'annual' | 'special' | 'reinspection' | 'move_out';
-type InspectionResult = 'pass' | 'fail' | 'pending' | 'inconclusive';
-
-interface AssistanceProgram {
-  id: string;
-  name: string;
-  type: ProgramType;
-  adminAgency: string;
-  contactEmail?: string;
-  contactPhone?: string;
-  website?: string;
-  portalUrl?: string;
-  paymentSchedule: 'monthly' | 'bi_weekly' | 'weekly';
-  requiresInspection: boolean;
-  inspectionFrequency?: 'annual' | 'biennial';
-  maxRent?: number;
-  utilityAllowance?: number;
-  region?: string;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface AssistanceApplication {
-  id: string;
-  programId: string;
-  propertyId: string;
-  unitId: string;
-  tenantId: string;
-  landlordId: string;
-  status: ApplicationStatus;
-  submittedDate?: string;
-  approvedDate?: string;
-  denialReason?: string;
-  voucherNumber?: string;
-  requestedAmount: number;
-  approvedAmount?: number;
-  startDate?: string;
-  endDate?: string;
-  documents: ApplicationDocument[];
-  timeline: ApplicationEvent[];
-  createdAt: string;
-  updatedAt: string;
-}
 
 interface ApplicationDocument {
   id: string;
@@ -80,48 +36,6 @@ interface ApplicationEvent {
   performedBy?: string;
 }
 
-interface Voucher {
-  id: string;
-  programId: string;
-  applicationId: string;
-  voucherNumber: string;
-  tenantId: string;
-  propertyId: string;
-  unitId: string;
-  status: VoucherStatus;
-  hapAmount: number; // Housing Assistance Payment
-  tenantPortion: number;
-  totalRent: number;
-  utilityAllowance: number;
-  effectiveDate: string;
-  expirationDate?: string;
-  annualReviewDate?: string;
-  portedFrom?: string;
-  portedTo?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface Inspection {
-  id: string;
-  programId: string;
-  propertyId: string;
-  unitId: string;
-  voucherId?: string;
-  type: InspectionType;
-  scheduledDate: string;
-  completedDate?: string;
-  inspectorId?: string;
-  inspectorName?: string;
-  result?: InspectionResult;
-  deficiencies: InspectionDeficiency[];
-  reinspectionDeadline?: string;
-  notes?: string;
-  reportUrl?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 interface InspectionDeficiency {
   id: string;
   category: string;
@@ -130,38 +44,6 @@ interface InspectionDeficiency {
   location?: string;
   correctedDate?: string;
   correctionVerified: boolean;
-}
-
-interface AssistancePayment {
-  id: string;
-  voucherId: string;
-  programId: string;
-  propertyId: string;
-  landlordId: string;
-  period: string; // YYYY-MM
-  hapAmount: number;
-  adjustments: number;
-  netAmount: number;
-  status: 'scheduled' | 'processing' | 'paid' | 'failed' | 'held';
-  scheduledDate: string;
-  paidDate?: string;
-  paymentReference?: string;
-  notes?: string;
-  createdAt: string;
-}
-
-interface LandlordCertification {
-  id: string;
-  landlordId: string;
-  propertyId: string;
-  programId: string;
-  certificationType: 'initial' | 'annual' | 'recertification';
-  certificationDate: string;
-  expirationDate: string;
-  status: 'active' | 'expired' | 'revoked';
-  requirements: CertificationRequirement[];
-  createdAt: string;
-  updatedAt: string;
 }
 
 interface CertificationRequirement {
@@ -173,41 +55,17 @@ interface CertificationRequirement {
   documentUrl?: string;
 }
 
-interface ComplianceReport {
-  id: string;
-  programId: string;
-  reportType: 'monthly' | 'quarterly' | 'annual';
-  period: string;
-  data: {
-    activeVouchers: number;
-    totalHAPPaid: number;
-    inspectionsConducted: number;
-    inspectionsPass: number;
-    inspectionsFail: number;
-    newEnrollments: number;
-    terminations: number;
-    averageHAP: number;
-    averageTenantPortion: number;
-  };
-  submittedDate?: string;
-  createdAt: string;
-}
-
-// ============================================================================
-// IN-MEMORY STORAGE
-// ============================================================================
-
-const programs = new Map<string, AssistanceProgram>();
-const applications = new Map<string, AssistanceApplication>();
-const vouchers = new Map<string, Voucher>();
-const inspections = new Map<string, Inspection>();
-const assistancePayments = new Map<string, AssistancePayment>();
-const landlordCertifications = new Map<string, LandlordCertification>();
-const complianceReports = new Map<string, ComplianceReport>();
-
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
 
 export function calculateHAPPayment(
   totalRent: number,
@@ -215,11 +73,8 @@ export function calculateHAPPayment(
   paymentStandard: number,
   utilityAllowance: number = 0
 ): { hapAmount: number; tenantPortion: number; grossRent: number } {
-  // HUD formula: Tenant pays 30% of adjusted income
   const tenantPortion = Math.round(tenantIncome * 0.3 * 100) / 100;
   const grossRent = totalRent + utilityAllowance;
-
-  // HAP is lesser of payment standard or gross rent, minus tenant portion
   const maxHAP = Math.min(paymentStandard, grossRent);
   const hapAmount = Math.max(0, maxHAP - tenantPortion);
 
@@ -230,9 +85,18 @@ export function calculateHAPPayment(
   };
 }
 
+interface VoucherData {
+  expirationDate: Date | null;
+}
+
+interface InspectionData {
+  completedDate: Date | null;
+  scheduledDate: Date;
+}
+
 export function isInspectionDue(
-  voucher: Voucher,
-  lastInspection: Inspection | undefined,
+  voucher: VoucherData,
+  lastInspection: InspectionData | undefined,
   frequencyMonths: number = 12
 ): boolean {
   if (!lastInspection) return true;
@@ -244,7 +108,11 @@ export function isInspectionDue(
   return new Date() >= nextDue;
 }
 
-export function calculateInspectionPassRate(inspectionList: Inspection[]): {
+interface InspectionResultData {
+  result: string | null;
+}
+
+export function calculateInspectionPassRate(inspectionList: InspectionResultData[]): {
   total: number;
   passed: number;
   failed: number;
@@ -288,8 +156,14 @@ export function getDeficiencySummary(
   };
 }
 
+interface PaymentData {
+  period: string;
+  status: string;
+  netAmount: unknown;
+}
+
 export function calculatePaymentSummary(
-  payments: AssistancePayment[],
+  payments: PaymentData[],
   period?: string
 ): {
   totalPayments: number;
@@ -304,8 +178,8 @@ export function calculatePaymentSummary(
   }
 
   const paidPayments = filtered.filter((p) => p.status === 'paid');
-  const totalAmount = filtered.reduce((sum, p) => sum + p.netAmount, 0);
-  const paidAmount = paidPayments.reduce((sum, p) => sum + p.netAmount, 0);
+  const totalAmount = filtered.reduce((sum, p) => sum + toNumber(p.netAmount), 0);
+  const paidAmount = paidPayments.reduce((sum, p) => sum + toNumber(p.netAmount), 0);
 
   return {
     totalPayments: filtered.length,
@@ -316,7 +190,7 @@ export function calculatePaymentSummary(
   };
 }
 
-export function getVoucherExpirationDays(voucher: Voucher): number {
+export function getVoucherExpirationDays(voucher: VoucherData): number {
   if (!voucher.expirationDate) return -1;
   const expiration = new Date(voucher.expirationDate);
   const now = new Date();
@@ -344,11 +218,11 @@ const ProgramSchema = z.object({
 });
 
 const ApplicationSchema = z.object({
-  programId: z.string(),
-  propertyId: z.string(),
-  unitId: z.string(),
-  tenantId: z.string(),
-  landlordId: z.string(),
+  programId: z.string().uuid(),
+  propertyId: z.string().uuid(),
+  unitId: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  landlordId: z.string().uuid(),
   requestedAmount: z.number(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
@@ -362,14 +236,8 @@ const ApplicationDocumentSchema = z.object({
 
 const ApplicationStatusSchema = z.object({
   status: z.enum([
-    'draft',
-    'submitted',
-    'pending_documents',
-    'under_review',
-    'approved',
-    'denied',
-    'expired',
-    'withdrawn',
+    'draft', 'submitted', 'pending_documents', 'under_review',
+    'approved', 'denied', 'expired', 'withdrawn',
   ]),
   notes: z.string().optional(),
   denialReason: z.string().optional(),
@@ -378,12 +246,12 @@ const ApplicationStatusSchema = z.object({
 });
 
 const VoucherSchema = z.object({
-  programId: z.string(),
-  applicationId: z.string(),
+  programId: z.string().uuid(),
+  applicationId: z.string().uuid(),
   voucherNumber: z.string(),
-  tenantId: z.string(),
-  propertyId: z.string(),
-  unitId: z.string(),
+  tenantId: z.string().uuid(),
+  propertyId: z.string().uuid(),
+  unitId: z.string().uuid(),
   hapAmount: z.number(),
   tenantPortion: z.number(),
   totalRent: z.number(),
@@ -394,38 +262,34 @@ const VoucherSchema = z.object({
 });
 
 const InspectionSchema = z.object({
-  programId: z.string(),
-  propertyId: z.string(),
-  unitId: z.string(),
-  voucherId: z.string().optional(),
+  programId: z.string().uuid(),
+  propertyId: z.string().uuid(),
+  unitId: z.string().uuid(),
+  voucherId: z.string().uuid().optional(),
   type: z.enum(['initial', 'annual', 'special', 'reinspection', 'move_out']),
   scheduledDate: z.string(),
-  inspectorId: z.string().optional(),
+  inspectorId: z.string().uuid().optional(),
   inspectorName: z.string().optional(),
 });
 
 const InspectionResultSchema = z.object({
   result: z.enum(['pass', 'fail', 'pending', 'inconclusive']),
-  deficiencies: z
-    .array(
-      z.object({
-        category: z.string(),
-        description: z.string(),
-        severity: z.enum(['minor', 'major', 'life_threatening']),
-        location: z.string().optional(),
-      })
-    )
-    .default([]),
+  deficiencies: z.array(z.object({
+    category: z.string(),
+    description: z.string(),
+    severity: z.enum(['minor', 'major', 'life_threatening']),
+    location: z.string().optional(),
+  })).default([]),
   reinspectionDeadline: z.string().optional(),
   notes: z.string().optional(),
   reportUrl: z.string().optional(),
 });
 
 const PaymentSchema = z.object({
-  voucherId: z.string(),
-  programId: z.string(),
-  propertyId: z.string(),
-  landlordId: z.string(),
+  voucherId: z.string().uuid(),
+  programId: z.string().uuid(),
+  propertyId: z.string().uuid(),
+  landlordId: z.string().uuid(),
   period: z.string(),
   hapAmount: z.number(),
   adjustments: z.number().default(0),
@@ -433,16 +297,14 @@ const PaymentSchema = z.object({
 });
 
 const CertificationSchema = z.object({
-  landlordId: z.string(),
-  propertyId: z.string(),
-  programId: z.string(),
+  landlordId: z.string().uuid(),
+  propertyId: z.string().uuid(),
+  programId: z.string().uuid(),
   certificationType: z.enum(['initial', 'annual', 'recertification']),
-  requirements: z.array(
-    z.object({
-      name: z.string(),
-      description: z.string(),
-    })
-  ),
+  requirements: z.array(z.object({
+    name: z.string(),
+    description: z.string(),
+  })),
 });
 
 const HAPCalculationSchema = z.object({
@@ -469,18 +331,31 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       reply
     ) => {
       const data = ProgramSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const program: AssistanceProgram = {
-        id: `prog_${Date.now()}`,
-        ...data,
-        isActive: true,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const program = await prisma.assistanceProgram.create({
+        data: {
+          name: data.name,
+          type: data.type as AssistanceProgramType,
+          adminAgency: data.adminAgency,
+          contactEmail: data.contactEmail,
+          contactPhone: data.contactPhone,
+          website: data.website,
+          portalUrl: data.portalUrl,
+          paymentSchedule: data.paymentSchedule,
+          requiresInspection: data.requiresInspection,
+          inspectionFrequency: data.inspectionFrequency,
+          maxRent: data.maxRent,
+          utilityAllowance: data.utilityAllowance,
+          region: data.region,
+          isActive: true,
+        },
+      });
 
-      programs.set(program.id, program);
-      return reply.status(201).send(program);
+      return reply.status(201).send({
+        ...program,
+        maxRent: program.maxRent ? toNumber(program.maxRent) : null,
+        utilityAllowance: program.utilityAllowance ? toNumber(program.utilityAllowance) : null,
+      });
     }
   );
 
@@ -491,16 +366,20 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       request: FastifyRequest<{ Querystring: { type?: string; isActive?: string } }>,
       reply
     ) => {
-      let results = Array.from(programs.values());
+      const results = await prisma.assistanceProgram.findMany({
+        where: {
+          ...(request.query.type && { type: request.query.type as AssistanceProgramType }),
+          ...(request.query.isActive === 'true' && { isActive: true }),
+        },
+      });
 
-      if (request.query.type) {
-        results = results.filter((p) => p.type === request.query.type);
-      }
-      if (request.query.isActive === 'true') {
-        results = results.filter((p) => p.isActive);
-      }
-
-      return reply.send({ programs: results });
+      return reply.send({
+        programs: results.map((p) => ({
+          ...p,
+          maxRent: p.maxRent ? toNumber(p.maxRent) : null,
+          utilityAllowance: p.utilityAllowance ? toNumber(p.utilityAllowance) : null,
+        })),
+      });
     }
   );
 
@@ -508,28 +387,27 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
   app.get(
     '/programs/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const program = programs.get(request.params.id);
+      const program = await prisma.assistanceProgram.findUnique({
+        where: { id: request.params.id },
+      });
       if (!program) {
         return reply.status(404).send({ error: 'Program not found' });
       }
 
-      // Get stats
-      const programVouchers = Array.from(vouchers.values()).filter(
-        (v) => v.programId === program.id
-      );
-      const programInspections = Array.from(inspections.values()).filter(
-        (i) => i.programId === program.id
-      );
-      const programPayments = Array.from(assistancePayments.values()).filter(
-        (p) => p.programId === program.id
-      );
+      const [vouchersList, inspectionsList, paymentsList] = await Promise.all([
+        prisma.voucher.findMany({ where: { programId: program.id } }),
+        prisma.assistanceInspection.findMany({ where: { programId: program.id } }),
+        prisma.assistancePaymentRecord.findMany({ where: { programId: program.id } }),
+      ]);
 
       return reply.send({
         ...program,
+        maxRent: program.maxRent ? toNumber(program.maxRent) : null,
+        utilityAllowance: program.utilityAllowance ? toNumber(program.utilityAllowance) : null,
         stats: {
-          activeVouchers: programVouchers.filter((v) => v.status === 'active').length,
-          inspectionPassRate: calculateInspectionPassRate(programInspections),
-          paymentSummary: calculatePaymentSummary(programPayments),
+          activeVouchers: vouchersList.filter((v) => v.status === 'active').length,
+          inspectionPassRate: calculateInspectionPassRate(inspectionsList),
+          paymentSummary: calculatePaymentSummary(paymentsList),
         },
       });
     }
@@ -568,25 +446,34 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       const data = ApplicationSchema.parse(request.body);
       const now = new Date().toISOString();
 
-      const application: AssistanceApplication = {
-        id: `app_${Date.now()}`,
-        ...data,
-        status: 'draft',
-        documents: [],
-        timeline: [
-          {
-            id: `ae_${Date.now()}`,
-            date: now,
-            action: 'created',
-            notes: 'Application created',
-          },
-        ],
-        createdAt: now,
-        updatedAt: now,
-      };
+      const initialTimeline: ApplicationEvent[] = [{
+        id: `ae_${Date.now()}`,
+        date: now,
+        action: 'created',
+        notes: 'Application created',
+      }];
 
-      applications.set(application.id, application);
-      return reply.status(201).send(application);
+      const application = await prisma.assistanceApplication.create({
+        data: {
+          programId: data.programId,
+          propertyId: data.propertyId,
+          unitId: data.unitId,
+          tenantId: data.tenantId,
+          landlordId: data.landlordId,
+          status: 'draft',
+          requestedAmount: data.requestedAmount,
+          startDate: data.startDate ? new Date(data.startDate) : null,
+          endDate: data.endDate ? new Date(data.endDate) : null,
+          documents: [],
+          timeline: initialTimeline,
+        },
+      });
+
+      return reply.status(201).send({
+        ...application,
+        requestedAmount: toNumber(application.requestedAmount),
+        approvedAmount: application.approvedAmount ? toNumber(application.approvedAmount) : null,
+      });
     }
   );
 
@@ -604,22 +491,22 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      let results = Array.from(applications.values());
+      const results = await prisma.assistanceApplication.findMany({
+        where: {
+          ...(request.query.programId && { programId: request.query.programId }),
+          ...(request.query.tenantId && { tenantId: request.query.tenantId }),
+          ...(request.query.landlordId && { landlordId: request.query.landlordId }),
+          ...(request.query.status && { status: request.query.status as AssistanceApplicationStatus }),
+        },
+      });
 
-      if (request.query.programId) {
-        results = results.filter((a) => a.programId === request.query.programId);
-      }
-      if (request.query.tenantId) {
-        results = results.filter((a) => a.tenantId === request.query.tenantId);
-      }
-      if (request.query.landlordId) {
-        results = results.filter((a) => a.landlordId === request.query.landlordId);
-      }
-      if (request.query.status) {
-        results = results.filter((a) => a.status === request.query.status);
-      }
-
-      return reply.send({ applications: results });
+      return reply.send({
+        applications: results.map((a) => ({
+          ...a,
+          requestedAmount: toNumber(a.requestedAmount),
+          approvedAmount: a.approvedAmount ? toNumber(a.approvedAmount) : null,
+        })),
+      });
     }
   );
 
@@ -627,13 +514,24 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
   app.get(
     '/applications/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const application = applications.get(request.params.id);
+      const application = await prisma.assistanceApplication.findUnique({
+        where: { id: request.params.id },
+        include: { program: true },
+      });
       if (!application) {
         return reply.status(404).send({ error: 'Application not found' });
       }
 
-      const program = programs.get(application.programId);
-      return reply.send({ ...application, program });
+      return reply.send({
+        ...application,
+        requestedAmount: toNumber(application.requestedAmount),
+        approvedAmount: application.approvedAmount ? toNumber(application.approvedAmount) : null,
+        program: application.program ? {
+          ...application.program,
+          maxRent: application.program.maxRent ? toNumber(application.program.maxRent) : null,
+          utilityAllowance: application.program.utilityAllowance ? toNumber(application.program.utilityAllowance) : null,
+        } : null,
+      });
     }
   );
 
@@ -647,7 +545,9 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      const application = applications.get(request.params.id);
+      const application = await prisma.assistanceApplication.findUnique({
+        where: { id: request.params.id },
+      });
       if (!application) {
         return reply.status(404).send({ error: 'Application not found' });
       }
@@ -660,9 +560,13 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
         verified: false,
       };
 
-      application.documents.push(doc);
-      application.updatedAt = new Date().toISOString();
-      applications.set(application.id, application);
+      const documents = (application.documents as ApplicationDocument[]) || [];
+      documents.push(doc);
+
+      await prisma.assistanceApplication.update({
+        where: { id: request.params.id },
+        data: { documents },
+      });
 
       return reply.status(201).send(doc);
     }
@@ -678,36 +582,44 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      const application = applications.get(request.params.id);
+      const application = await prisma.assistanceApplication.findUnique({
+        where: { id: request.params.id },
+      });
       if (!application) {
         return reply.status(404).send({ error: 'Application not found' });
       }
 
       const data = ApplicationStatusSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      application.status = data.status;
-      if (data.status === 'submitted') {
-        application.submittedDate = now;
-      } else if (data.status === 'approved') {
-        application.approvedDate = now;
-        application.approvedAmount = data.approvedAmount;
-        application.voucherNumber = data.voucherNumber;
-      } else if (data.status === 'denied') {
-        application.denialReason = data.denialReason;
-      }
-
-      application.timeline.push({
+      const timeline = (application.timeline as ApplicationEvent[]) || [];
+      timeline.push({
         id: `ae_${Date.now()}`,
-        date: now,
+        date: now.toISOString(),
         action: `status_changed_to_${data.status}`,
         notes: data.notes,
       });
 
-      application.updatedAt = now;
-      applications.set(application.id, application);
+      const updated = await prisma.assistanceApplication.update({
+        where: { id: request.params.id },
+        data: {
+          status: data.status as AssistanceApplicationStatus,
+          ...(data.status === 'submitted' && { submittedDate: now }),
+          ...(data.status === 'approved' && {
+            approvedDate: now,
+            approvedAmount: data.approvedAmount,
+            voucherNumber: data.voucherNumber,
+          }),
+          ...(data.status === 'denied' && { denialReason: data.denialReason }),
+          timeline,
+        },
+      });
 
-      return reply.send(application);
+      return reply.send({
+        ...updated,
+        requestedAmount: toNumber(updated.requestedAmount),
+        approvedAmount: updated.approvedAmount ? toNumber(updated.approvedAmount) : null,
+      });
     }
   );
 
@@ -723,18 +635,33 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       reply
     ) => {
       const data = VoucherSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const voucher: Voucher = {
-        id: `vou_${Date.now()}`,
-        ...data,
-        status: 'pending',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const voucher = await prisma.voucher.create({
+        data: {
+          programId: data.programId,
+          applicationId: data.applicationId,
+          voucherNumber: data.voucherNumber,
+          tenantId: data.tenantId,
+          propertyId: data.propertyId,
+          unitId: data.unitId,
+          status: 'pending',
+          hapAmount: data.hapAmount,
+          tenantPortion: data.tenantPortion,
+          totalRent: data.totalRent,
+          utilityAllowance: data.utilityAllowance,
+          effectiveDate: new Date(data.effectiveDate),
+          expirationDate: data.expirationDate ? new Date(data.expirationDate) : null,
+          annualReviewDate: data.annualReviewDate ? new Date(data.annualReviewDate) : null,
+        },
+      });
 
-      vouchers.set(voucher.id, voucher);
-      return reply.status(201).send(voucher);
+      return reply.status(201).send({
+        ...voucher,
+        hapAmount: toNumber(voucher.hapAmount),
+        tenantPortion: toNumber(voucher.tenantPortion),
+        totalRent: toNumber(voucher.totalRent),
+        utilityAllowance: toNumber(voucher.utilityAllowance),
+      });
     }
   );
 
@@ -752,24 +679,21 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      let results = Array.from(vouchers.values());
+      const results = await prisma.voucher.findMany({
+        where: {
+          ...(request.query.programId && { programId: request.query.programId }),
+          ...(request.query.tenantId && { tenantId: request.query.tenantId }),
+          ...(request.query.propertyId && { propertyId: request.query.propertyId }),
+          ...(request.query.status && { status: request.query.status as VoucherStatus }),
+        },
+      });
 
-      if (request.query.programId) {
-        results = results.filter((v) => v.programId === request.query.programId);
-      }
-      if (request.query.tenantId) {
-        results = results.filter((v) => v.tenantId === request.query.tenantId);
-      }
-      if (request.query.propertyId) {
-        results = results.filter((v) => v.propertyId === request.query.propertyId);
-      }
-      if (request.query.status) {
-        results = results.filter((v) => v.status === request.query.status);
-      }
-
-      // Add expiration info
       const vouchersWithExpiration = results.map((v) => ({
         ...v,
+        hapAmount: toNumber(v.hapAmount),
+        tenantPortion: toNumber(v.tenantPortion),
+        totalRent: toNumber(v.totalRent),
+        utilityAllowance: toNumber(v.utilityAllowance),
         daysUntilExpiration: getVoucherExpirationDays(v),
       }));
 
@@ -781,24 +705,33 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
   app.get(
     '/vouchers/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const voucher = vouchers.get(request.params.id);
+      const voucher = await prisma.voucher.findUnique({
+        where: { id: request.params.id },
+        include: { program: true },
+      });
       if (!voucher) {
         return reply.status(404).send({ error: 'Voucher not found' });
       }
 
-      const program = programs.get(voucher.programId);
-      const voucherInspections = Array.from(inspections.values()).filter(
-        (i) => i.voucherId === voucher.id
-      );
-      const lastInspection = voucherInspections.sort((a, b) =>
-        b.scheduledDate.localeCompare(a.scheduledDate)
-      )[0];
+      const voucherInspections = await prisma.assistanceInspection.findMany({
+        where: { voucherId: voucher.id },
+        orderBy: { scheduledDate: 'desc' },
+      });
+      const lastInspection = voucherInspections[0];
 
       return reply.send({
         ...voucher,
-        program,
+        hapAmount: toNumber(voucher.hapAmount),
+        tenantPortion: toNumber(voucher.tenantPortion),
+        totalRent: toNumber(voucher.totalRent),
+        utilityAllowance: toNumber(voucher.utilityAllowance),
+        program: voucher.program ? {
+          ...voucher.program,
+          maxRent: voucher.program.maxRent ? toNumber(voucher.program.maxRent) : null,
+          utilityAllowance: voucher.program.utilityAllowance ? toNumber(voucher.program.utilityAllowance) : null,
+        } : null,
         daysUntilExpiration: getVoucherExpirationDays(voucher),
-        inspectionDue: program?.requiresInspection
+        inspectionDue: voucher.program?.requiresInspection
           ? isInspectionDue(voucher, lastInspection)
           : false,
         lastInspection,
@@ -810,16 +743,25 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
   app.post(
     '/vouchers/:id/activate',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const voucher = vouchers.get(request.params.id);
+      const voucher = await prisma.voucher.findUnique({
+        where: { id: request.params.id },
+      });
       if (!voucher) {
         return reply.status(404).send({ error: 'Voucher not found' });
       }
 
-      voucher.status = 'active';
-      voucher.updatedAt = new Date().toISOString();
-      vouchers.set(voucher.id, voucher);
+      const updated = await prisma.voucher.update({
+        where: { id: request.params.id },
+        data: { status: 'active' },
+      });
 
-      return reply.send(voucher);
+      return reply.send({
+        ...updated,
+        hapAmount: toNumber(updated.hapAmount),
+        tenantPortion: toNumber(updated.tenantPortion),
+        totalRent: toNumber(updated.totalRent),
+        utilityAllowance: toNumber(updated.utilityAllowance),
+      });
     }
   );
 
@@ -830,16 +772,28 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       request: FastifyRequest<{ Params: { id: string }; Body: { reason?: string } }>,
       reply
     ) => {
-      const voucher = vouchers.get(request.params.id);
+      const voucher = await prisma.voucher.findUnique({
+        where: { id: request.params.id },
+      });
       if (!voucher) {
         return reply.status(404).send({ error: 'Voucher not found' });
       }
 
-      voucher.status = 'terminated';
-      voucher.updatedAt = new Date().toISOString();
-      vouchers.set(voucher.id, voucher);
+      const updated = await prisma.voucher.update({
+        where: { id: request.params.id },
+        data: { status: 'terminated' },
+      });
 
-      return reply.send({ message: 'Voucher terminated', voucher });
+      return reply.send({
+        message: 'Voucher terminated',
+        voucher: {
+          ...updated,
+          hapAmount: toNumber(updated.hapAmount),
+          tenantPortion: toNumber(updated.tenantPortion),
+          totalRent: toNumber(updated.totalRent),
+          utilityAllowance: toNumber(updated.utilityAllowance),
+        },
+      });
     }
   );
 
@@ -853,17 +807,31 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      const voucher = vouchers.get(request.params.id);
+      const voucher = await prisma.voucher.findUnique({
+        where: { id: request.params.id },
+      });
       if (!voucher) {
         return reply.status(404).send({ error: 'Voucher not found' });
       }
 
-      voucher.status = 'ported_out';
-      voucher.portedTo = request.body.destinationAgency;
-      voucher.updatedAt = new Date().toISOString();
-      vouchers.set(voucher.id, voucher);
+      const updated = await prisma.voucher.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'ported_out',
+          portedTo: request.body.destinationAgency,
+        },
+      });
 
-      return reply.send({ message: 'Voucher ported', voucher });
+      return reply.send({
+        message: 'Voucher ported',
+        voucher: {
+          ...updated,
+          hapAmount: toNumber(updated.hapAmount),
+          tenantPortion: toNumber(updated.tenantPortion),
+          totalRent: toNumber(updated.totalRent),
+          utilityAllowance: toNumber(updated.utilityAllowance),
+        },
+      });
     }
   );
 
@@ -879,17 +847,21 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       reply
     ) => {
       const data = InspectionSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const inspection: Inspection = {
-        id: `insp_${Date.now()}`,
-        ...data,
-        deficiencies: [],
-        createdAt: now,
-        updatedAt: now,
-      };
+      const inspection = await prisma.assistanceInspection.create({
+        data: {
+          programId: data.programId,
+          propertyId: data.propertyId,
+          unitId: data.unitId,
+          voucherId: data.voucherId,
+          type: data.type as AssistanceInspectionType,
+          scheduledDate: new Date(data.scheduledDate),
+          inspectorId: data.inspectorId,
+          inspectorName: data.inspectorName,
+          deficiencies: [],
+        },
+      });
 
-      inspections.set(inspection.id, inspection);
       return reply.status(201).send(inspection);
     }
   );
@@ -908,20 +880,14 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      let results = Array.from(inspections.values());
-
-      if (request.query.programId) {
-        results = results.filter((i) => i.programId === request.query.programId);
-      }
-      if (request.query.propertyId) {
-        results = results.filter((i) => i.propertyId === request.query.propertyId);
-      }
-      if (request.query.voucherId) {
-        results = results.filter((i) => i.voucherId === request.query.voucherId);
-      }
-      if (request.query.result) {
-        results = results.filter((i) => i.result === request.query.result);
-      }
+      const results = await prisma.assistanceInspection.findMany({
+        where: {
+          ...(request.query.programId && { programId: request.query.programId }),
+          ...(request.query.propertyId && { propertyId: request.query.propertyId }),
+          ...(request.query.voucherId && { voucherId: request.query.voucherId }),
+          ...(request.query.result && { result: request.query.result as AssistanceInspectionResult }),
+        },
+      });
 
       return reply.send({
         inspections: results,
@@ -940,26 +906,33 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      const inspection = inspections.get(request.params.id);
+      const inspection = await prisma.assistanceInspection.findUnique({
+        where: { id: request.params.id },
+      });
       if (!inspection) {
         return reply.status(404).send({ error: 'Inspection not found' });
       }
 
       const data = InspectionResultSchema.parse(request.body);
-      inspection.result = data.result;
-      inspection.completedDate = new Date().toISOString();
-      inspection.deficiencies = data.deficiencies.map((d, i) => ({
+      const deficiencies = data.deficiencies.map((d, i) => ({
         id: `def_${Date.now()}_${i}`,
         ...d,
         correctionVerified: false,
       }));
-      inspection.reinspectionDeadline = data.reinspectionDeadline;
-      inspection.notes = data.notes;
-      inspection.reportUrl = data.reportUrl;
-      inspection.updatedAt = new Date().toISOString();
 
-      inspections.set(inspection.id, inspection);
-      return reply.send(inspection);
+      const updated = await prisma.assistanceInspection.update({
+        where: { id: request.params.id },
+        data: {
+          result: data.result as AssistanceInspectionResult,
+          completedDate: new Date(),
+          deficiencies,
+          reinspectionDeadline: data.reinspectionDeadline ? new Date(data.reinspectionDeadline) : null,
+          notes: data.notes,
+          reportUrl: data.reportUrl,
+        },
+      });
+
+      return reply.send(updated);
     }
   );
 
@@ -972,22 +945,28 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      const inspection = inspections.get(request.params.id);
+      const inspection = await prisma.assistanceInspection.findUnique({
+        where: { id: request.params.id },
+      });
       if (!inspection) {
         return reply.status(404).send({ error: 'Inspection not found' });
       }
 
-      const deficiency = inspection.deficiencies.find((d) => d.id === request.params.defId);
+      const deficiencies = (inspection.deficiencies as InspectionDeficiency[]) || [];
+      const deficiency = deficiencies.find((d) => d.id === request.params.defId);
       if (!deficiency) {
         return reply.status(404).send({ error: 'Deficiency not found' });
       }
 
       deficiency.correctedDate = new Date().toISOString();
       deficiency.correctionVerified = true;
-      inspection.updatedAt = new Date().toISOString();
 
-      inspections.set(inspection.id, inspection);
-      return reply.send(inspection);
+      const updated = await prisma.assistanceInspection.update({
+        where: { id: request.params.id },
+        data: { deficiencies },
+      });
+
+      return reply.send(updated);
     }
   );
 
@@ -998,13 +977,11 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       request: FastifyRequest<{ Querystring: { programId?: string } }>,
       reply
     ) => {
-      let results = Array.from(inspections.values());
+      const results = await prisma.assistanceInspection.findMany({
+        where: request.query.programId ? { programId: request.query.programId } : undefined,
+      });
 
-      if (request.query.programId) {
-        results = results.filter((i) => i.programId === request.query.programId);
-      }
-
-      const allDeficiencies = results.flatMap((i) => i.deficiencies);
+      const allDeficiencies = results.flatMap((i) => (i.deficiencies as InspectionDeficiency[]) || []);
       const summary = getDeficiencySummary(allDeficiencies);
 
       return reply.send(summary);
@@ -1024,16 +1001,27 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
     ) => {
       const data = PaymentSchema.parse(request.body);
 
-      const payment: AssistancePayment = {
-        id: `pmt_${Date.now()}`,
-        ...data,
-        netAmount: data.hapAmount + data.adjustments,
-        status: 'scheduled',
-        createdAt: new Date().toISOString(),
-      };
+      const payment = await prisma.assistancePaymentRecord.create({
+        data: {
+          voucherId: data.voucherId,
+          programId: data.programId,
+          propertyId: data.propertyId,
+          landlordId: data.landlordId,
+          period: data.period,
+          hapAmount: data.hapAmount,
+          adjustments: data.adjustments,
+          netAmount: data.hapAmount + data.adjustments,
+          status: 'scheduled',
+          scheduledDate: new Date(data.scheduledDate),
+        },
+      });
 
-      assistancePayments.set(payment.id, payment);
-      return reply.status(201).send(payment);
+      return reply.status(201).send({
+        ...payment,
+        hapAmount: toNumber(payment.hapAmount),
+        adjustments: toNumber(payment.adjustments),
+        netAmount: toNumber(payment.netAmount),
+      });
     }
   );
 
@@ -1051,23 +1039,22 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      let results = Array.from(assistancePayments.values());
-
-      if (request.query.voucherId) {
-        results = results.filter((p) => p.voucherId === request.query.voucherId);
-      }
-      if (request.query.landlordId) {
-        results = results.filter((p) => p.landlordId === request.query.landlordId);
-      }
-      if (request.query.period) {
-        results = results.filter((p) => p.period === request.query.period);
-      }
-      if (request.query.status) {
-        results = results.filter((p) => p.status === request.query.status);
-      }
+      const results = await prisma.assistancePaymentRecord.findMany({
+        where: {
+          ...(request.query.voucherId && { voucherId: request.query.voucherId }),
+          ...(request.query.landlordId && { landlordId: request.query.landlordId }),
+          ...(request.query.period && { period: request.query.period }),
+          ...(request.query.status && { status: request.query.status as AssistancePaymentStatus }),
+        },
+      });
 
       return reply.send({
-        payments: results,
+        payments: results.map((p) => ({
+          ...p,
+          hapAmount: toNumber(p.hapAmount),
+          adjustments: toNumber(p.adjustments),
+          netAmount: toNumber(p.netAmount),
+        })),
         summary: calculatePaymentSummary(results, request.query.period),
       });
     }
@@ -1077,17 +1064,28 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
   app.post(
     '/payments/:id/process',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const payment = assistancePayments.get(request.params.id);
+      const payment = await prisma.assistancePaymentRecord.findUnique({
+        where: { id: request.params.id },
+      });
       if (!payment) {
         return reply.status(404).send({ error: 'Payment not found' });
       }
 
-      payment.status = 'paid';
-      payment.paidDate = new Date().toISOString();
-      payment.paymentReference = `HAP_${Date.now()}`;
-      assistancePayments.set(payment.id, payment);
+      const updated = await prisma.assistancePaymentRecord.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'paid',
+          paidDate: new Date(),
+          paymentReference: `HAP_${Date.now()}`,
+        },
+      });
 
-      return reply.send(payment);
+      return reply.send({
+        ...updated,
+        hapAmount: toNumber(updated.hapAmount),
+        adjustments: toNumber(updated.adjustments),
+        netAmount: toNumber(updated.netAmount),
+      });
     }
   );
 
@@ -1098,16 +1096,27 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       request: FastifyRequest<{ Params: { id: string }; Body: { notes: string } }>,
       reply
     ) => {
-      const payment = assistancePayments.get(request.params.id);
+      const payment = await prisma.assistancePaymentRecord.findUnique({
+        where: { id: request.params.id },
+      });
       if (!payment) {
         return reply.status(404).send({ error: 'Payment not found' });
       }
 
-      payment.status = 'held';
-      payment.notes = request.body.notes;
-      assistancePayments.set(payment.id, payment);
+      const updated = await prisma.assistancePaymentRecord.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'held',
+          notes: request.body.notes,
+        },
+      });
 
-      return reply.send(payment);
+      return reply.send({
+        ...updated,
+        hapAmount: toNumber(updated.hapAmount),
+        adjustments: toNumber(updated.adjustments),
+        netAmount: toNumber(updated.netAmount),
+      });
     }
   );
 
@@ -1123,28 +1132,30 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       reply
     ) => {
       const data = CertificationSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      // Calculate expiration (1 year from certification date)
       const expirationDate = new Date();
       expirationDate.setFullYear(expirationDate.getFullYear() + 1);
 
-      const certification: LandlordCertification = {
-        id: `cert_${Date.now()}`,
-        ...data,
-        certificationDate: now,
-        expirationDate: expirationDate.toISOString(),
-        status: 'active',
-        requirements: data.requirements.map((r, i) => ({
-          id: `req_${Date.now()}_${i}`,
-          ...r,
-          completed: false,
-        })),
-        createdAt: now,
-        updatedAt: now,
-      };
+      const requirements: CertificationRequirement[] = data.requirements.map((r, i) => ({
+        id: `req_${Date.now()}_${i}`,
+        ...r,
+        completed: false,
+      }));
 
-      landlordCertifications.set(certification.id, certification);
+      const certification = await prisma.landlordCertification.create({
+        data: {
+          landlordId: data.landlordId,
+          propertyId: data.propertyId,
+          programId: data.programId,
+          certificationType: data.certificationType as CertificationType,
+          certificationDate: now,
+          expirationDate,
+          status: 'active',
+          requirements,
+        },
+      });
+
       return reply.status(201).send(certification);
     }
   );
@@ -1158,17 +1169,13 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      let results = Array.from(landlordCertifications.values());
-
-      if (request.query.landlordId) {
-        results = results.filter((c) => c.landlordId === request.query.landlordId);
-      }
-      if (request.query.programId) {
-        results = results.filter((c) => c.programId === request.query.programId);
-      }
-      if (request.query.status) {
-        results = results.filter((c) => c.status === request.query.status);
-      }
+      const results = await prisma.landlordCertification.findMany({
+        where: {
+          ...(request.query.landlordId && { landlordId: request.query.landlordId }),
+          ...(request.query.programId && { programId: request.query.programId }),
+          ...(request.query.status && { status: request.query.status as CertificationStatus }),
+        },
+      });
 
       return reply.send({ certifications: results });
     }
@@ -1184,12 +1191,15 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       }>,
       reply
     ) => {
-      const certification = landlordCertifications.get(request.params.id);
+      const certification = await prisma.landlordCertification.findUnique({
+        where: { id: request.params.id },
+      });
       if (!certification) {
         return reply.status(404).send({ error: 'Certification not found' });
       }
 
-      const requirement = certification.requirements.find((r) => r.id === request.params.reqId);
+      const requirements = (certification.requirements as CertificationRequirement[]) || [];
+      const requirement = requirements.find((r) => r.id === request.params.reqId);
       if (!requirement) {
         return reply.status(404).send({ error: 'Requirement not found' });
       }
@@ -1197,10 +1207,13 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       requirement.completed = true;
       requirement.completedDate = new Date().toISOString();
       requirement.documentUrl = request.body.documentUrl;
-      certification.updatedAt = new Date().toISOString();
 
-      landlordCertifications.set(certification.id, certification);
-      return reply.send(certification);
+      const updated = await prisma.landlordCertification.update({
+        where: { id: request.params.id },
+        data: { requirements },
+      });
+
+      return reply.send(updated);
     }
   );
 
@@ -1219,47 +1232,42 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
     ) => {
       const { programId, reportType, period } = request.body;
 
-      const programVouchers = Array.from(vouchers.values()).filter(
-        (v) => v.programId === programId
-      );
-      const programInspections = Array.from(inspections.values()).filter(
-        (i) => i.programId === programId
-      );
-      const programPayments = Array.from(assistancePayments.values()).filter(
-        (p) => p.programId === programId && p.period === period
-      );
+      const [programVouchers, programInspections, programPayments] = await Promise.all([
+        prisma.voucher.findMany({ where: { programId } }),
+        prisma.assistanceInspection.findMany({ where: { programId } }),
+        prisma.assistancePaymentRecord.findMany({ where: { programId, period } }),
+      ]);
 
       const activeVouchers = programVouchers.filter((v) => v.status === 'active');
       const passRate = calculateInspectionPassRate(programInspections);
 
-      const report: ComplianceReport = {
-        id: `cr_${Date.now()}`,
-        programId,
-        reportType: reportType as ComplianceReport['reportType'],
-        period,
+      const report = await prisma.complianceReport.create({
         data: {
-          activeVouchers: activeVouchers.length,
-          totalHAPPaid: programPayments
-            .filter((p) => p.status === 'paid')
-            .reduce((sum, p) => sum + p.netAmount, 0),
-          inspectionsConducted: programInspections.filter((i) => i.completedDate).length,
-          inspectionsPass: passRate.passed,
-          inspectionsFail: passRate.failed,
-          newEnrollments: programVouchers.filter((v) => v.effectiveDate.startsWith(period)).length,
-          terminations: programVouchers.filter((v) => v.status === 'terminated').length,
-          averageHAP:
-            activeVouchers.length > 0
-              ? activeVouchers.reduce((sum, v) => sum + v.hapAmount, 0) / activeVouchers.length
+          programId,
+          reportType,
+          period,
+          data: {
+            activeVouchers: activeVouchers.length,
+            totalHAPPaid: programPayments
+              .filter((p) => p.status === 'paid')
+              .reduce((sum, p) => sum + toNumber(p.netAmount), 0),
+            inspectionsConducted: programInspections.filter((i) => i.completedDate).length,
+            inspectionsPass: passRate.passed,
+            inspectionsFail: passRate.failed,
+            newEnrollments: programVouchers.filter((v) =>
+              v.effectiveDate.toISOString().startsWith(period)
+            ).length,
+            terminations: programVouchers.filter((v) => v.status === 'terminated').length,
+            averageHAP: activeVouchers.length > 0
+              ? activeVouchers.reduce((sum, v) => sum + toNumber(v.hapAmount), 0) / activeVouchers.length
               : 0,
-          averageTenantPortion:
-            activeVouchers.length > 0
-              ? activeVouchers.reduce((sum, v) => sum + v.tenantPortion, 0) / activeVouchers.length
+            averageTenantPortion: activeVouchers.length > 0
+              ? activeVouchers.reduce((sum, v) => sum + toNumber(v.tenantPortion), 0) / activeVouchers.length
               : 0,
+          },
         },
-        createdAt: new Date().toISOString(),
-      };
+      });
 
-      complianceReports.set(report.id, report);
       return reply.status(201).send(report);
     }
   );
@@ -1271,24 +1279,11 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       request: FastifyRequest<{ Querystring: { programId?: string } }>,
       reply
     ) => {
-      let results = Array.from(complianceReports.values());
-
-      if (request.query.programId) {
-        results = results.filter((r) => r.programId === request.query.programId);
-      }
+      const results = await prisma.complianceReport.findMany({
+        where: request.query.programId ? { programId: request.query.programId } : undefined,
+      });
 
       return reply.send({ reports: results });
     }
   );
 }
-
-// Export for testing
-export {
-  programs,
-  applications,
-  vouchers,
-  inspections,
-  assistancePayments,
-  landlordCertifications,
-  complianceReports,
-};

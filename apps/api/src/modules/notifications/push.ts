@@ -5,7 +5,14 @@
  * Supports device registration, notification sending, and delivery tracking.
  */
 
-import { prisma } from '@realriches/database';
+import {
+  prisma,
+  Prisma,
+  type PushProvider as PrismaPushProvider,
+  type DevicePlatform as PrismaDevicePlatform,
+  type NotificationPriority as PrismaNotificationPriority,
+  type DeliveryStatus as PrismaDeliveryStatus,
+} from '@realriches/database';
 import { generatePrefixedId, logger, AppError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -14,62 +21,33 @@ import { z } from 'zod';
 // Types
 // =============================================================================
 
-export type PushProvider = 'fcm' | 'apns' | 'mock';
-export type DevicePlatform = 'ios' | 'android' | 'web';
-export type NotificationPriority = 'low' | 'normal' | 'high';
-export type DeliveryStatus = 'pending' | 'sent' | 'delivered' | 'failed' | 'clicked';
+export type PushProvider = PrismaPushProvider;
+export type DevicePlatform = PrismaDevicePlatform;
+export type NotificationPriority = PrismaNotificationPriority;
+export type DeliveryStatus = PrismaDeliveryStatus;
 
-interface DeviceRegistration {
+// Internal interface for provider communication (not persisted)
+interface PushNotificationPayload {
   id: string;
   userId: string;
-  platform: DevicePlatform;
-  provider: PushProvider;
-  deviceToken: string;
-  deviceName?: string;
-  deviceModel?: string;
-  osVersion?: string;
-  appVersion?: string;
-  isActive: boolean;
-  lastActiveAt: Date;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-interface PushNotification {
-  id: string;
-  userId: string;
-  deviceId?: string; // null = send to all user devices
+  deviceId?: string;
   title: string;
   body: string;
-  imageUrl?: string;
-  data?: Record<string, string>;
-  category?: string;
+  imageUrl?: string | null;
+  data?: Record<string, string> | null;
+  category?: string | null;
   priority: NotificationPriority;
-  badge?: number;
-  sound?: string;
-  collapseKey?: string;
-  ttl?: number; // seconds
+  badge?: number | null;
+  sound?: string | null;
+  collapseKey?: string | null;
+  ttl?: number | null;
   status: DeliveryStatus;
-  providerMessageId?: string;
-  sentAt?: Date;
-  deliveredAt?: Date;
-  clickedAt?: Date;
-  error?: string;
+  providerMessageId?: string | null;
+  sentAt?: Date | null;
+  deliveredAt?: Date | null;
+  clickedAt?: Date | null;
+  error?: string | null;
   createdAt: Date;
-}
-
-interface NotificationTemplate {
-  id: string;
-  name: string;
-  category: string;
-  title: string;
-  body: string;
-  data?: Record<string, string>;
-  imageUrl?: string;
-  priority: NotificationPriority;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 interface PushStats {
@@ -88,8 +66,8 @@ interface PushStats {
 
 interface IPushProvider {
   name: PushProvider;
-  send(deviceToken: string, notification: PushNotification): Promise<{ messageId: string }>;
-  sendBatch(tokens: string[], notification: PushNotification): Promise<{ successCount: number; failureCount: number; results: Array<{ token: string; messageId?: string; error?: string }> }>;
+  send(deviceToken: string, notification: PushNotificationPayload): Promise<{ messageId: string }>;
+  sendBatch(tokens: string[], notification: PushNotificationPayload): Promise<{ successCount: number; failureCount: number; results: Array<{ token: string; messageId?: string; error?: string }> }>;
   validateToken(deviceToken: string): Promise<boolean>;
 }
 
@@ -99,16 +77,14 @@ interface IPushProvider {
 
 class MockPushProvider implements IPushProvider {
   name: PushProvider = 'mock';
-  private sentNotifications: Map<string, PushNotification> = new Map();
 
-  async send(deviceToken: string, notification: PushNotification): Promise<{ messageId: string }> {
+  async send(deviceToken: string, notification: PushNotificationPayload): Promise<{ messageId: string }> {
     const messageId = `mock_msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    this.sentNotifications.set(messageId, notification);
     logger.debug({ deviceToken, title: notification.title }, 'Mock push sent');
     return { messageId };
   }
 
-  async sendBatch(tokens: string[], notification: PushNotification): Promise<{ successCount: number; failureCount: number; results: Array<{ token: string; messageId?: string; error?: string }> }> {
+  async sendBatch(tokens: string[], _notification: PushNotificationPayload): Promise<{ successCount: number; failureCount: number; results: Array<{ token: string; messageId?: string; error?: string }> }> {
     const results = tokens.map(token => {
       const messageId = `mock_msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       return { token, messageId };
@@ -131,13 +107,8 @@ class MockPushProvider implements IPushProvider {
 
 class FCMProvider implements IPushProvider {
   name: PushProvider = 'fcm';
-  private serverKey: string;
 
-  constructor() {
-    this.serverKey = process.env.FCM_SERVER_KEY || '';
-  }
-
-  async send(deviceToken: string, notification: PushNotification): Promise<{ messageId: string }> {
+  async send(deviceToken: string, notification: PushNotificationPayload): Promise<{ messageId: string }> {
     // In production, use firebase-admin SDK or HTTP v1 API
     // POST https://fcm.googleapis.com/v1/projects/{project}/messages:send
     logger.info({ deviceToken: deviceToken.slice(0, 20) + '...', title: notification.title }, 'FCM: Sending notification');
@@ -155,7 +126,7 @@ class FCMProvider implements IPushProvider {
     return { messageId };
   }
 
-  async sendBatch(tokens: string[], notification: PushNotification): Promise<{ successCount: number; failureCount: number; results: Array<{ token: string; messageId?: string; error?: string }> }> {
+  async sendBatch(tokens: string[], notification: PushNotificationPayload): Promise<{ successCount: number; failureCount: number; results: Array<{ token: string; messageId?: string; error?: string }> }> {
     // Use sendMulticast or batch HTTP requests
     logger.info({ tokenCount: tokens.length, title: notification.title }, 'FCM: Sending batch');
 
@@ -183,17 +154,8 @@ class FCMProvider implements IPushProvider {
 
 class APNsProvider implements IPushProvider {
   name: PushProvider = 'apns';
-  private teamId: string;
-  private keyId: string;
-  private bundleId: string;
 
-  constructor() {
-    this.teamId = process.env.APNS_TEAM_ID || '';
-    this.keyId = process.env.APNS_KEY_ID || '';
-    this.bundleId = process.env.APNS_BUNDLE_ID || 'com.realriches.app';
-  }
-
-  async send(deviceToken: string, notification: PushNotification): Promise<{ messageId: string }> {
+  async send(deviceToken: string, notification: PushNotificationPayload): Promise<{ messageId: string }> {
     // In production, use apn package or HTTP/2 API
     // POST https://api.push.apple.com/3/device/{deviceToken}
     logger.info({ deviceToken: deviceToken.slice(0, 20) + '...', title: notification.title }, 'APNs: Sending notification');
@@ -213,7 +175,7 @@ class APNsProvider implements IPushProvider {
     return { messageId };
   }
 
-  async sendBatch(tokens: string[], notification: PushNotification): Promise<{ successCount: number; failureCount: number; results: Array<{ token: string; messageId?: string; error?: string }> }> {
+  async sendBatch(tokens: string[], notification: PushNotificationPayload): Promise<{ successCount: number; failureCount: number; results: Array<{ token: string; messageId?: string; error?: string }> }> {
     // APNs requires individual requests, but can use HTTP/2 multiplexing
     logger.info({ tokenCount: tokens.length, title: notification.title }, 'APNs: Sending batch');
 
@@ -273,21 +235,16 @@ function getProviderForPlatform(platform: DevicePlatform): PushProvider {
 }
 
 // =============================================================================
-// In-Memory Storage
+// Default Templates Seeding
 // =============================================================================
 
-const deviceRegistrations = new Map<string, DeviceRegistration>();
-const pushNotifications = new Map<string, PushNotification>();
-const notificationTemplates = new Map<string, NotificationTemplate>();
-
-// Initialize default templates
-const defaultTemplates: Omit<NotificationTemplate, 'id' | 'createdAt' | 'updatedAt'>[] = [
+const defaultTemplates = [
   {
     name: 'new_lead',
     category: 'leads',
     title: 'New Inquiry',
     body: 'You have a new inquiry for {{propertyName}}',
-    priority: 'high',
+    priority: 'high' as const,
     isActive: true,
   },
   {
@@ -295,7 +252,7 @@ const defaultTemplates: Omit<NotificationTemplate, 'id' | 'createdAt' | 'updated
     category: 'payments',
     title: 'Payment Received',
     body: '{{tenantName}} paid ${{amount}} for {{propertyName}}',
-    priority: 'normal',
+    priority: 'normal' as const,
     isActive: true,
   },
   {
@@ -303,7 +260,7 @@ const defaultTemplates: Omit<NotificationTemplate, 'id' | 'createdAt' | 'updated
     category: 'leases',
     title: 'Lease Expiring Soon',
     body: 'Lease for {{unitAddress}} expires in {{daysRemaining}} days',
-    priority: 'normal',
+    priority: 'normal' as const,
     isActive: true,
   },
   {
@@ -311,7 +268,7 @@ const defaultTemplates: Omit<NotificationTemplate, 'id' | 'createdAt' | 'updated
     category: 'maintenance',
     title: 'Urgent Maintenance Request',
     body: '{{category}} issue reported at {{propertyName}}',
-    priority: 'high',
+    priority: 'high' as const,
     isActive: true,
   },
   {
@@ -319,20 +276,26 @@ const defaultTemplates: Omit<NotificationTemplate, 'id' | 'createdAt' | 'updated
     category: 'documents',
     title: 'Document Signed',
     body: '{{signerName}} signed {{documentName}}',
-    priority: 'normal',
+    priority: 'normal' as const,
     isActive: true,
   },
 ];
 
-// Initialize templates
-for (const template of defaultTemplates) {
-  const id = generatePrefixedId('tpl');
-  notificationTemplates.set(id, {
-    ...template,
-    id,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  });
+// Seed default templates if they don't exist
+async function seedDefaultTemplates(): Promise<void> {
+  for (const template of defaultTemplates) {
+    const existing = await prisma.pushNotificationTemplate.findFirst({
+      where: { name: template.name },
+    });
+    if (!existing) {
+      await prisma.pushNotificationTemplate.create({
+        data: {
+          id: generatePrefixedId('tpl'),
+          ...template,
+        },
+      });
+    }
+  }
 }
 
 // =============================================================================
@@ -382,6 +345,9 @@ function interpolateTemplate(template: string, variables: Record<string, string>
 // =============================================================================
 
 export async function pushNotificationRoutes(app: FastifyInstance): Promise<void> {
+  // Seed default templates on startup
+  await seedDefaultTemplates();
+
   // ==========================================================================
   // Device Registration
   // ==========================================================================
@@ -421,43 +387,45 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
       }
 
       // Check for existing registration with same token
-      const existing = Array.from(deviceRegistrations.values())
-        .find(d => d.deviceToken === data.deviceToken);
+      const existing = await prisma.deviceRegistration.findFirst({
+        where: { deviceToken: data.deviceToken },
+      });
 
       if (existing) {
         // Update existing registration
-        existing.userId = request.user.id;
-        existing.isActive = true;
-        existing.lastActiveAt = new Date();
-        existing.updatedAt = new Date();
-        if (data.deviceName) existing.deviceName = data.deviceName;
-        if (data.appVersion) existing.appVersion = data.appVersion;
+        const updated = await prisma.deviceRegistration.update({
+          where: { id: existing.id },
+          data: {
+            userId: request.user.id,
+            isActive: true,
+            lastActiveAt: new Date(),
+            ...(data.deviceName && { deviceName: data.deviceName }),
+            ...(data.appVersion && { appVersion: data.appVersion }),
+          },
+        });
 
         return reply.send({
           success: true,
-          data: { device: existing },
+          data: { device: updated },
           message: 'Device updated',
         });
       }
 
-      const now = new Date();
-      const device: DeviceRegistration = {
-        id: generatePrefixedId('dev'),
-        userId: request.user.id,
-        platform: data.platform,
-        provider: providerName,
-        deviceToken: data.deviceToken,
-        deviceName: data.deviceName,
-        deviceModel: data.deviceModel,
-        osVersion: data.osVersion,
-        appVersion: data.appVersion,
-        isActive: true,
-        lastActiveAt: now,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      deviceRegistrations.set(device.id, device);
+      const device = await prisma.deviceRegistration.create({
+        data: {
+          id: generatePrefixedId('dev'),
+          userId: request.user.id,
+          platform: data.platform as PrismaDevicePlatform,
+          provider: providerName,
+          deviceToken: data.deviceToken,
+          deviceName: data.deviceName,
+          deviceModel: data.deviceModel,
+          osVersion: data.osVersion,
+          appVersion: data.appVersion,
+          isActive: true,
+          lastActiveAt: new Date(),
+        },
+      });
 
       logger.info({
         deviceId: device.id,
@@ -493,12 +461,14 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
         });
       }
 
-      const devices = Array.from(deviceRegistrations.values())
-        .filter(d => d.userId === request.user!.id && d.isActive)
-        .map(d => ({
-          ...d,
-          deviceToken: d.deviceToken.slice(0, 20) + '...', // Redact token
-        }));
+      const rawDevices = await prisma.deviceRegistration.findMany({
+        where: { userId: request.user.id, isActive: true },
+      });
+
+      const devices = rawDevices.map(d => ({
+        ...d,
+        deviceToken: d.deviceToken.slice(0, 20) + '...', // Redact token
+      }));
 
       return reply.send({
         success: true,
@@ -532,14 +502,18 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
       }
 
       const { deviceId } = request.params;
-      const device = deviceRegistrations.get(deviceId);
+      const device = await prisma.deviceRegistration.findUnique({
+        where: { id: deviceId },
+      });
 
       if (!device || device.userId !== request.user.id) {
         throw new AppError('NOT_FOUND', 'Device not found', 404);
       }
 
-      device.isActive = false;
-      device.updatedAt = new Date();
+      await prisma.deviceRegistration.update({
+        where: { id: deviceId },
+        data: { isActive: false },
+      });
 
       return reply.send({
         success: true,
@@ -581,16 +555,19 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
       const now = new Date();
 
       // Get target devices
-      let targetDevices: DeviceRegistration[] = [];
+      let targetDevices: Awaited<ReturnType<typeof prisma.deviceRegistration.findMany>> = [];
 
       if (data.deviceId) {
-        const device = deviceRegistrations.get(data.deviceId);
-        if (device?.isActive) {
+        const device = await prisma.deviceRegistration.findFirst({
+          where: { id: data.deviceId, isActive: true },
+        });
+        if (device) {
           targetDevices = [device];
         }
       } else if (data.userId) {
-        targetDevices = Array.from(deviceRegistrations.values())
-          .filter(d => d.userId === data.userId && d.isActive);
+        targetDevices = await prisma.deviceRegistration.findMany({
+          where: { userId: data.userId, isActive: true },
+        });
       } else {
         throw new AppError('VALIDATION_ERROR', 'Must specify userId or deviceId', 400);
       }
@@ -602,8 +579,9 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
       const results: Array<{ deviceId: string; status: DeliveryStatus; messageId?: string; error?: string }> = [];
 
       for (const device of targetDevices) {
-        const notification: PushNotification = {
-          id: generatePrefixedId('psh'),
+        const notificationId = generatePrefixedId('psh');
+        const payload: PushNotificationPayload = {
+          id: notificationId,
           userId: device.userId,
           deviceId: device.id,
           title: data.title,
@@ -611,7 +589,7 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
           imageUrl: data.imageUrl,
           data: data.data,
           category: data.category,
-          priority: data.priority,
+          priority: data.priority as PrismaNotificationPriority,
           badge: data.badge,
           sound: data.sound,
           collapseKey: data.collapseKey,
@@ -620,23 +598,48 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
           createdAt: now,
         };
 
+        let status: DeliveryStatus = 'pending';
+        let providerMessageId: string | undefined;
+        let error: string | undefined;
+        let sentAt: Date | undefined;
+
         try {
           const provider = getProvider(device.provider);
-          const { messageId } = await provider.send(device.deviceToken, notification);
+          const result = await provider.send(device.deviceToken, payload);
 
-          notification.status = 'sent';
-          notification.providerMessageId = messageId;
-          notification.sentAt = new Date();
+          status = 'sent';
+          providerMessageId = result.messageId;
+          sentAt = new Date();
 
-          results.push({ deviceId: device.id, status: 'sent', messageId });
-        } catch (error) {
-          notification.status = 'failed';
-          notification.error = error instanceof Error ? error.message : 'Unknown error';
+          results.push({ deviceId: device.id, status: 'sent', messageId: result.messageId });
+        } catch (err) {
+          status = 'failed';
+          error = err instanceof Error ? err.message : 'Unknown error';
 
-          results.push({ deviceId: device.id, status: 'failed', error: notification.error });
+          results.push({ deviceId: device.id, status: 'failed', error });
         }
 
-        pushNotifications.set(notification.id, notification);
+        await prisma.pushNotification.create({
+          data: {
+            id: notificationId,
+            userId: device.userId,
+            deviceId: device.id,
+            title: data.title,
+            body: data.body,
+            imageUrl: data.imageUrl,
+            data: data.data as unknown as Prisma.JsonValue,
+            category: data.category,
+            priority: data.priority as PrismaNotificationPriority,
+            badge: data.badge,
+            sound: data.sound,
+            collapseKey: data.collapseKey,
+            ttl: data.ttl,
+            status,
+            providerMessageId,
+            sentAt,
+            error,
+          },
+        });
       }
 
       const successCount = results.filter(r => r.status === 'sent').length;
@@ -685,8 +688,9 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
 
       const data = SendTemplatedSchema.parse(request.body);
 
-      const template = Array.from(notificationTemplates.values())
-        .find(t => t.name === data.templateName && t.isActive);
+      const template = await prisma.pushNotificationTemplate.findFirst({
+        where: { name: data.templateName, isActive: true },
+      });
 
       if (!template) {
         throw new AppError('NOT_FOUND', 'Template not found', 404);
@@ -695,9 +699,10 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
       const title = interpolateTemplate(template.title, data.variables);
       const body = interpolateTemplate(template.body, data.variables);
 
-      // Reuse send logic
-      const targetDevices = Array.from(deviceRegistrations.values())
-        .filter(d => d.userId === data.userId && d.isActive);
+      // Get target devices
+      const targetDevices = await prisma.deviceRegistration.findMany({
+        where: { userId: data.userId, isActive: true },
+      });
 
       if (targetDevices.length === 0) {
         throw new AppError('NOT_FOUND', 'No active devices found', 404);
@@ -705,37 +710,58 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
 
       const now = new Date();
       const results: Array<{ deviceId: string; status: DeliveryStatus }> = [];
+      const templateData = template.data as Record<string, string> | null;
 
       for (const device of targetDevices) {
-        const notification: PushNotification = {
-          id: generatePrefixedId('psh'),
+        const notificationId = generatePrefixedId('psh');
+        const payload: PushNotificationPayload = {
+          id: notificationId,
           userId: device.userId,
           deviceId: device.id,
           title,
           body,
           imageUrl: template.imageUrl,
-          data: template.data,
+          data: templateData,
           category: template.category,
           priority: template.priority,
           status: 'pending',
           createdAt: now,
         };
 
+        let status: DeliveryStatus = 'pending';
+        let providerMessageId: string | undefined;
+        let sentAt: Date | undefined;
+
         try {
           const provider = getProvider(device.provider);
-          const { messageId } = await provider.send(device.deviceToken, notification);
+          const result = await provider.send(device.deviceToken, payload);
 
-          notification.status = 'sent';
-          notification.providerMessageId = messageId;
-          notification.sentAt = new Date();
+          status = 'sent';
+          providerMessageId = result.messageId;
+          sentAt = new Date();
 
           results.push({ deviceId: device.id, status: 'sent' });
         } catch {
-          notification.status = 'failed';
+          status = 'failed';
           results.push({ deviceId: device.id, status: 'failed' });
         }
 
-        pushNotifications.set(notification.id, notification);
+        await prisma.pushNotification.create({
+          data: {
+            id: notificationId,
+            userId: device.userId,
+            deviceId: device.id,
+            title,
+            body,
+            imageUrl: template.imageUrl,
+            data: templateData as unknown as Prisma.JsonValue,
+            category: template.category,
+            priority: template.priority,
+            status,
+            providerMessageId,
+            sentAt,
+          },
+        });
       }
 
       return reply.send({
@@ -778,11 +804,12 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
 
       const { title, body, priority = 'normal' } = request.body;
 
-      const activeDevices = Array.from(deviceRegistrations.values())
-        .filter(d => d.isActive);
+      const activeDevices = await prisma.deviceRegistration.findMany({
+        where: { isActive: true },
+      });
 
       // Group by provider for batch sending
-      const byProvider = new Map<PushProvider, DeviceRegistration[]>();
+      const byProvider = new Map<PushProvider, typeof activeDevices>();
       for (const device of activeDevices) {
         if (!byProvider.has(device.provider)) {
           byProvider.set(device.provider, []);
@@ -797,17 +824,17 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
         const provider = getProvider(providerName);
         const tokens = devices.map(d => d.deviceToken);
 
-        const notification: PushNotification = {
+        const payload: PushNotificationPayload = {
           id: generatePrefixedId('psh'),
           userId: 'broadcast',
           title,
           body,
-          priority,
+          priority: priority as PrismaNotificationPriority,
           status: 'pending',
           createdAt: new Date(),
         };
 
-        const result = await provider.sendBatch(tokens, notification);
+        const result = await provider.sendBatch(tokens, payload);
         totalSuccess += result.successCount;
         totalFailed += result.failureCount;
       }
@@ -866,10 +893,11 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
 
       const { limit = 50 } = request.query;
 
-      const notifications = Array.from(pushNotifications.values())
-        .filter(n => n.userId === request.user!.id)
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-        .slice(0, limit);
+      const notifications = await prisma.pushNotification.findMany({
+        where: { userId: request.user.id },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      });
 
       return reply.send({
         success: true,
@@ -912,29 +940,41 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
       const { periodDays = 7 } = request.query;
       const startDate = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000);
 
-      const recentNotifications = Array.from(pushNotifications.values())
-        .filter(n => n.createdAt >= startDate);
+      // Get notification stats using Prisma groupBy
+      const [totalCount, sentCount, deliveredCount, failedCount, clickedCount] = await Promise.all([
+        prisma.pushNotification.count({ where: { createdAt: { gte: startDate } } }),
+        prisma.pushNotification.count({ where: { createdAt: { gte: startDate }, status: 'sent' } }),
+        prisma.pushNotification.count({ where: { createdAt: { gte: startDate }, status: 'delivered' } }),
+        prisma.pushNotification.count({ where: { createdAt: { gte: startDate }, status: 'failed' } }),
+        prisma.pushNotification.count({ where: { createdAt: { gte: startDate }, status: 'clicked' } }),
+      ]);
 
       const stats: PushStats = {
-        total: recentNotifications.length,
-        sent: recentNotifications.filter(n => n.status === 'sent').length,
-        delivered: recentNotifications.filter(n => n.status === 'delivered').length,
-        failed: recentNotifications.filter(n => n.status === 'failed').length,
-        clicked: recentNotifications.filter(n => n.status === 'clicked').length,
-        deliveryRate: 0,
-        clickRate: 0,
+        total: totalCount,
+        sent: sentCount,
+        delivered: deliveredCount,
+        failed: failedCount,
+        clicked: clickedCount,
+        deliveryRate: sentCount > 0 ? (deliveredCount / sentCount) * 100 : 0,
+        clickRate: deliveredCount > 0 ? (clickedCount / deliveredCount) * 100 : 0,
       };
 
-      stats.deliveryRate = stats.sent > 0 ? (stats.delivered / stats.sent) * 100 : 0;
-      stats.clickRate = stats.delivered > 0 ? (stats.clicked / stats.delivered) * 100 : 0;
+      // Get device stats
+      const [totalDevices, activeDevices, iosCounts, androidCounts, webCounts] = await Promise.all([
+        prisma.deviceRegistration.count(),
+        prisma.deviceRegistration.count({ where: { isActive: true } }),
+        prisma.deviceRegistration.count({ where: { platform: 'ios', isActive: true } }),
+        prisma.deviceRegistration.count({ where: { platform: 'android', isActive: true } }),
+        prisma.deviceRegistration.count({ where: { platform: 'web', isActive: true } }),
+      ]);
 
       const deviceStats = {
-        total: deviceRegistrations.size,
-        active: Array.from(deviceRegistrations.values()).filter(d => d.isActive).length,
+        total: totalDevices,
+        active: activeDevices,
         byPlatform: {
-          ios: Array.from(deviceRegistrations.values()).filter(d => d.platform === 'ios' && d.isActive).length,
-          android: Array.from(deviceRegistrations.values()).filter(d => d.platform === 'android' && d.isActive).length,
-          web: Array.from(deviceRegistrations.values()).filter(d => d.platform === 'web' && d.isActive).length,
+          ios: iosCounts,
+          android: androidCounts,
+          web: webCounts,
         },
       };
 
@@ -968,7 +1008,7 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
       },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const templates = Array.from(notificationTemplates.values());
+      const templates = await prisma.pushNotificationTemplate.findMany();
 
       return reply.send({
         success: true,
@@ -988,15 +1028,17 @@ export async function sendPushToUser(
   body: string,
   data?: Record<string, string>
 ): Promise<{ sent: number; failed: number }> {
-  const devices = Array.from(deviceRegistrations.values())
-    .filter(d => d.userId === userId && d.isActive);
+  const devices = await prisma.deviceRegistration.findMany({
+    where: { userId, isActive: true },
+  });
 
   let sent = 0;
   let failed = 0;
 
   for (const device of devices) {
-    const notification: PushNotification = {
-      id: generatePrefixedId('psh'),
+    const notificationId = generatePrefixedId('psh');
+    const payload: PushNotificationPayload = {
+      id: notificationId,
       userId,
       deviceId: device.id,
       title,
@@ -1007,17 +1049,36 @@ export async function sendPushToUser(
       createdAt: new Date(),
     };
 
+    let status: DeliveryStatus = 'pending';
+    let providerMessageId: string | undefined;
+    let sentAt: Date | undefined;
+
     try {
       const provider = getProvider(device.provider);
-      await provider.send(device.deviceToken, notification);
-      notification.status = 'sent';
+      const result = await provider.send(device.deviceToken, payload);
+      status = 'sent';
+      providerMessageId = result.messageId;
+      sentAt = new Date();
       sent++;
     } catch {
-      notification.status = 'failed';
+      status = 'failed';
       failed++;
     }
 
-    pushNotifications.set(notification.id, notification);
+    await prisma.pushNotification.create({
+      data: {
+        id: notificationId,
+        userId,
+        deviceId: device.id,
+        title,
+        body,
+        data: data as unknown as Prisma.JsonValue,
+        priority: 'normal',
+        status,
+        providerMessageId,
+        sentAt,
+      },
+    });
   }
 
   return { sent, failed };
@@ -1028,9 +1089,6 @@ export async function sendPushToUser(
 // =============================================================================
 
 export {
-  deviceRegistrations,
-  pushNotifications,
-  notificationTemplates,
   getProvider,
   getProviderForPlatform,
 };

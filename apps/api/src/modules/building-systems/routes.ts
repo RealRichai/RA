@@ -1,211 +1,41 @@
 import { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-type SystemType = 'hvac' | 'electrical' | 'plumbing' | 'elevator' | 'fire_safety' | 'security' | 'lighting' | 'water_heater' | 'boiler' | 'generator' | 'solar' | 'irrigation';
-type SystemStatus = 'online' | 'offline' | 'warning' | 'critical' | 'maintenance';
-type AlertSeverity = 'info' | 'warning' | 'critical' | 'emergency';
-type AlertStatus = 'active' | 'acknowledged' | 'resolved' | 'escalated';
-type MaintenanceType = 'preventive' | 'corrective' | 'emergency' | 'inspection';
-type MaintenanceStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'overdue';
-type SensorType = 'temperature' | 'humidity' | 'pressure' | 'flow' | 'power' | 'occupancy' | 'smoke' | 'co2' | 'water_leak' | 'motion' | 'door_contact' | 'vibration';
-
-export interface BuildingSystem {
-  id: string;
-  propertyId: string;
-  name: string;
-  type: SystemType;
-  status: SystemStatus;
-  manufacturer?: string;
-  model?: string;
-  serialNumber?: string;
-  installDate?: string;
-  warrantyExpiry?: string;
-  location: string;
-  floor?: number;
-  lastMaintenanceDate?: string;
-  nextMaintenanceDate?: string;
-  maintenanceIntervalDays?: number;
-  operatingHours: number;
-  specifications?: Record<string, unknown>;
-  isAutomated: boolean;
-  automationSchedule?: {
-    dayOfWeek: number[];
-    onTime: string;
-    offTime: string;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SystemSensor {
-  id: string;
-  systemId: string;
-  propertyId: string;
-  name: string;
-  type: SensorType;
-  unit: string;
-  location: string;
-  minThreshold?: number;
-  maxThreshold?: number;
-  currentValue?: number;
-  lastReading?: string;
-  status: 'active' | 'inactive' | 'error' | 'calibrating';
-  batteryLevel?: number;
-  isWireless: boolean;
-  hardwareId?: string;
-  calibrationDate?: string;
-  nextCalibrationDate?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SensorReading {
-  id: string;
-  sensorId: string;
-  value: number;
-  unit: string;
-  quality: 'good' | 'fair' | 'poor' | 'invalid';
-  isAnomaly: boolean;
-  recordedAt: string;
-}
-
-export interface SystemAlert {
-  id: string;
-  propertyId: string;
-  systemId?: string;
-  sensorId?: string;
-  severity: AlertSeverity;
-  status: AlertStatus;
-  title: string;
-  description: string;
-  source: string;
-  triggeredAt: string;
-  acknowledgedAt?: string;
-  acknowledgedBy?: string;
-  resolvedAt?: string;
-  resolvedBy?: string;
-  resolution?: string;
-  escalatedAt?: string;
-  escalatedTo?: string;
-  autoResolved: boolean;
-  notificationsSent: string[];
-  metadata?: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface MaintenanceSchedule {
-  id: string;
-  propertyId: string;
-  systemId: string;
-  type: MaintenanceType;
-  status: MaintenanceStatus;
-  title: string;
-  description?: string;
-  scheduledDate: string;
-  completedDate?: string;
-  assignedTo?: string;
-  vendorId?: string;
-  estimatedDuration: number; // minutes
-  actualDuration?: number;
-  cost?: number;
-  parts?: { name: string; quantity: number; cost: number }[];
-  checklist?: { item: string; completed: boolean }[];
-  notes?: string;
-  recurrence?: {
-    frequency: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annual';
-    interval: number;
-    endDate?: string;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface EnergyUsage {
-  id: string;
-  propertyId: string;
-  systemId?: string;
-  utilityType: 'electricity' | 'gas' | 'water' | 'solar_generation';
-  period: 'hourly' | 'daily' | 'monthly';
-  startTime: string;
-  endTime: string;
-  consumption: number;
-  unit: string;
-  cost?: number;
-  peakDemand?: number;
-  averageLoad?: number;
-  createdAt: string;
-}
-
-export interface SystemDowntime {
-  id: string;
-  systemId: string;
-  propertyId: string;
-  reason: 'maintenance' | 'failure' | 'upgrade' | 'external' | 'unknown';
-  startTime: string;
-  endTime?: string;
-  duration?: number; // minutes
-  impact: 'none' | 'minimal' | 'moderate' | 'severe' | 'critical';
-  affectedUnits?: string[];
-  notes?: string;
-  createdAt: string;
-}
-
-export interface AlertRule {
-  id: string;
-  propertyId: string;
-  name: string;
-  description?: string;
-  isActive: boolean;
-  systemType?: SystemType;
-  sensorType?: SensorType;
-  condition: {
-    metric: string;
-    operator: 'gt' | 'lt' | 'eq' | 'gte' | 'lte' | 'between' | 'outside';
-    value: number;
-    value2?: number; // For between/outside
-    duration?: number; // seconds
-  };
-  severity: AlertSeverity;
-  notifications: {
-    channels: ('email' | 'sms' | 'push' | 'webhook')[];
-    recipients: string[];
-    escalationMinutes?: number;
-  };
-  cooldownMinutes: number;
-  lastTriggeredAt?: string;
-  triggerCount: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// ============================================================================
-// IN-MEMORY STORES
-// ============================================================================
-
-export const buildingSystems = new Map<string, BuildingSystem>();
-export const systemSensors = new Map<string, SystemSensor>();
-export const sensorReadings = new Map<string, SensorReading>();
-export const systemAlerts = new Map<string, SystemAlert>();
-export const maintenanceSchedules = new Map<string, MaintenanceSchedule>();
-export const energyUsages = new Map<string, EnergyUsage>();
-export const systemDowntimes = new Map<string, SystemDowntime>();
-export const alertRules = new Map<string, AlertRule>();
+import {
+  prisma,
+  type BuildingSystemType,
+  type BuildingSystemStatus,
+  type SensorType,
+  type SensorStatus,
+  type SystemAlertSeverity,
+  type SystemAlertStatus,
+  type SystemMaintenanceType,
+  type SystemMaintenanceStatus,
+  type UtilityType,
+  type EnergyPeriod,
+  type DowntimeReason,
+  type DowntimeImpact,
+  type RuleOperator,
+  type ReadingQuality,
+} from '@realriches/database';
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
+interface SensorData {
+  minThreshold: number | null;
+  maxThreshold: number | null;
+  name: string;
+  unit: string;
+  type: SensorType;
+}
+
 export function checkThresholds(
-  sensor: SystemSensor,
+  sensor: SensorData,
   value: number
-): { isAnomaly: boolean; severity?: AlertSeverity; message?: string } {
-  if (sensor.minThreshold !== undefined && value < sensor.minThreshold) {
-    const severity = value < sensor.minThreshold * 0.8 ? 'critical' : 'warning';
+): { isAnomaly: boolean; severity?: SystemAlertSeverity; message?: string } {
+  if (sensor.minThreshold !== null && value < sensor.minThreshold) {
+    const severity: SystemAlertSeverity = value < sensor.minThreshold * 0.8 ? 'critical' : 'warning';
     return {
       isAnomaly: true,
       severity,
@@ -213,8 +43,8 @@ export function checkThresholds(
     };
   }
 
-  if (sensor.maxThreshold !== undefined && value > sensor.maxThreshold) {
-    const severity = value > sensor.maxThreshold * 1.2 ? 'critical' : 'warning';
+  if (sensor.maxThreshold !== null && value > sensor.maxThreshold) {
+    const severity: SystemAlertSeverity = value > sensor.maxThreshold * 1.2 ? 'critical' : 'warning';
     return {
       isAnomaly: true,
       severity,
@@ -225,12 +55,15 @@ export function checkThresholds(
   return { isAnomaly: false };
 }
 
-export function calculateSystemHealth(systemId: string): {
+export async function calculateSystemHealth(systemId: string): Promise<{
   score: number;
   status: 'healthy' | 'degraded' | 'critical';
   factors: string[];
-} {
-  const system = buildingSystems.get(systemId);
+}> {
+  const system = await prisma.buildingSystem.findUnique({
+    where: { id: systemId },
+  });
+
   if (!system) {
     return { score: 0, status: 'critical', factors: ['System not found'] };
   }
@@ -242,7 +75,7 @@ export function calculateSystemHealth(systemId: string): {
   if (system.status === 'offline') {
     score -= 50;
     factors.push('System offline');
-  } else if (system.status === 'warning') {
+  } else if (system.status === 'degraded') {
     score -= 20;
     factors.push('System in warning state');
   } else if (system.status === 'critical') {
@@ -251,8 +84,8 @@ export function calculateSystemHealth(systemId: string): {
   }
 
   // Check maintenance
-  if (system.nextMaintenanceDate) {
-    const nextMaint = new Date(system.nextMaintenanceDate);
+  if (system.nextServiceDate) {
+    const nextMaint = new Date(system.nextServiceDate);
     const now = new Date();
     const daysUntil = Math.floor((nextMaint.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -275,27 +108,35 @@ export function calculateSystemHealth(systemId: string): {
   }
 
   // Check recent alerts
-  const recentAlerts = Array.from(systemAlerts.values()).filter(
-    (a) => a.systemId === systemId && a.status === 'active'
-  );
+  const activeAlerts = await prisma.systemAlert.findMany({
+    where: {
+      systemId,
+      status: 'active',
+    },
+  });
 
-  if (recentAlerts.length > 0) {
-    const criticalAlerts = recentAlerts.filter((a) => a.severity === 'critical' || a.severity === 'emergency');
+  if (activeAlerts.length > 0) {
+    const criticalAlerts = activeAlerts.filter((a) => a.severity === 'critical' || a.severity === 'emergency');
     if (criticalAlerts.length > 0) {
       score -= 30;
       factors.push(`${criticalAlerts.length} critical alerts active`);
     } else {
       score -= 10;
-      factors.push(`${recentAlerts.length} alerts active`);
+      factors.push(`${activeAlerts.length} alerts active`);
     }
   }
 
   // Check sensors
-  const sensors = Array.from(systemSensors.values()).filter((s) => s.systemId === systemId);
-  const errorSensors = sensors.filter((s) => s.status === 'error');
-  if (errorSensors.length > 0) {
+  const errorSensors = await prisma.systemSensor.count({
+    where: {
+      systemId,
+      status: 'error',
+    },
+  });
+
+  if (errorSensors > 0) {
     score -= 15;
-    factors.push(`${errorSensors.length} sensors in error state`);
+    factors.push(`${errorSensors} sensors in error state`);
   }
 
   score = Math.max(0, score);
@@ -312,40 +153,73 @@ export function calculateSystemHealth(systemId: string): {
   return { score, status, factors };
 }
 
-export function getMaintenanceSummary(propertyId: string): {
+export async function getMaintenanceSummary(propertyId: string): Promise<{
   scheduled: number;
   inProgress: number;
   overdue: number;
   completedThisMonth: number;
-  upcomingThisWeek: MaintenanceSchedule[];
+  upcomingThisWeek: Awaited<ReturnType<typeof prisma.systemMaintenanceSchedule.findMany>>;
   costThisMonth: number;
-} {
+}> {
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  const maintenance = Array.from(maintenanceSchedules.values()).filter(
-    (m) => {
-      const system = buildingSystems.get(m.systemId);
-      return system?.propertyId === propertyId;
-    }
-  );
+  const [scheduled, inProgress, overdue, completedThisMonth, upcomingThisWeek, completedMaintenance] = await Promise.all([
+    prisma.systemMaintenanceSchedule.count({
+      where: {
+        propertyId,
+        status: 'scheduled',
+      },
+    }),
+    prisma.systemMaintenanceSchedule.count({
+      where: {
+        propertyId,
+        status: 'in_progress',
+      },
+    }),
+    prisma.systemMaintenanceSchedule.count({
+      where: {
+        propertyId,
+        status: 'overdue',
+      },
+    }),
+    prisma.systemMaintenanceSchedule.count({
+      where: {
+        propertyId,
+        status: 'completed',
+        completedDate: {
+          gte: startOfMonth,
+        },
+      },
+    }),
+    prisma.systemMaintenanceSchedule.findMany({
+      where: {
+        propertyId,
+        status: 'scheduled',
+        scheduledDate: {
+          gte: now,
+          lte: oneWeekFromNow,
+        },
+      },
+    }),
+    prisma.systemMaintenanceSchedule.findMany({
+      where: {
+        propertyId,
+        completedDate: {
+          gte: startOfMonth,
+        },
+        cost: {
+          not: null,
+        },
+      },
+      select: {
+        cost: true,
+      },
+    }),
+  ]);
 
-  const scheduled = maintenance.filter((m) => m.status === 'scheduled').length;
-  const inProgress = maintenance.filter((m) => m.status === 'in_progress').length;
-  const overdue = maintenance.filter((m) => m.status === 'overdue').length;
-
-  const completedThisMonth = maintenance.filter(
-    (m) => m.status === 'completed' && m.completedDate && m.completedDate >= startOfMonth.toISOString()
-  ).length;
-
-  const upcomingThisWeek = maintenance.filter(
-    (m) => m.status === 'scheduled' && m.scheduledDate >= now.toISOString() && m.scheduledDate <= oneWeekFromNow.toISOString()
-  );
-
-  const costThisMonth = maintenance
-    .filter((m) => m.completedDate && m.completedDate >= startOfMonth.toISOString() && m.cost)
-    .reduce((sum, m) => sum + (m.cost || 0), 0);
+  const costThisMonth = completedMaintenance.reduce((sum, m) => sum + (m.cost?.toNumber() || 0), 0);
 
   return {
     scheduled,
@@ -357,27 +231,29 @@ export function getMaintenanceSummary(propertyId: string): {
   };
 }
 
-export function calculateEnergyStats(
+export async function calculateEnergyStats(
   propertyId: string,
   startDate?: string,
   endDate?: string
-): {
+): Promise<{
   totalConsumption: Record<string, number>;
   totalCost: number;
   averageDaily: Record<string, number>;
   peakUsage: { date: string; value: number; type: string } | null;
   comparedToPrevious: Record<string, number>;
-} {
-  let usage = Array.from(energyUsages.values()).filter(
-    (u) => u.propertyId === propertyId
-  );
+}> {
+  const where: Parameters<typeof prisma.energyUsage.findMany>[0]['where'] = {
+    propertyId,
+  };
 
   if (startDate) {
-    usage = usage.filter((u) => u.startTime >= startDate);
+    where.startTime = { gte: new Date(startDate) };
   }
   if (endDate) {
-    usage = usage.filter((u) => u.endTime <= endDate);
+    where.endTime = { lte: new Date(endDate) };
   }
+
+  const usage = await prisma.energyUsage.findMany({ where });
 
   const totalConsumption: Record<string, number> = {};
   let totalCost = 0;
@@ -385,15 +261,15 @@ export function calculateEnergyStats(
 
   usage.forEach((u) => {
     totalConsumption[u.utilityType] = (totalConsumption[u.utilityType] || 0) + u.consumption;
-    totalCost += u.cost || 0;
+    totalCost += u.cost?.toNumber() || 0;
 
     if (!peakUsage || u.consumption > peakUsage.value) {
-      peakUsage = { date: u.startTime, value: u.consumption, type: u.utilityType };
+      peakUsage = { date: u.startTime.toISOString(), value: u.consumption, type: u.utilityType };
     }
   });
 
   // Calculate average daily (simplified)
-  const days = usage.length > 0 ? Math.max(1, new Set(usage.map((u) => u.startTime.split('T')[0])).size) : 1;
+  const days = usage.length > 0 ? Math.max(1, new Set(usage.map((u) => u.startTime.toISOString().split('T')[0])).size) : 1;
   const averageDaily: Record<string, number> = {};
   Object.entries(totalConsumption).forEach(([type, total]) => {
     averageDaily[type] = Math.round(total / days);
@@ -414,34 +290,39 @@ export function calculateEnergyStats(
   };
 }
 
-export function getSystemUptime(systemId: string, days: number = 30): {
+export async function getSystemUptime(systemId: string, days: number = 30): Promise<{
   uptimePercentage: number;
   totalDowntimeMinutes: number;
   incidents: number;
   mtbf: number; // Mean time between failures (hours)
   mttr: number; // Mean time to repair (minutes)
-} {
+}> {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
 
-  const downtimes = Array.from(systemDowntimes.values()).filter(
-    (d) => d.systemId === systemId && d.startTime >= cutoffDate.toISOString()
-  );
+  const downtimes = await prisma.systemDowntime.findMany({
+    where: {
+      systemId,
+      startTime: {
+        gte: cutoffDate,
+      },
+    },
+  });
 
   const totalMinutes = days * 24 * 60;
   let totalDowntimeMinutes = 0;
-  const completedDowntimes: SystemDowntime[] = [];
+  const completedDowntimes: { duration: number }[] = [];
 
   downtimes.forEach((d) => {
     if (d.duration) {
       totalDowntimeMinutes += d.duration;
-      completedDowntimes.push(d);
+      completedDowntimes.push({ duration: d.duration });
     } else if (d.endTime) {
       const duration = Math.floor(
         (new Date(d.endTime).getTime() - new Date(d.startTime).getTime()) / (1000 * 60)
       );
       totalDowntimeMinutes += duration;
-      completedDowntimes.push({ ...d, duration });
+      completedDowntimes.push({ duration });
     }
   });
 
@@ -451,7 +332,7 @@ export function getSystemUptime(systemId: string, days: number = 30): {
   const incidents = downtimes.length;
   const mtbf = incidents > 0 ? Math.round((uptimeMinutes / 60) / incidents) : totalMinutes / 60;
   const mttr = completedDowntimes.length > 0
-    ? Math.round(completedDowntimes.reduce((sum, d) => sum + (d.duration || 0), 0) / completedDowntimes.length)
+    ? Math.round(completedDowntimes.reduce((sum, d) => sum + d.duration, 0) / completedDowntimes.length)
     : 0;
 
   return {
@@ -464,12 +345,9 @@ export function getSystemUptime(systemId: string, days: number = 30): {
 }
 
 export function evaluateAlertRule(
-  rule: AlertRule,
-  sensorId: string,
+  condition: { operator: RuleOperator; value: number; value2?: number | null },
   value: number
 ): boolean {
-  const { condition } = rule;
-
   switch (condition.operator) {
     case 'gt':
       return value > condition.value;
@@ -482,9 +360,9 @@ export function evaluateAlertRule(
     case 'lte':
       return value <= condition.value;
     case 'between':
-      return condition.value2 !== undefined && value >= condition.value && value <= condition.value2;
+      return condition.value2 !== null && condition.value2 !== undefined && value >= condition.value && value <= condition.value2;
     case 'outside':
-      return condition.value2 !== undefined && (value < condition.value || value > condition.value2);
+      return condition.value2 !== null && condition.value2 !== undefined && (value < condition.value || value > condition.value2);
     default:
       return false;
   }
@@ -495,15 +373,15 @@ export function evaluateAlertRule(
 // ============================================================================
 
 const SystemSchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   name: z.string(),
-  type: z.enum(['hvac', 'electrical', 'plumbing', 'elevator', 'fire_safety', 'security', 'lighting', 'water_heater', 'boiler', 'generator', 'solar', 'irrigation']),
+  type: z.enum(['hvac', 'electrical', 'plumbing', 'elevator', 'fire_safety', 'security', 'lighting', 'water_heater', 'boiler', 'generator', 'solar', 'irrigation', 'chiller', 'other']),
   manufacturer: z.string().optional(),
   model: z.string().optional(),
   serialNumber: z.string().optional(),
   installDate: z.string().optional(),
   warrantyExpiry: z.string().optional(),
-  location: z.string(),
+  location: z.string().optional(),
   floor: z.number().int().optional(),
   maintenanceIntervalDays: z.number().int().positive().optional(),
   specifications: z.record(z.unknown()).optional(),
@@ -516,8 +394,8 @@ const SystemSchema = z.object({
 });
 
 const SensorSchema = z.object({
-  systemId: z.string(),
-  propertyId: z.string(),
+  systemId: z.string().uuid(),
+  propertyId: z.string().uuid(),
   name: z.string(),
   type: z.enum(['temperature', 'humidity', 'pressure', 'flow', 'power', 'occupancy', 'smoke', 'co2', 'water_leak', 'motion', 'door_contact', 'vibration']),
   unit: z.string(),
@@ -529,15 +407,15 @@ const SensorSchema = z.object({
 });
 
 const ReadingSchema = z.object({
-  sensorId: z.string(),
+  sensorId: z.string().uuid(),
   value: z.number(),
   quality: z.enum(['good', 'fair', 'poor', 'invalid']).default('good'),
 });
 
 const AlertSchema = z.object({
-  propertyId: z.string(),
-  systemId: z.string().optional(),
-  sensorId: z.string().optional(),
+  propertyId: z.string().uuid(),
+  systemId: z.string().uuid().optional(),
+  sensorId: z.string().uuid().optional(),
   severity: z.enum(['info', 'warning', 'critical', 'emergency']),
   title: z.string(),
   description: z.string(),
@@ -546,14 +424,14 @@ const AlertSchema = z.object({
 });
 
 const MaintenanceSchema = z.object({
-  propertyId: z.string(),
-  systemId: z.string(),
+  propertyId: z.string().uuid(),
+  systemId: z.string().uuid(),
   type: z.enum(['preventive', 'corrective', 'emergency', 'inspection']),
   title: z.string(),
   description: z.string().optional(),
   scheduledDate: z.string(),
-  assignedTo: z.string().optional(),
-  vendorId: z.string().optional(),
+  assignedTo: z.string().uuid().optional(),
+  vendorId: z.string().uuid().optional(),
   estimatedDuration: z.number().int().positive(),
   parts: z.array(z.object({
     name: z.string(),
@@ -572,8 +450,8 @@ const MaintenanceSchema = z.object({
 });
 
 const EnergyUsageSchema = z.object({
-  propertyId: z.string(),
-  systemId: z.string().optional(),
+  propertyId: z.string().uuid(),
+  systemId: z.string().uuid().optional(),
   utilityType: z.enum(['electricity', 'gas', 'water', 'solar_generation']),
   period: z.enum(['hourly', 'daily', 'monthly']),
   startTime: z.string(),
@@ -586,7 +464,7 @@ const EnergyUsageSchema = z.object({
 });
 
 const DowntimeSchema = z.object({
-  systemId: z.string(),
+  systemId: z.string().uuid(),
   reason: z.enum(['maintenance', 'failure', 'upgrade', 'external', 'unknown']),
   startTime: z.string(),
   impact: z.enum(['none', 'minimal', 'moderate', 'severe', 'critical']),
@@ -595,10 +473,10 @@ const DowntimeSchema = z.object({
 });
 
 const AlertRuleSchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   name: z.string(),
   description: z.string().optional(),
-  systemType: z.enum(['hvac', 'electrical', 'plumbing', 'elevator', 'fire_safety', 'security', 'lighting', 'water_heater', 'boiler', 'generator', 'solar', 'irrigation']).optional(),
+  systemType: z.enum(['hvac', 'electrical', 'plumbing', 'elevator', 'fire_safety', 'security', 'lighting', 'water_heater', 'boiler', 'generator', 'solar', 'irrigation', 'chiller', 'other']).optional(),
   sensorType: z.enum(['temperature', 'humidity', 'pressure', 'flow', 'power', 'occupancy', 'smoke', 'co2', 'water_leak', 'motion', 'door_contact', 'vibration']).optional(),
   condition: z.object({
     metric: z.string(),
@@ -633,25 +511,37 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = SystemSchema.parse(request.body);
-      const now = new Date().toISOString();
-
-      const system: BuildingSystem = {
-        id: `sys_${Date.now()}`,
-        ...data,
-        status: 'online',
-        operatingHours: 0,
-        createdAt: now,
-        updatedAt: now,
-      };
 
       // Calculate next maintenance date if interval provided
+      let nextServiceDate: Date | undefined;
       if (data.maintenanceIntervalDays) {
         const nextMaint = new Date();
         nextMaint.setDate(nextMaint.getDate() + data.maintenanceIntervalDays);
-        system.nextMaintenanceDate = nextMaint.toISOString().split('T')[0];
+        nextServiceDate = nextMaint;
       }
 
-      buildingSystems.set(system.id, system);
+      const system = await prisma.buildingSystem.create({
+        data: {
+          propertyId: data.propertyId,
+          name: data.name,
+          type: data.type as BuildingSystemType,
+          status: 'operational',
+          manufacturer: data.manufacturer,
+          model: data.model,
+          serialNumber: data.serialNumber,
+          installDate: data.installDate ? new Date(data.installDate) : null,
+          warrantyExpiry: data.warrantyExpiry ? new Date(data.warrantyExpiry) : null,
+          location: data.location,
+          floor: data.floor,
+          maintenanceIntervalDays: data.maintenanceIntervalDays,
+          operatingHours: 0,
+          specifications: data.specifications as object | undefined,
+          isAutomated: data.isAutomated,
+          automationSchedule: data.automationSchedule as object | undefined,
+          nextServiceDate,
+        },
+      });
+
       return reply.status(201).send(system);
     }
   );
@@ -661,22 +551,23 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
     '/systems',
     async (
       request: FastifyRequest<{
-        Querystring: { propertyId?: string; type?: SystemType; status?: SystemStatus };
+        Querystring: { propertyId?: string; type?: BuildingSystemType; status?: BuildingSystemStatus };
       }>,
       reply
     ) => {
-      let systems = Array.from(buildingSystems.values());
+      const where: Parameters<typeof prisma.buildingSystem.findMany>[0]['where'] = {};
 
       if (request.query.propertyId) {
-        systems = systems.filter((s) => s.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.type) {
-        systems = systems.filter((s) => s.type === request.query.type);
+        where.type = request.query.type;
       }
       if (request.query.status) {
-        systems = systems.filter((s) => s.status === request.query.status);
+        where.status = request.query.status;
       }
 
+      const systems = await prisma.buildingSystem.findMany({ where });
       return reply.send(systems);
     }
   );
@@ -685,7 +576,10 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/systems/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const system = buildingSystems.get(request.params.id);
+      const system = await prisma.buildingSystem.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!system) {
         return reply.status(404).send({ error: 'System not found' });
       }
@@ -699,20 +593,24 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
     async (
       request: FastifyRequest<{
         Params: { id: string };
-        Body: { status: SystemStatus };
+        Body: { status: BuildingSystemStatus };
       }>,
       reply
     ) => {
-      const system = buildingSystems.get(request.params.id);
+      const system = await prisma.buildingSystem.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!system) {
         return reply.status(404).send({ error: 'System not found' });
       }
 
-      system.status = request.body.status;
-      system.updatedAt = new Date().toISOString();
+      const updated = await prisma.buildingSystem.update({
+        where: { id: request.params.id },
+        data: { status: request.body.status },
+      });
 
-      buildingSystems.set(system.id, system);
-      return reply.send(system);
+      return reply.send(updated);
     }
   );
 
@@ -720,7 +618,7 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/systems/:id/health',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const health = calculateSystemHealth(request.params.id);
+      const health = await calculateSystemHealth(request.params.id);
       return reply.send(health);
     }
   );
@@ -736,7 +634,7 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const days = request.query.days ? parseInt(request.query.days) : 30;
-      const uptime = getSystemUptime(request.params.id, days);
+      const uptime = await getSystemUptime(request.params.id, days);
       return reply.send(uptime);
     }
   );
@@ -753,17 +651,23 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = SensorSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const sensor: SystemSensor = {
-        id: `sen_${Date.now()}`,
-        ...data,
-        status: 'active',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const sensor = await prisma.systemSensor.create({
+        data: {
+          systemId: data.systemId,
+          propertyId: data.propertyId,
+          name: data.name,
+          type: data.type as SensorType,
+          unit: data.unit,
+          location: data.location,
+          minThreshold: data.minThreshold,
+          maxThreshold: data.maxThreshold,
+          status: 'active',
+          isWireless: data.isWireless,
+          hardwareId: data.hardwareId,
+        },
+      });
 
-      systemSensors.set(sensor.id, sensor);
       return reply.status(201).send(sensor);
     }
   );
@@ -777,21 +681,22 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let sensors = Array.from(systemSensors.values());
+      const where: Parameters<typeof prisma.systemSensor.findMany>[0]['where'] = {};
 
       if (request.query.propertyId) {
-        sensors = sensors.filter((s) => s.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.systemId) {
-        sensors = sensors.filter((s) => s.systemId === request.query.systemId);
+        where.systemId = request.query.systemId;
       }
       if (request.query.type) {
-        sensors = sensors.filter((s) => s.type === request.query.type);
+        where.type = request.query.type;
       }
       if (request.query.status) {
-        sensors = sensors.filter((s) => s.status === request.query.status);
+        where.status = request.query.status as SensorStatus;
       }
 
+      const sensors = await prisma.systemSensor.findMany({ where });
       return reply.send(sensors);
     }
   );
@@ -804,9 +709,12 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = ReadingSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      const sensor = systemSensors.get(data.sensorId);
+      const sensor = await prisma.systemSensor.findUnique({
+        where: { id: data.sensorId },
+      });
+
       if (!sensor) {
         return reply.status(404).send({ error: 'Sensor not found' });
       }
@@ -814,44 +722,48 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       // Check thresholds
       const thresholdCheck = checkThresholds(sensor, data.value);
 
-      const reading: SensorReading = {
-        id: `srd_${Date.now()}`,
-        sensorId: data.sensorId,
-        value: data.value,
-        unit: sensor.unit,
-        quality: data.quality,
-        isAnomaly: thresholdCheck.isAnomaly,
-        recordedAt: now,
-      };
+      // Create reading
+      const reading = await prisma.systemReading.create({
+        data: {
+          systemId: sensor.systemId,
+          sensorId: sensor.id,
+          propertyId: sensor.propertyId,
+          metricType: sensor.type,
+          value: data.value,
+          unit: sensor.unit,
+          quality: data.quality as ReadingQuality,
+          isAnomaly: thresholdCheck.isAnomaly,
+          recordedAt: now,
+        },
+      });
 
       // Update sensor
-      sensor.currentValue = data.value;
-      sensor.lastReading = now;
-      sensor.updatedAt = now;
-      systemSensors.set(sensor.id, sensor);
-
-      sensorReadings.set(reading.id, reading);
+      await prisma.systemSensor.update({
+        where: { id: sensor.id },
+        data: {
+          currentValue: data.value,
+          lastReading: now,
+        },
+      });
 
       // Create alert if anomaly detected
       if (thresholdCheck.isAnomaly && thresholdCheck.severity) {
-        const alert: SystemAlert = {
-          id: `alt_${Date.now()}`,
-          propertyId: sensor.propertyId,
-          systemId: sensor.systemId,
-          sensorId: sensor.id,
-          severity: thresholdCheck.severity,
-          status: 'active',
-          title: `${sensor.type} threshold exceeded`,
-          description: thresholdCheck.message || 'Threshold exceeded',
-          source: 'sensor',
-          triggeredAt: now,
-          autoResolved: false,
-          notificationsSent: [],
-          createdAt: now,
-          updatedAt: now,
-        };
-
-        systemAlerts.set(alert.id, alert);
+        await prisma.systemAlert.create({
+          data: {
+            propertyId: sensor.propertyId,
+            systemId: sensor.systemId,
+            sensorId: sensor.id,
+            severity: thresholdCheck.severity,
+            status: 'active',
+            alertType: 'threshold',
+            title: `${sensor.type} threshold exceeded`,
+            message: thresholdCheck.message || 'Threshold exceeded',
+            source: 'sensor',
+            triggeredAt: now,
+            autoResolved: false,
+            notificationsSent: [],
+          },
+        });
       }
 
       return reply.status(201).send(reading);
@@ -868,22 +780,22 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let readings = Array.from(sensorReadings.values()).filter(
-        (r) => r.sensorId === request.params.id
-      );
+      const where: Parameters<typeof prisma.systemReading.findMany>[0]['where'] = {
+        sensorId: request.params.id,
+      };
 
-      if (request.query.startDate) {
-        readings = readings.filter((r) => r.recordedAt >= request.query.startDate!);
-      }
-      if (request.query.endDate) {
-        readings = readings.filter((r) => r.recordedAt <= request.query.endDate!);
+      if (request.query.startDate || request.query.endDate) {
+        where.recordedAt = {
+          ...(request.query.startDate && { gte: new Date(request.query.startDate) }),
+          ...(request.query.endDate && { lte: new Date(request.query.endDate) }),
+        };
       }
 
-      readings = readings.sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
-
-      if (request.query.limit) {
-        readings = readings.slice(0, parseInt(request.query.limit));
-      }
+      const readings = await prisma.systemReading.findMany({
+        where,
+        orderBy: { recordedAt: 'desc' },
+        take: request.query.limit ? parseInt(request.query.limit) : undefined,
+      });
 
       return reply.send(readings);
     }
@@ -901,20 +813,26 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = AlertSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      const alert: SystemAlert = {
-        id: `alt_${Date.now()}`,
-        ...data,
-        status: 'active',
-        triggeredAt: now,
-        autoResolved: false,
-        notificationsSent: [],
-        createdAt: now,
-        updatedAt: now,
-      };
+      const alert = await prisma.systemAlert.create({
+        data: {
+          propertyId: data.propertyId,
+          systemId: data.systemId,
+          sensorId: data.sensorId,
+          severity: data.severity as SystemAlertSeverity,
+          status: 'active',
+          alertType: 'manual',
+          title: data.title,
+          message: data.description,
+          source: data.source,
+          triggeredAt: now,
+          autoResolved: false,
+          notificationsSent: [],
+          metadata: data.metadata as object | undefined,
+        },
+      });
 
-      systemAlerts.set(alert.id, alert);
       return reply.status(201).send(alert);
     }
   );
@@ -927,36 +845,41 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
         Querystring: {
           propertyId?: string;
           systemId?: string;
-          severity?: AlertSeverity;
-          status?: AlertStatus;
+          severity?: SystemAlertSeverity;
+          status?: SystemAlertStatus;
           startDate?: string;
           endDate?: string;
         };
       }>,
       reply
     ) => {
-      let alerts = Array.from(systemAlerts.values());
+      const where: Parameters<typeof prisma.systemAlert.findMany>[0]['where'] = {};
 
       if (request.query.propertyId) {
-        alerts = alerts.filter((a) => a.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.systemId) {
-        alerts = alerts.filter((a) => a.systemId === request.query.systemId);
+        where.systemId = request.query.systemId;
       }
       if (request.query.severity) {
-        alerts = alerts.filter((a) => a.severity === request.query.severity);
+        where.severity = request.query.severity;
       }
       if (request.query.status) {
-        alerts = alerts.filter((a) => a.status === request.query.status);
+        where.status = request.query.status;
       }
-      if (request.query.startDate) {
-        alerts = alerts.filter((a) => a.triggeredAt >= request.query.startDate!);
-      }
-      if (request.query.endDate) {
-        alerts = alerts.filter((a) => a.triggeredAt <= request.query.endDate!);
+      if (request.query.startDate || request.query.endDate) {
+        where.triggeredAt = {
+          ...(request.query.startDate && { gte: new Date(request.query.startDate) }),
+          ...(request.query.endDate && { lte: new Date(request.query.endDate) }),
+        };
       }
 
-      return reply.send(alerts.sort((a, b) => b.triggeredAt.localeCompare(a.triggeredAt)));
+      const alerts = await prisma.systemAlert.findMany({
+        where,
+        orderBy: { triggeredAt: 'desc' },
+      });
+
+      return reply.send(alerts);
     }
   );
 
@@ -970,20 +893,24 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const alert = systemAlerts.get(request.params.id);
+      const alert = await prisma.systemAlert.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!alert) {
         return reply.status(404).send({ error: 'Alert not found' });
       }
 
-      const now = new Date().toISOString();
+      const updated = await prisma.systemAlert.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'acknowledged',
+          acknowledgedAt: new Date(),
+          acknowledgedBy: request.body.acknowledgedBy,
+        },
+      });
 
-      alert.status = 'acknowledged';
-      alert.acknowledgedAt = now;
-      alert.acknowledgedBy = request.body.acknowledgedBy;
-      alert.updatedAt = now;
-
-      systemAlerts.set(alert.id, alert);
-      return reply.send(alert);
+      return reply.send(updated);
     }
   );
 
@@ -997,21 +924,25 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const alert = systemAlerts.get(request.params.id);
+      const alert = await prisma.systemAlert.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!alert) {
         return reply.status(404).send({ error: 'Alert not found' });
       }
 
-      const now = new Date().toISOString();
+      const updated = await prisma.systemAlert.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'resolved',
+          resolvedAt: new Date(),
+          resolvedBy: request.body.resolvedBy,
+          resolution: request.body.resolution,
+        },
+      });
 
-      alert.status = 'resolved';
-      alert.resolvedAt = now;
-      alert.resolvedBy = request.body.resolvedBy;
-      alert.resolution = request.body.resolution;
-      alert.updatedAt = now;
-
-      systemAlerts.set(alert.id, alert);
-      return reply.send(alert);
+      return reply.send(updated);
     }
   );
 
@@ -1027,17 +958,25 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = MaintenanceSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const maintenance: MaintenanceSchedule = {
-        id: `mnt_${Date.now()}`,
-        ...data,
-        status: 'scheduled',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const maintenance = await prisma.systemMaintenanceSchedule.create({
+        data: {
+          propertyId: data.propertyId,
+          systemId: data.systemId,
+          type: data.type as SystemMaintenanceType,
+          status: 'scheduled',
+          title: data.title,
+          description: data.description,
+          scheduledDate: new Date(data.scheduledDate),
+          assignedTo: data.assignedTo,
+          vendorId: data.vendorId,
+          estimatedDuration: data.estimatedDuration,
+          parts: data.parts,
+          checklist: data.checklist,
+          recurrence: data.recurrence,
+        },
+      });
 
-      maintenanceSchedules.set(maintenance.id, maintenance);
       return reply.status(201).send(maintenance);
     }
   );
@@ -1050,35 +989,36 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
         Querystring: {
           propertyId?: string;
           systemId?: string;
-          type?: MaintenanceType;
-          status?: MaintenanceStatus;
+          type?: SystemMaintenanceType;
+          status?: SystemMaintenanceStatus;
           startDate?: string;
           endDate?: string;
         };
       }>,
       reply
     ) => {
-      let maintenance = Array.from(maintenanceSchedules.values());
+      const where: Parameters<typeof prisma.systemMaintenanceSchedule.findMany>[0]['where'] = {};
 
       if (request.query.propertyId) {
-        maintenance = maintenance.filter((m) => m.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.systemId) {
-        maintenance = maintenance.filter((m) => m.systemId === request.query.systemId);
+        where.systemId = request.query.systemId;
       }
       if (request.query.type) {
-        maintenance = maintenance.filter((m) => m.type === request.query.type);
+        where.type = request.query.type;
       }
       if (request.query.status) {
-        maintenance = maintenance.filter((m) => m.status === request.query.status);
+        where.status = request.query.status;
       }
-      if (request.query.startDate) {
-        maintenance = maintenance.filter((m) => m.scheduledDate >= request.query.startDate!);
-      }
-      if (request.query.endDate) {
-        maintenance = maintenance.filter((m) => m.scheduledDate <= request.query.endDate!);
+      if (request.query.startDate || request.query.endDate) {
+        where.scheduledDate = {
+          ...(request.query.startDate && { gte: new Date(request.query.startDate) }),
+          ...(request.query.endDate && { lte: new Date(request.query.endDate) }),
+        };
       }
 
+      const maintenance = await prisma.systemMaintenanceSchedule.findMany({ where });
       return reply.send(maintenance);
     }
   );
@@ -1090,7 +1030,7 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       request: FastifyRequest<{ Querystring: { propertyId: string } }>,
       reply
     ) => {
-      const summary = getMaintenanceSummary(request.query.propertyId);
+      const summary = await getMaintenanceSummary(request.query.propertyId);
       return reply.send(summary);
     }
   );
@@ -1099,26 +1039,27 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/maintenance/:id/start',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const maintenance = maintenanceSchedules.get(request.params.id);
+      const maintenance = await prisma.systemMaintenanceSchedule.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!maintenance) {
         return reply.status(404).send({ error: 'Maintenance not found' });
       }
 
-      const now = new Date().toISOString();
-
-      maintenance.status = 'in_progress';
-      maintenance.updatedAt = now;
+      // Update maintenance status
+      const updated = await prisma.systemMaintenanceSchedule.update({
+        where: { id: request.params.id },
+        data: { status: 'in_progress' },
+      });
 
       // Update system status
-      const system = buildingSystems.get(maintenance.systemId);
-      if (system) {
-        system.status = 'maintenance';
-        system.updatedAt = now;
-        buildingSystems.set(system.id, system);
-      }
+      await prisma.buildingSystem.update({
+        where: { id: maintenance.systemId },
+        data: { status: 'maintenance' },
+      });
 
-      maintenanceSchedules.set(maintenance.id, maintenance);
-      return reply.send(maintenance);
+      return reply.send(updated);
     }
   );
 
@@ -1132,41 +1073,52 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const maintenance = maintenanceSchedules.get(request.params.id);
+      const maintenance = await prisma.systemMaintenanceSchedule.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!maintenance) {
         return reply.status(404).send({ error: 'Maintenance not found' });
       }
 
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      maintenance.status = 'completed';
-      maintenance.completedDate = now;
-      maintenance.actualDuration = request.body.actualDuration;
-      maintenance.cost = request.body.cost;
-      if (request.body.notes) {
-        maintenance.notes = request.body.notes;
-      }
-      maintenance.updatedAt = now;
+      // Update maintenance
+      const updated = await prisma.systemMaintenanceSchedule.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'completed',
+          completedDate: now,
+          actualDuration: request.body.actualDuration,
+          cost: request.body.cost,
+          notes: request.body.notes,
+        },
+      });
 
       // Update system
-      const system = buildingSystems.get(maintenance.systemId);
-      if (system) {
-        system.status = 'online';
-        system.lastMaintenanceDate = now.split('T')[0];
+      const system = await prisma.buildingSystem.findUnique({
+        where: { id: maintenance.systemId },
+      });
 
-        // Calculate next maintenance date
+      if (system) {
+        let nextServiceDate: Date | undefined;
         if (system.maintenanceIntervalDays) {
           const nextMaint = new Date();
           nextMaint.setDate(nextMaint.getDate() + system.maintenanceIntervalDays);
-          system.nextMaintenanceDate = nextMaint.toISOString().split('T')[0];
+          nextServiceDate = nextMaint;
         }
 
-        system.updatedAt = now;
-        buildingSystems.set(system.id, system);
+        await prisma.buildingSystem.update({
+          where: { id: maintenance.systemId },
+          data: {
+            status: 'operational',
+            lastServiceDate: now,
+            nextServiceDate,
+          },
+        });
       }
 
-      maintenanceSchedules.set(maintenance.id, maintenance);
-      return reply.send(maintenance);
+      return reply.send(updated);
     }
   );
 
@@ -1182,15 +1134,23 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = EnergyUsageSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const usage: EnergyUsage = {
-        id: `eng_${Date.now()}`,
-        ...data,
-        createdAt: now,
-      };
+      const usage = await prisma.energyUsage.create({
+        data: {
+          propertyId: data.propertyId,
+          systemId: data.systemId,
+          utilityType: data.utilityType as UtilityType,
+          period: data.period as EnergyPeriod,
+          startTime: new Date(data.startTime),
+          endTime: new Date(data.endTime),
+          consumption: data.consumption,
+          unit: data.unit,
+          cost: data.cost,
+          peakDemand: data.peakDemand,
+          averageLoad: data.averageLoad,
+        },
+      });
 
-      energyUsages.set(usage.id, usage);
       return reply.status(201).send(usage);
     }
   );
@@ -1204,7 +1164,7 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const stats = calculateEnergyStats(
+      const stats = await calculateEnergyStats(
         request.query.propertyId,
         request.query.startDate,
         request.query.endDate
@@ -1221,35 +1181,36 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
         Querystring: {
           propertyId?: string;
           systemId?: string;
-          utilityType?: string;
-          period?: string;
+          utilityType?: UtilityType;
+          period?: EnergyPeriod;
           startDate?: string;
           endDate?: string;
         };
       }>,
       reply
     ) => {
-      let usage = Array.from(energyUsages.values());
+      const where: Parameters<typeof prisma.energyUsage.findMany>[0]['where'] = {};
 
       if (request.query.propertyId) {
-        usage = usage.filter((u) => u.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.systemId) {
-        usage = usage.filter((u) => u.systemId === request.query.systemId);
+        where.systemId = request.query.systemId;
       }
       if (request.query.utilityType) {
-        usage = usage.filter((u) => u.utilityType === request.query.utilityType);
+        where.utilityType = request.query.utilityType;
       }
       if (request.query.period) {
-        usage = usage.filter((u) => u.period === request.query.period);
+        where.period = request.query.period;
       }
       if (request.query.startDate) {
-        usage = usage.filter((u) => u.startTime >= request.query.startDate!);
+        where.startTime = { gte: new Date(request.query.startDate) };
       }
       if (request.query.endDate) {
-        usage = usage.filter((u) => u.endTime <= request.query.endDate!);
+        where.endTime = { lte: new Date(request.query.endDate) };
       }
 
+      const usage = await prisma.energyUsage.findMany({ where });
       return reply.send(usage);
     }
   );
@@ -1266,26 +1227,33 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = DowntimeSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const system = buildingSystems.get(data.systemId);
+      const system = await prisma.buildingSystem.findUnique({
+        where: { id: data.systemId },
+      });
+
       if (!system) {
         return reply.status(404).send({ error: 'System not found' });
       }
 
-      const downtime: SystemDowntime = {
-        id: `dwn_${Date.now()}`,
-        ...data,
-        propertyId: system.propertyId,
-        createdAt: now,
-      };
+      const downtime = await prisma.systemDowntime.create({
+        data: {
+          systemId: data.systemId,
+          propertyId: system.propertyId,
+          reason: data.reason as DowntimeReason,
+          startTime: new Date(data.startTime),
+          impact: data.impact as DowntimeImpact,
+          affectedUnits: data.affectedUnits || [],
+          notes: data.notes,
+        },
+      });
 
       // Update system status
-      system.status = 'offline';
-      system.updatedAt = now;
-      buildingSystems.set(system.id, system);
+      await prisma.buildingSystem.update({
+        where: { id: data.systemId },
+        data: { status: 'offline' },
+      });
 
-      systemDowntimes.set(downtime.id, downtime);
       return reply.status(201).send(downtime);
     }
   );
@@ -1300,31 +1268,35 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const downtime = systemDowntimes.get(request.params.id);
+      const downtime = await prisma.systemDowntime.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!downtime) {
         return reply.status(404).send({ error: 'Downtime record not found' });
       }
 
       const now = new Date();
-
-      downtime.endTime = now.toISOString();
-      downtime.duration = Math.floor(
+      const duration = Math.floor(
         (now.getTime() - new Date(downtime.startTime).getTime()) / (1000 * 60)
       );
-      if (request.body.notes) {
-        downtime.notes = request.body.notes;
-      }
+
+      const updated = await prisma.systemDowntime.update({
+        where: { id: request.params.id },
+        data: {
+          endTime: now,
+          duration,
+          notes: request.body.notes || downtime.notes,
+        },
+      });
 
       // Restore system status
-      const system = buildingSystems.get(downtime.systemId);
-      if (system) {
-        system.status = 'online';
-        system.updatedAt = now.toISOString();
-        buildingSystems.set(system.id, system);
-      }
+      await prisma.buildingSystem.update({
+        where: { id: downtime.systemId },
+        data: { status: 'operational' },
+      });
 
-      systemDowntimes.set(downtime.id, downtime);
-      return reply.send(downtime);
+      return reply.send(updated);
     }
   );
 
@@ -1333,28 +1305,29 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
     '/downtime',
     async (
       request: FastifyRequest<{
-        Querystring: { systemId?: string; propertyId?: string; reason?: string; startDate?: string; endDate?: string };
+        Querystring: { systemId?: string; propertyId?: string; reason?: DowntimeReason; startDate?: string; endDate?: string };
       }>,
       reply
     ) => {
-      let downtimes = Array.from(systemDowntimes.values());
+      const where: Parameters<typeof prisma.systemDowntime.findMany>[0]['where'] = {};
 
       if (request.query.systemId) {
-        downtimes = downtimes.filter((d) => d.systemId === request.query.systemId);
+        where.systemId = request.query.systemId;
       }
       if (request.query.propertyId) {
-        downtimes = downtimes.filter((d) => d.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.reason) {
-        downtimes = downtimes.filter((d) => d.reason === request.query.reason);
+        where.reason = request.query.reason;
       }
-      if (request.query.startDate) {
-        downtimes = downtimes.filter((d) => d.startTime >= request.query.startDate!);
-      }
-      if (request.query.endDate) {
-        downtimes = downtimes.filter((d) => d.startTime <= request.query.endDate!);
+      if (request.query.startDate || request.query.endDate) {
+        where.startTime = {
+          ...(request.query.startDate && { gte: new Date(request.query.startDate) }),
+          ...(request.query.endDate && { lte: new Date(request.query.endDate) }),
+        };
       }
 
+      const downtimes = await prisma.systemDowntime.findMany({ where });
       return reply.send(downtimes);
     }
   );
@@ -1371,18 +1344,29 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = AlertRuleSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const rule: AlertRule = {
-        id: `arl_${Date.now()}`,
-        ...data,
-        isActive: true,
-        triggerCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const rule = await prisma.alertRule.create({
+        data: {
+          propertyId: data.propertyId,
+          name: data.name,
+          description: data.description,
+          isActive: true,
+          systemType: data.systemType as BuildingSystemType | undefined,
+          sensorType: data.sensorType as SensorType | undefined,
+          conditionMetric: data.condition.metric,
+          conditionOperator: data.condition.operator as RuleOperator,
+          conditionValue: data.condition.value,
+          conditionValue2: data.condition.value2,
+          conditionDuration: data.condition.duration,
+          severity: data.severity as SystemAlertSeverity,
+          notifyChannels: data.notifications.channels,
+          notifyRecipients: data.notifications.recipients,
+          escalationMinutes: data.notifications.escalationMinutes,
+          cooldownMinutes: data.cooldownMinutes,
+          triggerCount: 0,
+        },
+      });
 
-      alertRules.set(rule.id, rule);
       return reply.status(201).send(rule);
     }
   );
@@ -1396,16 +1380,16 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let rules = Array.from(alertRules.values());
+      const where: Parameters<typeof prisma.alertRule.findMany>[0]['where'] = {};
 
       if (request.query.propertyId) {
-        rules = rules.filter((r) => r.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.isActive !== undefined) {
-        const active = request.query.isActive === 'true';
-        rules = rules.filter((r) => r.isActive === active);
+        where.isActive = request.query.isActive === 'true';
       }
 
+      const rules = await prisma.alertRule.findMany({ where });
       return reply.send(rules);
     }
   );
@@ -1414,16 +1398,20 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/alert-rules/:id/toggle',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const rule = alertRules.get(request.params.id);
+      const rule = await prisma.alertRule.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!rule) {
         return reply.status(404).send({ error: 'Alert rule not found' });
       }
 
-      rule.isActive = !rule.isActive;
-      rule.updatedAt = new Date().toISOString();
+      const updated = await prisma.alertRule.update({
+        where: { id: request.params.id },
+        data: { isActive: !rule.isActive },
+      });
 
-      alertRules.set(rule.id, rule);
-      return reply.send(rule);
+      return reply.send(updated);
     }
   );
 
@@ -1431,11 +1419,18 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
   app.delete(
     '/alert-rules/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      if (!alertRules.has(request.params.id)) {
+      const rule = await prisma.alertRule.findUnique({
+        where: { id: request.params.id },
+      });
+
+      if (!rule) {
         return reply.status(404).send({ error: 'Alert rule not found' });
       }
 
-      alertRules.delete(request.params.id);
+      await prisma.alertRule.delete({
+        where: { id: request.params.id },
+      });
+
       return reply.send({ message: 'Alert rule deleted' });
     }
   );

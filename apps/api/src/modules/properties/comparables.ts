@@ -5,7 +5,7 @@
  * Provides rent estimation, market analysis, and pricing recommendations.
  */
 
-import { prisma } from '@realriches/database';
+import { prisma, Prisma } from '@realriches/database';
 import { generatePrefixedId, logger, AppError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -396,10 +396,16 @@ function getProvider(provider: ComparableProvider): IComparableProvider {
 }
 
 // =============================================================================
-// In-Memory Storage
+// Helper Functions
 // =============================================================================
 
-const comparableSearches = new Map<string, ComparableSearch>();
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
 
 // =============================================================================
 // Schemas
@@ -487,23 +493,21 @@ export async function comparableRoutes(app: FastifyInstance): Promise<void> {
         .sort((a, b) => a.distance - b.distance)
         .slice(0, data.limit);
 
-      // Store search
-      const search: ComparableSearch = {
-        id: generatePrefixedId('csr'),
-        userId: request.user.id,
-        address: data.address,
-        city: data.city,
-        state: data.state,
-        zip: data.zip,
-        bedrooms: data.bedrooms,
-        bathrooms: data.bathrooms,
-        sqft: data.sqft,
-        radius: data.radius,
-        comparables: uniqueComparables,
-        searchedAt: new Date(),
-      };
-
-      comparableSearches.set(search.id, search);
+      // Store search in database
+      const search = await prisma.comparableSearch.create({
+        data: {
+          userId: request.user.id,
+          address: data.address,
+          city: data.city,
+          state: data.state,
+          zip: data.zip,
+          bedrooms: data.bedrooms,
+          bathrooms: data.bathrooms,
+          sqft: data.sqft,
+          radius: data.radius,
+          comparables: uniqueComparables as unknown as Prisma.JsonValue,
+        },
+      });
 
       logger.info({
         searchId: search.id,
@@ -695,7 +699,7 @@ export async function comparableRoutes(app: FastifyInstance): Promise<void> {
         address: property.address,
         city: property.city,
         state: property.state,
-        zip: property.zip,
+        zip: property.postalCode,
         bedrooms: searchBedrooms,
         bathrooms: searchBathrooms,
         radius,
@@ -707,10 +711,10 @@ export async function comparableRoutes(app: FastifyInstance): Promise<void> {
         address: property.address,
         city: property.city,
         state: property.state,
-        zip: property.zip,
+        zip: property.postalCode,
         bedrooms: searchBedrooms,
         bathrooms: searchBathrooms,
-        sqft: unit?.sqft || undefined,
+        sqft: unit?.squareFeet || undefined,
       });
 
       return reply.send({
@@ -767,20 +771,22 @@ export async function comparableRoutes(app: FastifyInstance): Promise<void> {
 
       const { limit = 10 } = request.query;
 
-      const searches = Array.from(comparableSearches.values())
-        .filter(s => s.userId === request.user!.id)
-        .sort((a, b) => b.searchedAt.getTime() - a.searchedAt.getTime())
-        .slice(0, limit)
-        .map(s => ({
-          id: s.id,
-          address: s.address,
-          city: s.city,
-          state: s.state,
-          bedrooms: s.bedrooms,
-          bathrooms: s.bathrooms,
-          comparablesFound: s.comparables.length,
-          searchedAt: s.searchedAt.toISOString(),
-        }));
+      const dbSearches = await prisma.comparableSearch.findMany({
+        where: { userId: request.user.id },
+        orderBy: { searchedAt: 'desc' },
+        take: limit,
+      });
+
+      const searches = dbSearches.map(s => ({
+        id: s.id,
+        address: s.address,
+        city: s.city,
+        state: s.state,
+        bedrooms: s.bedrooms,
+        bathrooms: s.bathrooms,
+        comparablesFound: (s.comparables as unknown as PropertyComparable[])?.length || 0,
+        searchedAt: s.searchedAt.toISOString(),
+      }));
 
       return reply.send({
         success: true,
@@ -814,11 +820,30 @@ export async function comparableRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { searchId } = request.params;
-      const search = comparableSearches.get(searchId);
+      const searchRecord = await prisma.comparableSearch.findUnique({
+        where: { id: searchId },
+      });
 
-      if (!search || search.userId !== request.user.id) {
+      if (!searchRecord || searchRecord.userId !== request.user.id) {
         throw new AppError('NOT_FOUND', 'Search not found', 404);
       }
+
+      const search: ComparableSearch = {
+        id: searchRecord.id,
+        userId: searchRecord.userId,
+        propertyId: searchRecord.propertyId ?? undefined,
+        address: searchRecord.address,
+        city: searchRecord.city,
+        state: searchRecord.state,
+        zip: searchRecord.zip,
+        bedrooms: searchRecord.bedrooms,
+        bathrooms: searchRecord.bathrooms,
+        sqft: searchRecord.sqft ?? undefined,
+        radius: toNumber(searchRecord.radius),
+        comparables: searchRecord.comparables as unknown as PropertyComparable[],
+        rentEstimate: searchRecord.rentEstimate as unknown as RentEstimate | undefined,
+        searchedAt: searchRecord.searchedAt,
+      };
 
       return reply.send({
         success: true,
@@ -954,7 +979,6 @@ export async function comparableRoutes(app: FastifyInstance): Promise<void> {
 // =============================================================================
 
 export {
-  comparableSearches,
   getProvider,
   MockComparableProvider,
   ZillowProvider,

@@ -1,170 +1,34 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-
-// ============================================================================
-// Types
-// ============================================================================
-
-export type PetType = 'dog' | 'cat' | 'bird' | 'fish' | 'reptile' | 'small_mammal' | 'other';
-export type PetStatus = 'pending_approval' | 'approved' | 'denied' | 'removed';
-export type VaccinationType = 'rabies' | 'distemper' | 'parvo' | 'bordetella' | 'feline_leukemia' | 'other';
-export type IncidentSeverity = 'minor' | 'moderate' | 'severe';
-export type IncidentType = 'noise' | 'aggression' | 'property_damage' | 'waste' | 'off_leash' | 'other';
-
-export interface Pet {
-  id: string;
-  leaseId: string;
-  propertyId: string;
-  tenantId: string;
-  name: string;
-  type: PetType;
-  breed: string;
-  weight: number; // in pounds
-  age: number; // in years
-  color: string;
-  isServiceAnimal: boolean;
-  isEmotionalSupport: boolean;
-  microchipNumber?: string;
-  licenseNumber?: string;
-  veterinarian?: {
-    name: string;
-    phone: string;
-    address: string;
-  };
-  photoUrl?: string;
-  status: PetStatus;
-  denialReason?: string;
-  registrationDate: string;
-  approvalDate?: string;
-  removalDate?: string;
-  removalReason?: string;
-  notes?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface BreedRestriction {
-  id: string;
-  propertyId: string;
-  petType: PetType;
-  breed: string;
-  reason: string;
-  createdAt: string;
-}
-
-export interface PetPolicy {
-  id: string;
-  propertyId: string;
-  maxPets: number;
-  allowedTypes: PetType[];
-  maxWeight: number; // in pounds
-  petDeposit: number;
-  monthlyPetRent: number;
-  oneTimePetFee: number;
-  serviceAnimalExempt: boolean;
-  emotionalSupportExempt: boolean;
-  requiresVaccinations: boolean;
-  requiresLicense: boolean;
-  requiresInsurance: boolean;
-  insuranceMinCoverage: number;
-  restrictedBreeds: string[];
-  additionalRules?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface VaccinationRecord {
-  id: string;
-  petId: string;
-  type: VaccinationType;
-  vaccineName: string;
-  administeredDate: string;
-  expirationDate: string;
-  veterinarianName: string;
-  verified: boolean;
-  verifiedBy?: string;
-  verifiedAt?: string;
-  documentUrl?: string;
-  createdAt: string;
-}
-
-export interface PetIncident {
-  id: string;
-  petId: string;
-  propertyId: string;
-  reportedBy: string;
-  incidentType: IncidentType;
-  severity: IncidentSeverity;
-  description: string;
-  incidentDate: string;
-  location: string;
-  witnesses?: string[];
-  actionTaken?: string;
-  fineAmount?: number;
-  finePaid: boolean;
-  resolved: boolean;
-  resolutionNotes?: string;
-  resolvedAt?: string;
-  createdAt: string;
-}
-
-export interface PetScreening {
-  id: string;
-  petId: string;
-  screeningDate: string;
-  provider: string;
-  score: number; // 0-100 FIDO score style
-  riskLevel: 'low' | 'medium' | 'high';
-  breedVerified: boolean;
-  vaccinationsVerified: boolean;
-  behaviorAssessment: string;
-  recommendations: string[];
-  documentUrl?: string;
-  createdAt: string;
-}
-
-export interface PetFee {
-  id: string;
-  petId: string;
-  leaseId: string;
-  feeType: 'deposit' | 'monthly_rent' | 'one_time' | 'violation_fine';
-  amount: number;
-  dueDate: string;
-  paidDate?: string;
-  status: 'pending' | 'paid' | 'waived' | 'refunded';
-  waivedReason?: string;
-  notes?: string;
-  createdAt: string;
-}
-
-// ============================================================================
-// In-Memory Storage (placeholder for Prisma)
-// ============================================================================
-
-export const pets = new Map<string, Pet>();
-export const breedRestrictions = new Map<string, BreedRestriction>();
-export const petPolicies = new Map<string, PetPolicy>();
-export const vaccinationRecords = new Map<string, VaccinationRecord>();
-export const petIncidents = new Map<string, PetIncident>();
-export const petScreenings = new Map<string, PetScreening>();
-export const petFees = new Map<string, PetFee>();
+import {
+  prisma,
+  type PetType,
+  type PetStatus,
+  type VaccinationType,
+  type PetIncidentType,
+  type PetIncidentSeverity,
+  type PetFeeType,
+  type PetFeeStatus,
+  type PetScreeningRiskLevel,
+} from '@realriches/database';
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-export function checkBreedRestriction(
+export async function checkBreedRestriction(
   propertyId: string,
   petType: PetType,
   breed: string
-): { restricted: boolean; reason?: string } {
-  const restrictions = Array.from(breedRestrictions.values()).filter(
-    (r) => r.propertyId === propertyId && r.petType === petType
-  );
+): Promise<{ restricted: boolean; reason?: string }> {
+  const restrictions = await prisma.breedRestriction.findMany({
+    where: { propertyId, petType },
+  });
 
   const normalizedBreed = breed.toLowerCase();
-  const matchingRestriction = restrictions.find((r) =>
-    normalizedBreed.includes(r.breed.toLowerCase()) || r.breed.toLowerCase().includes(normalizedBreed)
+  const matchingRestriction = restrictions.find(
+    (r) =>
+      normalizedBreed.includes(r.breed.toLowerCase()) || r.breed.toLowerCase().includes(normalizedBreed)
   );
 
   if (matchingRestriction) {
@@ -174,9 +38,55 @@ export function checkBreedRestriction(
   return { restricted: false };
 }
 
+interface PetPolicyData {
+  allowedTypes: PetType[];
+  maxWeight: number;
+  restrictedBreeds: string[];
+  serviceAnimalExempt: boolean;
+  emotionalSupportExempt: boolean;
+  petDeposit: number;
+  monthlyPetRent: number;
+  oneTimePetFee: number;
+  maxPets: number;
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
+
+interface PrismaPetPolicy {
+  allowedTypes: PetType[];
+  maxWeight: number;
+  restrictedBreeds: string[];
+  serviceAnimalExempt: boolean;
+  emotionalSupportExempt: boolean;
+  petDeposit: unknown;
+  monthlyPetRent: unknown;
+  oneTimePetFee: unknown;
+  maxPets: number;
+}
+
+function toPetPolicyData(policy: PrismaPetPolicy): PetPolicyData {
+  return {
+    allowedTypes: policy.allowedTypes,
+    maxWeight: policy.maxWeight,
+    restrictedBreeds: policy.restrictedBreeds,
+    serviceAnimalExempt: policy.serviceAnimalExempt,
+    emotionalSupportExempt: policy.emotionalSupportExempt,
+    petDeposit: toNumber(policy.petDeposit),
+    monthlyPetRent: toNumber(policy.monthlyPetRent),
+    oneTimePetFee: toNumber(policy.oneTimePetFee),
+    maxPets: policy.maxPets,
+  };
+}
+
 export function validatePetAgainstPolicy(
-  pet: Partial<Pet>,
-  policy: PetPolicy
+  pet: { type?: PetType; weight?: number; breed?: string; isServiceAnimal?: boolean; isEmotionalSupport?: boolean },
+  policy: PetPolicyData
 ): { valid: boolean; violations: string[] } {
   const violations: string[] = [];
 
@@ -215,7 +125,7 @@ export function validatePetAgainstPolicy(
 }
 
 export function calculatePetFees(
-  policy: PetPolicy,
+  policy: PetPolicyData,
   isServiceAnimal: boolean,
   isEmotionalSupport: boolean
 ): { deposit: number; monthlyRent: number; oneTimeFee: number } {
@@ -234,28 +144,31 @@ export function calculatePetFees(
   };
 }
 
-export function getVaccinationStatus(petId: string): {
+export async function getVaccinationStatus(petId: string): Promise<{
   upToDate: boolean;
-  expired: VaccinationRecord[];
-  expiringSoon: VaccinationRecord[];
+  expired: { id: string; type: VaccinationType; expirationDate: Date }[];
+  expiringSoon: { id: string; type: VaccinationType; expirationDate: Date }[];
   missing: VaccinationType[];
-} {
-  const records = Array.from(vaccinationRecords.values()).filter((r) => r.petId === petId);
+}> {
+  const records = await prisma.vaccinationRecord.findMany({
+    where: { petId },
+  });
+
   const today = new Date();
   const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  const expired: VaccinationRecord[] = [];
-  const expiringSoon: VaccinationRecord[] = [];
+  const expired: { id: string; type: VaccinationType; expirationDate: Date }[] = [];
+  const expiringSoon: { id: string; type: VaccinationType; expirationDate: Date }[] = [];
   const vaccineTypes = new Set<VaccinationType>();
 
   for (const record of records) {
     vaccineTypes.add(record.type);
-    const expDate = new Date(record.expirationDate);
+    const expDate = record.expirationDate;
 
     if (expDate < today) {
-      expired.push(record);
+      expired.push({ id: record.id, type: record.type, expirationDate: expDate });
     } else if (expDate < thirtyDaysFromNow) {
-      expiringSoon.push(record);
+      expiringSoon.push({ id: record.id, type: record.type, expirationDate: expDate });
     }
   }
 
@@ -271,12 +184,17 @@ export function getVaccinationStatus(petId: string): {
   };
 }
 
-export function getIncidentHistory(
-  petId: string
-): { totalIncidents: number; byType: Record<IncidentType, number>; totalFines: number; unpaidFines: number } {
-  const incidents = Array.from(petIncidents.values()).filter((i) => i.petId === petId);
+export async function getIncidentHistory(petId: string): Promise<{
+  totalIncidents: number;
+  byType: Record<PetIncidentType, number>;
+  totalFines: number;
+  unpaidFines: number;
+}> {
+  const incidents = await prisma.petIncident.findMany({
+    where: { petId },
+  });
 
-  const byType: Record<IncidentType, number> = {
+  const byType: Record<PetIncidentType, number> = {
     noise: 0,
     aggression: 0,
     property_damage: 0,
@@ -291,9 +209,10 @@ export function getIncidentHistory(
   for (const incident of incidents) {
     byType[incident.incidentType]++;
     if (incident.fineAmount) {
-      totalFines += incident.fineAmount;
+      const fineNum = toNumber(incident.fineAmount);
+      totalFines += fineNum;
       if (!incident.finePaid) {
-        unpaidFines += incident.fineAmount;
+        unpaidFines += fineNum;
       }
     }
   }
@@ -306,8 +225,8 @@ export function getIncidentHistory(
   };
 }
 
-export function calculateRiskScore(petId: string): { score: number; factors: string[] } {
-  const pet = pets.get(petId);
+export async function calculateRiskScore(petId: string): Promise<{ score: number; factors: string[] }> {
+  const pet = await prisma.pet.findUnique({ where: { id: petId } });
   if (!pet) {
     return { score: 0, factors: ['Pet not found'] };
   }
@@ -316,7 +235,7 @@ export function calculateRiskScore(petId: string): { score: number; factors: str
   const factors: string[] = [];
 
   // Check vaccination status
-  const vaccStatus = getVaccinationStatus(petId);
+  const vaccStatus = await getVaccinationStatus(petId);
   if (!vaccStatus.upToDate) {
     score -= 20;
     factors.push('Vaccinations not up to date');
@@ -327,7 +246,7 @@ export function calculateRiskScore(petId: string): { score: number; factors: str
   }
 
   // Check incident history
-  const incidents = getIncidentHistory(petId);
+  const incidents = await getIncidentHistory(petId);
   if (incidents.totalIncidents > 0) {
     score -= incidents.totalIncidents * 10;
     factors.push(`${incidents.totalIncidents} incident(s) on record`);
@@ -349,14 +268,16 @@ export function calculateRiskScore(petId: string): { score: number; factors: str
   return { score, factors };
 }
 
-export function getPropertyPetCensus(propertyId: string): {
+export async function getPropertyPetCensus(propertyId: string): Promise<{
   totalPets: number;
   byType: Record<PetType, number>;
   byStatus: Record<PetStatus, number>;
   serviceAnimals: number;
   emotionalSupport: number;
-} {
-  const propertyPets = Array.from(pets.values()).filter((p) => p.propertyId === propertyId);
+}> {
+  const propertyPets = await prisma.pet.findMany({
+    where: { propertyId },
+  });
 
   const byType: Record<PetType, number> = {
     dog: 0,
@@ -424,38 +345,53 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const now = new Date().toISOString();
 
-    // Check if policy exists for property
-    const existingPolicy = Array.from(petPolicies.values()).find((p) => p.propertyId === body.propertyId);
+    const policy = await prisma.petPolicy.upsert({
+      where: { propertyId: body.propertyId },
+      update: {
+        maxPets: body.maxPets,
+        allowedTypes: body.allowedTypes,
+        maxWeight: body.maxWeight,
+        petDeposit: body.petDeposit,
+        monthlyPetRent: body.monthlyPetRent,
+        oneTimePetFee: body.oneTimePetFee,
+        serviceAnimalExempt: body.serviceAnimalExempt,
+        emotionalSupportExempt: body.emotionalSupportExempt,
+        requiresVaccinations: body.requiresVaccinations,
+        requiresLicense: body.requiresLicense,
+        requiresInsurance: body.requiresInsurance,
+        insuranceMinCoverage: body.insuranceMinCoverage,
+        restrictedBreeds: body.restrictedBreeds,
+        additionalRules: body.additionalRules,
+      },
+      create: {
+        propertyId: body.propertyId,
+        maxPets: body.maxPets,
+        allowedTypes: body.allowedTypes,
+        maxWeight: body.maxWeight,
+        petDeposit: body.petDeposit,
+        monthlyPetRent: body.monthlyPetRent,
+        oneTimePetFee: body.oneTimePetFee,
+        serviceAnimalExempt: body.serviceAnimalExempt,
+        emotionalSupportExempt: body.emotionalSupportExempt,
+        requiresVaccinations: body.requiresVaccinations,
+        requiresLicense: body.requiresLicense,
+        requiresInsurance: body.requiresInsurance,
+        insuranceMinCoverage: body.insuranceMinCoverage,
+        restrictedBreeds: body.restrictedBreeds,
+        additionalRules: body.additionalRules,
+      },
+    });
 
-    if (existingPolicy) {
-      // Update existing
-      const updated: PetPolicy = {
-        ...existingPolicy,
-        ...body,
-        updatedAt: now,
-      };
-      petPolicies.set(updated.id, updated);
-      return reply.status(200).send(updated);
-    }
-
-    // Create new
-    const policy: PetPolicy = {
-      id: `policy_${Date.now()}`,
-      ...body,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    petPolicies.set(policy.id, policy);
     return reply.status(201).send(policy);
   });
 
   // Get pet policy for property
   app.get('/policies/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const policy = Array.from(petPolicies.values()).find((p) => p.propertyId === propertyId);
+    const policy = await prisma.petPolicy.findUnique({
+      where: { propertyId },
+    });
 
     if (!policy) {
       return reply.status(404).send({ error: 'Pet policy not found for this property' });
@@ -479,20 +415,24 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
 
     const body = schema.parse(request.body);
 
-    const restriction: BreedRestriction = {
-      id: `restriction_${Date.now()}`,
-      ...body,
-      createdAt: new Date().toISOString(),
-    };
+    const restriction = await prisma.breedRestriction.create({
+      data: {
+        propertyId: body.propertyId,
+        petType: body.petType,
+        breed: body.breed,
+        reason: body.reason,
+      },
+    });
 
-    breedRestrictions.set(restriction.id, restriction);
     return reply.status(201).send(restriction);
   });
 
   // List breed restrictions for property
   app.get('/restrictions/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const restrictions = Array.from(breedRestrictions.values()).filter((r) => r.propertyId === propertyId);
+    const restrictions = await prisma.breedRestriction.findMany({
+      where: { propertyId },
+    });
     return reply.send({ restrictions });
   });
 
@@ -500,12 +440,14 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/restrictions/:restrictionId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { restrictionId } = request.params as { restrictionId: string };
 
-    if (!breedRestrictions.has(restrictionId)) {
+    try {
+      await prisma.breedRestriction.delete({
+        where: { id: restrictionId },
+      });
+      return reply.status(204).send();
+    } catch {
       return reply.status(404).send({ error: 'Restriction not found' });
     }
-
-    breedRestrictions.delete(restrictionId);
-    return reply.status(204).send();
   });
 
   // -------------------------------------------------------------------------
@@ -540,10 +482,10 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const now = new Date().toISOString();
+    const now = new Date();
 
     // Check breed restriction
-    const breedCheck = checkBreedRestriction(body.propertyId, body.type, body.breed);
+    const breedCheck = await checkBreedRestriction(body.propertyId, body.type, body.breed);
     if (breedCheck.restricted && !body.isServiceAnimal && !body.isEmotionalSupport) {
       return reply.status(400).send({
         error: 'Breed restricted',
@@ -552,9 +494,14 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Validate against policy if exists
-    const policy = Array.from(petPolicies.values()).find((p) => p.propertyId === body.propertyId);
+    const policy = await prisma.petPolicy.findUnique({
+      where: { propertyId: body.propertyId },
+    });
+
+    let policyData: PetPolicyData | null = null;
     if (policy) {
-      const validation = validatePetAgainstPolicy(body, policy);
+      policyData = toPetPolicyData(policy);
+      const validation = validatePetAgainstPolicy(body, policyData);
       if (!validation.valid) {
         return reply.status(400).send({
           error: 'Pet does not meet property policy',
@@ -563,14 +510,18 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Check max pets for tenant
-      const tenantPets = Array.from(pets.values()).filter(
-        (p) => p.tenantId === body.tenantId && p.leaseId === body.leaseId && p.status === 'approved'
-      );
-      if (tenantPets.length >= policy.maxPets && !body.isServiceAnimal && !body.isEmotionalSupport) {
+      const tenantPetCount = await prisma.pet.count({
+        where: {
+          tenantId: body.tenantId,
+          leaseId: body.leaseId,
+          status: 'approved',
+        },
+      });
+      if (tenantPetCount >= policy.maxPets && !body.isServiceAnimal && !body.isEmotionalSupport) {
         return reply.status(400).send({
           error: 'Maximum pet limit reached',
           maxPets: policy.maxPets,
-          currentPets: tenantPets.length,
+          currentPets: tenantPetCount,
         });
       }
     }
@@ -579,48 +530,60 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     const status: PetStatus =
       body.isServiceAnimal || body.isEmotionalSupport ? 'approved' : 'pending_approval';
 
-    const pet: Pet = {
-      id: `pet_${Date.now()}`,
-      ...body,
-      status,
-      registrationDate: now,
-      approvalDate: status === 'approved' ? now : undefined,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    pets.set(pet.id, pet);
+    const pet = await prisma.pet.create({
+      data: {
+        leaseId: body.leaseId,
+        propertyId: body.propertyId,
+        tenantId: body.tenantId,
+        name: body.name,
+        type: body.type,
+        breed: body.breed,
+        weight: body.weight,
+        age: body.age,
+        color: body.color,
+        isServiceAnimal: body.isServiceAnimal,
+        isEmotionalSupport: body.isEmotionalSupport,
+        microchipNumber: body.microchipNumber,
+        licenseNumber: body.licenseNumber,
+        vetName: body.veterinarian?.name,
+        vetPhone: body.veterinarian?.phone,
+        vetAddress: body.veterinarian?.address,
+        photoUrl: body.photoUrl,
+        status,
+        registrationDate: now,
+        approvalDate: status === 'approved' ? now : undefined,
+        notes: body.notes,
+      },
+    });
 
     // Create pet fees if applicable
-    if (policy && status === 'approved') {
-      const fees = calculatePetFees(policy, body.isServiceAnimal, body.isEmotionalSupport);
+    if (policyData && status === 'approved') {
+      const fees = calculatePetFees(policyData, body.isServiceAnimal, body.isEmotionalSupport);
 
       if (fees.deposit > 0) {
-        const depositFee: PetFee = {
-          id: `petfee_${Date.now()}_deposit`,
-          petId: pet.id,
-          leaseId: body.leaseId,
-          feeType: 'deposit',
-          amount: fees.deposit,
-          dueDate: now,
-          status: 'pending',
-          createdAt: now,
-        };
-        petFees.set(depositFee.id, depositFee);
+        await prisma.petFee.create({
+          data: {
+            petId: pet.id,
+            leaseId: body.leaseId,
+            feeType: 'deposit',
+            amount: fees.deposit,
+            dueDate: now,
+            status: 'pending',
+          },
+        });
       }
 
       if (fees.oneTimeFee > 0) {
-        const oneTimeFee: PetFee = {
-          id: `petfee_${Date.now()}_onetime`,
-          petId: pet.id,
-          leaseId: body.leaseId,
-          feeType: 'one_time',
-          amount: fees.oneTimeFee,
-          dueDate: now,
-          status: 'pending',
-          createdAt: now,
-        };
-        petFees.set(oneTimeFee.id, oneTimeFee);
+        await prisma.petFee.create({
+          data: {
+            petId: pet.id,
+            leaseId: body.leaseId,
+            feeType: 'one_time',
+            amount: fees.oneTimeFee,
+            dueDate: now,
+            status: 'pending',
+          },
+        });
       }
     }
 
@@ -630,16 +593,18 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   // Get pet by ID
   app.get('/:petId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { petId } = request.params as { petId: string };
-    const pet = pets.get(petId);
+    const pet = await prisma.pet.findUnique({
+      where: { id: petId },
+    });
 
     if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
     }
 
     // Include additional details
-    const vaccStatus = getVaccinationStatus(petId);
-    const incidentHistory = getIncidentHistory(petId);
-    const riskScore = calculateRiskScore(petId);
+    const vaccStatus = await getVaccinationStatus(petId);
+    const incidentHistory = await getIncidentHistory(petId);
+    const riskScore = await calculateRiskScore(petId);
 
     return reply.send({
       ...pet,
@@ -660,31 +625,26 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const query = schema.parse(request.query);
-    let result = Array.from(pets.values());
 
-    if (query.propertyId) {
-      result = result.filter((p) => p.propertyId === query.propertyId);
-    }
-    if (query.tenantId) {
-      result = result.filter((p) => p.tenantId === query.tenantId);
-    }
-    if (query.leaseId) {
-      result = result.filter((p) => p.leaseId === query.leaseId);
-    }
-    if (query.type) {
-      result = result.filter((p) => p.type === query.type);
-    }
-    if (query.status) {
-      result = result.filter((p) => p.status === query.status);
-    }
+    const pets = await prisma.pet.findMany({
+      where: {
+        ...(query.propertyId && { propertyId: query.propertyId }),
+        ...(query.tenantId && { tenantId: query.tenantId }),
+        ...(query.leaseId && { leaseId: query.leaseId }),
+        ...(query.type && { type: query.type }),
+        ...(query.status && { status: query.status }),
+      },
+    });
 
-    return reply.send({ pets: result, total: result.length });
+    return reply.send({ pets, total: pets.length });
   });
 
   // Approve pet registration
   app.post('/:petId/approve', async (request: FastifyRequest, reply: FastifyReply) => {
     const { petId } = request.params as { petId: string };
-    const pet = pets.get(petId);
+    const pet = await prisma.pet.findUnique({
+      where: { id: petId },
+    });
 
     if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
@@ -694,33 +654,35 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Pet is not pending approval' });
     }
 
-    const now = new Date().toISOString();
-    const updated: Pet = {
-      ...pet,
-      status: 'approved',
-      approvalDate: now,
-      updatedAt: now,
-    };
-
-    pets.set(petId, updated);
+    const now = new Date();
+    const updated = await prisma.pet.update({
+      where: { id: petId },
+      data: {
+        status: 'approved',
+        approvalDate: now,
+      },
+    });
 
     // Create pet fees
-    const policy = Array.from(petPolicies.values()).find((p) => p.propertyId === pet.propertyId);
+    const policy = await prisma.petPolicy.findUnique({
+      where: { propertyId: pet.propertyId },
+    });
+
     if (policy) {
-      const fees = calculatePetFees(policy, pet.isServiceAnimal, pet.isEmotionalSupport);
+      const policyData = toPetPolicyData(policy);
+      const fees = calculatePetFees(policyData, pet.isServiceAnimal, pet.isEmotionalSupport);
 
       if (fees.deposit > 0) {
-        const depositFee: PetFee = {
-          id: `petfee_${Date.now()}_deposit`,
-          petId: pet.id,
-          leaseId: pet.leaseId,
-          feeType: 'deposit',
-          amount: fees.deposit,
-          dueDate: now,
-          status: 'pending',
-          createdAt: now,
-        };
-        petFees.set(depositFee.id, depositFee);
+        await prisma.petFee.create({
+          data: {
+            petId: pet.id,
+            leaseId: pet.leaseId,
+            feeType: 'deposit',
+            amount: fees.deposit,
+            dueDate: now,
+            status: 'pending',
+          },
+        });
       }
     }
 
@@ -735,7 +697,9 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const pet = pets.get(petId);
+    const pet = await prisma.pet.findUnique({
+      where: { id: petId },
+    });
 
     if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
@@ -745,14 +709,14 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Pet is not pending approval' });
     }
 
-    const updated: Pet = {
-      ...pet,
-      status: 'denied',
-      denialReason: body.reason,
-      updatedAt: new Date().toISOString(),
-    };
+    const updated = await prisma.pet.update({
+      where: { id: petId },
+      data: {
+        status: 'denied',
+        denialReason: body.reason,
+      },
+    });
 
-    pets.set(petId, updated);
     return reply.send(updated);
   });
 
@@ -764,22 +728,23 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const pet = pets.get(petId);
+    const pet = await prisma.pet.findUnique({
+      where: { id: petId },
+    });
 
     if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
     }
 
-    const now = new Date().toISOString();
-    const updated: Pet = {
-      ...pet,
-      status: 'removed',
-      removalDate: now,
-      removalReason: body.reason,
-      updatedAt: now,
-    };
+    const updated = await prisma.pet.update({
+      where: { id: petId },
+      data: {
+        status: 'removed',
+        removalDate: new Date(),
+        removalReason: body.reason,
+      },
+    });
 
-    pets.set(petId, updated);
     return reply.send(updated);
   });
 
@@ -801,19 +766,24 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
 
     const body = schema.parse(request.body);
 
-    if (!pets.has(petId)) {
+    const pet = await prisma.pet.findUnique({ where: { id: petId } });
+    if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
     }
 
-    const record: VaccinationRecord = {
-      id: `vacc_${Date.now()}`,
-      petId,
-      ...body,
-      verified: false,
-      createdAt: new Date().toISOString(),
-    };
+    const record = await prisma.vaccinationRecord.create({
+      data: {
+        petId,
+        type: body.type,
+        vaccineName: body.vaccineName,
+        administeredDate: new Date(body.administeredDate),
+        expirationDate: new Date(body.expirationDate),
+        veterinarianName: body.veterinarianName,
+        documentUrl: body.documentUrl,
+        verified: false,
+      },
+    });
 
-    vaccinationRecords.set(record.id, record);
     return reply.status(201).send(record);
   });
 
@@ -821,12 +791,15 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   app.get('/:petId/vaccinations', async (request: FastifyRequest, reply: FastifyReply) => {
     const { petId } = request.params as { petId: string };
 
-    if (!pets.has(petId)) {
+    const pet = await prisma.pet.findUnique({ where: { id: petId } });
+    if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
     }
 
-    const records = Array.from(vaccinationRecords.values()).filter((r) => r.petId === petId);
-    const status = getVaccinationStatus(petId);
+    const records = await prisma.vaccinationRecord.findMany({
+      where: { petId },
+    });
+    const status = await getVaccinationStatus(petId);
 
     return reply.send({ records, status });
   });
@@ -839,21 +812,20 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const record = vaccinationRecords.get(vaccinationId);
 
-    if (!record) {
+    try {
+      const updated = await prisma.vaccinationRecord.update({
+        where: { id: vaccinationId },
+        data: {
+          verified: true,
+          verifiedBy: body.verifiedBy,
+          verifiedAt: new Date(),
+        },
+      });
+      return reply.send(updated);
+    } catch {
       return reply.status(404).send({ error: 'Vaccination record not found' });
     }
-
-    const updated: VaccinationRecord = {
-      ...record,
-      verified: true,
-      verifiedBy: body.verifiedBy,
-      verifiedAt: new Date().toISOString(),
-    };
-
-    vaccinationRecords.set(vaccinationId, updated);
-    return reply.send(updated);
   });
 
   // -------------------------------------------------------------------------
@@ -875,38 +847,44 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const pet = pets.get(petId);
+    const pet = await prisma.pet.findUnique({
+      where: { id: petId },
+    });
 
     if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
     }
 
-    const incident: PetIncident = {
-      id: `incident_${Date.now()}`,
-      petId,
-      propertyId: pet.propertyId,
-      ...body,
-      finePaid: false,
-      resolved: false,
-      createdAt: new Date().toISOString(),
-    };
-
-    petIncidents.set(incident.id, incident);
+    const incident = await prisma.petIncident.create({
+      data: {
+        petId,
+        propertyId: pet.propertyId,
+        reportedBy: body.reportedBy,
+        incidentType: body.incidentType,
+        severity: body.severity,
+        description: body.description,
+        incidentDate: new Date(body.incidentDate),
+        location: body.location,
+        witnesses: body.witnesses || [],
+        fineAmount: body.fineAmount,
+        finePaid: false,
+        resolved: false,
+      },
+    });
 
     // Create violation fine fee if applicable
     if (body.fineAmount && body.fineAmount > 0) {
-      const fine: PetFee = {
-        id: `petfee_${Date.now()}_fine`,
-        petId,
-        leaseId: pet.leaseId,
-        feeType: 'violation_fine',
-        amount: body.fineAmount,
-        dueDate: new Date().toISOString(),
-        status: 'pending',
-        notes: `Fine for ${body.incidentType} incident`,
-        createdAt: new Date().toISOString(),
-      };
-      petFees.set(fine.id, fine);
+      await prisma.petFee.create({
+        data: {
+          petId,
+          leaseId: pet.leaseId,
+          feeType: 'violation_fine',
+          amount: body.fineAmount,
+          dueDate: new Date(),
+          status: 'pending',
+          notes: `Fine for ${body.incidentType} incident`,
+        },
+      });
     }
 
     return reply.status(201).send(incident);
@@ -916,12 +894,15 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   app.get('/:petId/incidents', async (request: FastifyRequest, reply: FastifyReply) => {
     const { petId } = request.params as { petId: string };
 
-    if (!pets.has(petId)) {
+    const pet = await prisma.pet.findUnique({ where: { id: petId } });
+    if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
     }
 
-    const incidents = Array.from(petIncidents.values()).filter((i) => i.petId === petId);
-    const history = getIncidentHistory(petId);
+    const incidents = await prisma.petIncident.findMany({
+      where: { petId },
+    });
+    const history = await getIncidentHistory(petId);
 
     return reply.send({ incidents, summary: history });
   });
@@ -935,22 +916,21 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const incident = petIncidents.get(incidentId);
 
-    if (!incident) {
+    try {
+      const updated = await prisma.petIncident.update({
+        where: { id: incidentId },
+        data: {
+          resolved: true,
+          resolutionNotes: body.resolutionNotes,
+          actionTaken: body.actionTaken,
+          resolvedAt: new Date(),
+        },
+      });
+      return reply.send(updated);
+    } catch {
       return reply.status(404).send({ error: 'Incident not found' });
     }
-
-    const updated: PetIncident = {
-      ...incident,
-      resolved: true,
-      resolutionNotes: body.resolutionNotes,
-      actionTaken: body.actionTaken,
-      resolvedAt: new Date().toISOString(),
-    };
-
-    petIncidents.set(incidentId, updated);
-    return reply.send(updated);
   });
 
   // -------------------------------------------------------------------------
@@ -973,19 +953,26 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
 
     const body = schema.parse(request.body);
 
-    if (!pets.has(petId)) {
+    const pet = await prisma.pet.findUnique({ where: { id: petId } });
+    if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
     }
 
-    const screening: PetScreening = {
-      id: `screening_${Date.now()}`,
-      petId,
-      screeningDate: new Date().toISOString(),
-      ...body,
-      createdAt: new Date().toISOString(),
-    };
+    const screening = await prisma.petScreening.create({
+      data: {
+        petId,
+        screeningDate: new Date(),
+        provider: body.provider,
+        score: body.score,
+        riskLevel: body.riskLevel,
+        breedVerified: body.breedVerified,
+        vaccinationsVerified: body.vaccinationsVerified,
+        behaviorAssessment: body.behaviorAssessment,
+        recommendations: body.recommendations,
+        documentUrl: body.documentUrl,
+      },
+    });
 
-    petScreenings.set(screening.id, screening);
     return reply.status(201).send(screening);
   });
 
@@ -993,13 +980,15 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   app.get('/:petId/screening', async (request: FastifyRequest, reply: FastifyReply) => {
     const { petId } = request.params as { petId: string };
 
-    if (!pets.has(petId)) {
+    const pet = await prisma.pet.findUnique({ where: { id: petId } });
+    if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
     }
 
-    const screenings = Array.from(petScreenings.values())
-      .filter((s) => s.petId === petId)
-      .sort((a, b) => new Date(b.screeningDate).getTime() - new Date(a.screeningDate).getTime());
+    const screenings = await prisma.petScreening.findMany({
+      where: { petId },
+      orderBy: { screeningDate: 'desc' },
+    });
 
     return reply.send({ screenings, latest: screenings[0] || null });
   });
@@ -1012,13 +1001,17 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   app.get('/:petId/fees', async (request: FastifyRequest, reply: FastifyReply) => {
     const { petId } = request.params as { petId: string };
 
-    if (!pets.has(petId)) {
+    const pet = await prisma.pet.findUnique({ where: { id: petId } });
+    if (!pet) {
       return reply.status(404).send({ error: 'Pet not found' });
     }
 
-    const fees = Array.from(petFees.values()).filter((f) => f.petId === petId);
-    const totalOwed = fees.filter((f) => f.status === 'pending').reduce((sum, f) => sum + f.amount, 0);
-    const totalPaid = fees.filter((f) => f.status === 'paid').reduce((sum, f) => sum + f.amount, 0);
+    const fees = await prisma.petFee.findMany({
+      where: { petId },
+    });
+
+    const totalOwed = fees.filter((f) => f.status === 'pending').reduce((sum, f) => sum + toNumber(f.amount), 0);
+    const totalPaid = fees.filter((f) => f.status === 'paid').reduce((sum, f) => sum + toNumber(f.amount), 0);
 
     return reply.send({ fees, totalOwed, totalPaid });
   });
@@ -1026,8 +1019,8 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   // Pay fee
   app.post('/fees/:feeId/pay', async (request: FastifyRequest, reply: FastifyReply) => {
     const { feeId } = request.params as { feeId: string };
-    const fee = petFees.get(feeId);
 
+    const fee = await prisma.petFee.findUnique({ where: { id: feeId } });
     if (!fee) {
       return reply.status(404).send({ error: 'Fee not found' });
     }
@@ -1036,21 +1029,28 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Fee is not pending' });
     }
 
-    const updated: PetFee = {
-      ...fee,
-      status: 'paid',
-      paidDate: new Date().toISOString(),
-    };
-
-    petFees.set(feeId, updated);
+    const updated = await prisma.petFee.update({
+      where: { id: feeId },
+      data: {
+        status: 'paid',
+        paidDate: new Date(),
+      },
+    });
 
     // If this is a violation fine, mark incident as fine paid
     if (fee.feeType === 'violation_fine') {
-      const incident = Array.from(petIncidents.values()).find(
-        (i) => i.petId === fee.petId && i.fineAmount === fee.amount && !i.finePaid
-      );
+      const incident = await prisma.petIncident.findFirst({
+        where: {
+          petId: fee.petId,
+          fineAmount: fee.amount,
+          finePaid: false,
+        },
+      });
       if (incident) {
-        petIncidents.set(incident.id, { ...incident, finePaid: true });
+        await prisma.petIncident.update({
+          where: { id: incident.id },
+          data: { finePaid: true },
+        });
       }
     }
 
@@ -1065,20 +1065,19 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const fee = petFees.get(feeId);
 
-    if (!fee) {
+    try {
+      const updated = await prisma.petFee.update({
+        where: { id: feeId },
+        data: {
+          status: 'waived',
+          waivedReason: body.reason,
+        },
+      });
+      return reply.send(updated);
+    } catch {
       return reply.status(404).send({ error: 'Fee not found' });
     }
-
-    const updated: PetFee = {
-      ...fee,
-      status: 'waived',
-      waivedReason: body.reason,
-    };
-
-    petFees.set(feeId, updated);
-    return reply.send(updated);
   });
 
   // -------------------------------------------------------------------------
@@ -1088,7 +1087,7 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   // Get property pet census
   app.get('/census/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const census = getPropertyPetCensus(propertyId);
+    const census = await getPropertyPetCensus(propertyId);
     return reply.send(census);
   });
 
@@ -1104,14 +1103,14 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const query = schema.parse(request.query);
-    let incidents = Array.from(petIncidents.values()).filter((i) => i.propertyId === propertyId);
 
-    if (query.resolved !== undefined) {
-      incidents = incidents.filter((i) => i.resolved === query.resolved);
-    }
-    if (query.severity) {
-      incidents = incidents.filter((i) => i.severity === query.severity);
-    }
+    const incidents = await prisma.petIncident.findMany({
+      where: {
+        propertyId,
+        ...(query.resolved !== undefined && { resolved: query.resolved }),
+        ...(query.severity && { severity: query.severity }),
+      },
+    });
 
     return reply.send({ incidents, total: incidents.length });
   });
@@ -1119,17 +1118,23 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   // Risk assessment for all pets at property
   app.get('/risk-assessment/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const propertyPets = Array.from(pets.values()).filter(
-      (p) => p.propertyId === propertyId && p.status === 'approved'
-    );
 
-    const assessments = propertyPets.map((pet) => ({
-      petId: pet.id,
-      petName: pet.name,
-      type: pet.type,
-      breed: pet.breed,
-      ...calculateRiskScore(pet.id),
-    }));
+    const propertyPets = await prisma.pet.findMany({
+      where: {
+        propertyId,
+        status: 'approved',
+      },
+    });
+
+    const assessments = await Promise.all(
+      propertyPets.map(async (pet) => ({
+        petId: pet.id,
+        petName: pet.name,
+        type: pet.type,
+        breed: pet.breed,
+        ...(await calculateRiskScore(pet.id)),
+      }))
+    );
 
     const highRisk = assessments.filter((a) => a.score < 50);
     const mediumRisk = assessments.filter((a) => a.score >= 50 && a.score < 75);

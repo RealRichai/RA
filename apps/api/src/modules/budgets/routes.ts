@@ -1,12 +1,23 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import {
+  prisma,
+  type BudgetStatus,
+  type BudgetPeriodType,
+  type BudgetItemType,
+  type BudgetFrequency,
+  type ForecastType,
+  type CapExStatus,
+  type CapExPriority,
+  type FundingSource,
+} from '@realriches/database';
+
 // ============================================================================
 // Types
 // ============================================================================
 
 export type BudgetPeriod = 'monthly' | 'quarterly' | 'annual';
-export type BudgetStatus = 'draft' | 'pending_approval' | 'approved' | 'active' | 'closed';
 export type BudgetCategory =
   | 'rental_income'
   | 'other_income'
@@ -22,126 +33,6 @@ export type BudgetCategory =
   | 'reserves'
   | 'other_expense';
 
-export interface Budget {
-  id: string;
-  propertyId: string;
-  name: string;
-  fiscalYear: number;
-  period: BudgetPeriod;
-  status: BudgetStatus;
-  startDate: Date;
-  endDate: Date;
-  lineItems: BudgetLineItem[];
-  totalIncome: number;
-  totalExpenses: number;
-  netOperatingIncome: number;
-  notes: string | null;
-  approvedById: string | null;
-  approvedAt: Date | null;
-  createdById: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface BudgetLineItem {
-  id: string;
-  category: BudgetCategory;
-  name: string;
-  description: string | null;
-  type: 'income' | 'expense';
-  annualAmount: number;
-  monthlyAmounts: number[]; // 12 months
-  isRecurring: boolean;
-  frequency: 'monthly' | 'quarterly' | 'annual' | 'one_time';
-  notes: string | null;
-}
-
-export interface BudgetActual {
-  id: string;
-  budgetId: string;
-  lineItemId: string;
-  month: number; // 1-12
-  year: number;
-  budgetedAmount: number;
-  actualAmount: number;
-  variance: number;
-  variancePercentage: number;
-  notes: string | null;
-  transactions: ActualTransaction[];
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface ActualTransaction {
-  id: string;
-  date: Date;
-  description: string;
-  amount: number;
-  referenceType: string | null;
-  referenceId: string | null;
-}
-
-export interface BudgetForecast {
-  id: string;
-  propertyId: string;
-  name: string;
-  forecastType: 'rolling' | 'scenario' | 'projection';
-  baseBudgetId: string | null;
-  startDate: Date;
-  endDate: Date;
-  assumptions: ForecastAssumption[];
-  projections: ForecastProjection[];
-  summary: ForecastSummary;
-  createdById: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface ForecastAssumption {
-  category: BudgetCategory;
-  growthRate: number; // percentage
-  inflationAdjustment: boolean;
-  customFormula: string | null;
-  notes: string | null;
-}
-
-export interface ForecastProjection {
-  period: string; // e.g., "2024-01", "2024-Q1"
-  income: number;
-  expenses: number;
-  noi: number;
-  cashFlow: number;
-  occupancy: number;
-}
-
-export interface ForecastSummary {
-  totalIncome: number;
-  totalExpenses: number;
-  totalNOI: number;
-  averageOccupancy: number;
-  irr: number | null;
-  npv: number | null;
-}
-
-export interface CapExItem {
-  id: string;
-  propertyId: string;
-  name: string;
-  description: string | null;
-  category: string;
-  estimatedCost: number;
-  actualCost: number | null;
-  status: 'planned' | 'budgeted' | 'in_progress' | 'completed' | 'deferred';
-  priority: 'low' | 'medium' | 'high' | 'critical';
-  plannedDate: Date;
-  completedDate: Date | null;
-  usefulLife: number; // years
-  fundingSource: 'reserves' | 'operating' | 'loan' | 'owner_contribution';
-  notes: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 export interface VarianceReport {
   budgetId: string;
   propertyId: string;
@@ -155,7 +46,7 @@ export interface VarianceReport {
 }
 
 export interface VarianceCategory {
-  category: BudgetCategory;
+  category: string;
   name: string;
   type: 'income' | 'expense';
   budgeted: number;
@@ -166,17 +57,16 @@ export interface VarianceCategory {
 }
 
 // ============================================================================
-// In-memory stores (placeholder for Prisma)
-// ============================================================================
-
-export const budgets = new Map<string, Budget>();
-export const budgetActuals = new Map<string, BudgetActual>();
-export const forecasts = new Map<string, BudgetForecast>();
-export const capExItems = new Map<string, CapExItem>();
-
-// ============================================================================
 // Helper Functions
 // ============================================================================
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
 
 export function calculateVariance(budgeted: number, actual: number): { variance: number; percentage: number } {
   const variance = actual - budgeted;
@@ -191,19 +81,17 @@ export function getVarianceStatus(
   type: 'income' | 'expense',
   variancePercent: number
 ): 'on_track' | 'over' | 'under' | 'significantly_over' | 'significantly_under' {
-  const threshold = 10; // 10% threshold for significant variance
+  const threshold = 10;
   const absVariance = Math.abs(variancePercent);
 
   if (absVariance <= 5) return 'on_track';
 
   if (type === 'income') {
-    // For income: over is good, under is bad
     if (variancePercent > threshold) return 'significantly_over';
     if (variancePercent > 0) return 'over';
     if (variancePercent < -threshold) return 'significantly_under';
     return 'under';
   } else {
-    // For expenses: over is bad, under is good
     if (variancePercent > threshold) return 'significantly_over';
     if (variancePercent > 0) return 'over';
     if (variancePercent < -threshold) return 'significantly_under';
@@ -228,11 +116,11 @@ export function distributeAnnualToMonths(
       return months.map((_, i) => (i % 3 === 2 ? Math.round(quarterlyAmount * 100) / 100 : 0));
 
     case 'annual':
-      months[11] = annualAmount; // December by default
+      months[11] = annualAmount;
       return months;
 
     case 'one_time':
-      const month = (oneTimeMonth ?? 1) - 1; // Convert to 0-indexed
+      const month = (oneTimeMonth ?? 1) - 1;
       months[month] = annualAmount;
       return months;
 
@@ -271,8 +159,7 @@ export function calculateNPV(cashFlows: number[], discountRate: number): number 
 }
 
 export function calculateIRR(cashFlows: number[], initialInvestment: number): number | null {
-  // Newton-Raphson method for IRR approximation
-  let rate = 0.1; // Initial guess: 10%
+  let rate = 0.1;
 
   for (let iteration = 0; iteration < 100; iteration++) {
     let npv = -initialInvestment;
@@ -285,14 +172,14 @@ export function calculateIRR(cashFlows: number[], initialInvestment: number): nu
     }
 
     if (Math.abs(npv) < 0.0001) {
-      return Math.round(rate * 10000) / 100; // Return as percentage
+      return Math.round(rate * 10000) / 100;
     }
 
     if (derivative === 0) return null;
 
     rate = rate - npv / derivative;
 
-    if (rate < -1 || rate > 10) return null; // Out of reasonable bounds
+    if (rate < -1 || rate > 10) return null;
   }
 
   return null;
@@ -301,11 +188,9 @@ export function calculateIRR(cashFlows: number[], initialInvestment: number): nu
 export function generateVarianceInsights(categories: VarianceCategory[]): string[] {
   const insights: string[] = [];
 
-  // Find significant variances
   const significantOver = categories.filter((c) => c.status === 'significantly_over');
   const significantUnder = categories.filter((c) => c.status === 'significantly_under');
 
-  // Income insights
   const incomeOver = significantOver.filter((c) => c.type === 'income');
   const incomeUnder = significantUnder.filter((c) => c.type === 'income');
 
@@ -316,7 +201,6 @@ export function generateVarianceInsights(categories: VarianceCategory[]): string
     insights.push(`Attention needed: ${incomeUnder.map((c) => c.name).join(', ')} below budget expectations.`);
   }
 
-  // Expense insights
   const expenseOver = significantOver.filter((c) => c.type === 'expense');
   const expenseUnder = significantUnder.filter((c) => c.type === 'expense');
 
@@ -327,7 +211,6 @@ export function generateVarianceInsights(categories: VarianceCategory[]): string
     insights.push(`Cost savings: ${expenseUnder.map((c) => c.name).join(', ')} under budget.`);
   }
 
-  // Overall assessment
   const onTrack = categories.filter((c) => c.status === 'on_track').length;
   const total = categories.length;
   const onTrackPercent = Math.round((onTrack / total) * 100);
@@ -341,6 +224,36 @@ export function generateVarianceInsights(categories: VarianceCategory[]): string
   }
 
   return insights;
+}
+
+function getMonthlyAmounts(lineItem: {
+  jan: unknown;
+  feb: unknown;
+  mar: unknown;
+  apr: unknown;
+  may: unknown;
+  jun: unknown;
+  jul: unknown;
+  aug: unknown;
+  sep: unknown;
+  oct: unknown;
+  nov: unknown;
+  dec: unknown;
+}): number[] {
+  return [
+    toNumber(lineItem.jan),
+    toNumber(lineItem.feb),
+    toNumber(lineItem.mar),
+    toNumber(lineItem.apr),
+    toNumber(lineItem.may),
+    toNumber(lineItem.jun),
+    toNumber(lineItem.jul),
+    toNumber(lineItem.aug),
+    toNumber(lineItem.sep),
+    toNumber(lineItem.oct),
+    toNumber(lineItem.nov),
+    toNumber(lineItem.dec),
+  ];
 }
 
 // ============================================================================
@@ -373,7 +286,7 @@ const createBudgetSchema = z.object({
 
 const recordActualSchema = z.object({
   budgetId: z.string().uuid(),
-  lineItemId: z.string(),
+  lineItemId: z.string().uuid(),
   month: z.number().min(1).max(12),
   year: z.number().min(2020).max(2100),
   actualAmount: z.number(),
@@ -436,95 +349,159 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
   app.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = request.query as { propertyId?: string; year?: string; status?: string };
 
-    let budgetList = Array.from(budgets.values());
+    const budgets = await prisma.budget.findMany({
+      where: {
+        ...(query.propertyId && { propertyId: query.propertyId }),
+        ...(query.year && { fiscalYear: parseInt(query.year, 10) }),
+        ...(query.status && { status: query.status as BudgetStatus }),
+      },
+      include: {
+        lineItems: true,
+      },
+      orderBy: { fiscalYear: 'desc' },
+    });
 
-    if (query.propertyId) {
-      budgetList = budgetList.filter((b) => b.propertyId === query.propertyId);
-    }
-    if (query.year) {
-      const year = parseInt(query.year, 10);
-      budgetList = budgetList.filter((b) => b.fiscalYear === year);
-    }
-    if (query.status) {
-      budgetList = budgetList.filter((b) => b.status === query.status);
-    }
-
-    // Sort by fiscal year descending
-    budgetList.sort((a, b) => b.fiscalYear - a.fiscalYear);
+    const result = budgets.map((b) => ({
+      ...b,
+      totalIncome: toNumber(b.totalIncome),
+      totalExpenses: toNumber(b.totalExpense),
+      netOperatingIncome: toNumber(b.netIncome),
+      lineItems: b.lineItems.map((li) => ({
+        id: li.id,
+        category: li.category,
+        name: li.name,
+        description: li.description,
+        type: li.type,
+        annualAmount: toNumber(li.annualBudget),
+        monthlyAmounts: getMonthlyAmounts(li),
+        isRecurring: li.isRecurring,
+        frequency: li.frequency,
+        notes: li.notes,
+      })),
+    }));
 
     return reply.send({
       success: true,
-      data: budgetList,
-      total: budgetList.length,
+      data: result,
+      total: result.length,
     });
   });
 
   // Get budget
   app.get('/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const budget = budgets.get(id);
+
+    const budget = await prisma.budget.findUnique({
+      where: { id },
+      include: { lineItems: true },
+    });
 
     if (!budget) {
       return reply.status(404).send({ success: false, error: 'Budget not found' });
     }
 
-    return reply.send({ success: true, data: budget });
+    const result = {
+      ...budget,
+      totalIncome: toNumber(budget.totalIncome),
+      totalExpenses: toNumber(budget.totalExpense),
+      netOperatingIncome: toNumber(budget.netIncome),
+      lineItems: budget.lineItems.map((li) => ({
+        id: li.id,
+        category: li.category,
+        name: li.name,
+        description: li.description,
+        type: li.type,
+        annualAmount: toNumber(li.annualBudget),
+        monthlyAmounts: getMonthlyAmounts(li),
+        isRecurring: li.isRecurring,
+        frequency: li.frequency,
+        notes: li.notes,
+      })),
+    };
+
+    return reply.send({ success: true, data: result });
   });
 
   // Create budget
   app.post('/', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createBudgetSchema.parse(request.body);
-    const now = new Date();
-
-    // Process line items
-    const lineItems: BudgetLineItem[] = body.lineItems.map((item, index) => ({
-      id: `li-${index}`,
-      category: item.category,
-      name: item.name,
-      description: item.description ?? null,
-      type: item.type,
-      annualAmount: item.annualAmount,
-      monthlyAmounts: distributeAnnualToMonths(item.annualAmount, item.frequency),
-      isRecurring: item.isRecurring,
-      frequency: item.frequency,
-      notes: item.notes ?? null,
-    }));
 
     // Calculate totals
-    const totalIncome = lineItems
+    const totalIncome = body.lineItems
       .filter((i) => i.type === 'income')
       .reduce((sum, i) => sum + i.annualAmount, 0);
-    const totalExpenses = lineItems
+    const totalExpenses = body.lineItems
       .filter((i) => i.type === 'expense')
       .reduce((sum, i) => sum + i.annualAmount, 0);
     const netOperatingIncome = totalIncome - totalExpenses;
 
-    const budget: Budget = {
-      id: crypto.randomUUID(),
-      propertyId: body.propertyId,
-      name: body.name,
-      fiscalYear: body.fiscalYear,
-      period: body.period,
-      status: 'draft',
-      startDate: new Date(body.startDate),
-      endDate: new Date(body.endDate),
-      lineItems,
-      totalIncome,
-      totalExpenses,
-      netOperatingIncome,
-      notes: body.notes ?? null,
-      approvedById: null,
-      approvedAt: null,
-      createdById: 'system',
-      createdAt: now,
-      updatedAt: now,
-    };
+    const budget = await prisma.budget.create({
+      data: {
+        propertyId: body.propertyId,
+        name: body.name,
+        fiscalYear: body.fiscalYear,
+        periodType: body.period as BudgetPeriodType,
+        status: 'draft',
+        startDate: new Date(body.startDate),
+        endDate: new Date(body.endDate),
+        totalIncome,
+        totalExpense: totalExpenses,
+        netIncome: netOperatingIncome,
+        notes: body.notes,
+        createdBy: 'system',
+        lineItems: {
+          create: body.lineItems.map((item) => {
+            const monthlyAmounts = distributeAnnualToMonths(item.annualAmount, item.frequency);
+            return {
+              category: item.category,
+              name: item.name,
+              description: item.description,
+              type: item.type as BudgetItemType,
+              frequency: item.frequency as BudgetFrequency,
+              isRecurring: item.isRecurring,
+              jan: monthlyAmounts[0],
+              feb: monthlyAmounts[1],
+              mar: monthlyAmounts[2],
+              apr: monthlyAmounts[3],
+              may: monthlyAmounts[4],
+              jun: monthlyAmounts[5],
+              jul: monthlyAmounts[6],
+              aug: monthlyAmounts[7],
+              sep: monthlyAmounts[8],
+              oct: monthlyAmounts[9],
+              nov: monthlyAmounts[10],
+              dec: monthlyAmounts[11],
+              annualBudget: item.annualAmount,
+              notes: item.notes,
+            };
+          }),
+        },
+      },
+      include: { lineItems: true },
+    });
 
-    budgets.set(budget.id, budget);
+    const result = {
+      ...budget,
+      totalIncome: toNumber(budget.totalIncome),
+      totalExpenses: toNumber(budget.totalExpense),
+      netOperatingIncome: toNumber(budget.netIncome),
+      lineItems: budget.lineItems.map((li) => ({
+        id: li.id,
+        category: li.category,
+        name: li.name,
+        description: li.description,
+        type: li.type,
+        annualAmount: toNumber(li.annualBudget),
+        monthlyAmounts: getMonthlyAmounts(li),
+        isRecurring: li.isRecurring,
+        frequency: li.frequency,
+        notes: li.notes,
+      })),
+    };
 
     return reply.status(201).send({
       success: true,
-      data: budget,
+      data: result,
     });
   });
 
@@ -533,25 +510,29 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const { userId } = request.body as { userId: string };
 
-    const budget = budgets.get(id);
+    const budget = await prisma.budget.findUnique({ where: { id } });
     if (!budget) {
       return reply.status(404).send({ success: false, error: 'Budget not found' });
     }
 
-    budget.status = 'approved';
-    budget.approvedById = userId;
-    budget.approvedAt = new Date();
-    budget.updatedAt = new Date();
-    budgets.set(id, budget);
+    const updated = await prisma.budget.update({
+      where: { id },
+      data: {
+        status: 'approved',
+        approvedBy: userId,
+        approvedAt: new Date(),
+      },
+      include: { lineItems: true },
+    });
 
-    return reply.send({ success: true, data: budget });
+    return reply.send({ success: true, data: updated });
   });
 
   // Activate budget
   app.post('/:id/activate', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
 
-    const budget = budgets.get(id);
+    const budget = await prisma.budget.findUnique({ where: { id } });
     if (!budget) {
       return reply.status(404).send({ success: false, error: 'Budget not found' });
     }
@@ -561,18 +542,23 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Deactivate other active budgets for same property/year
-    for (const [budgetId, b] of budgets) {
-      if (b.propertyId === budget.propertyId && b.fiscalYear === budget.fiscalYear && b.status === 'active') {
-        b.status = 'closed';
-        budgets.set(budgetId, b);
-      }
-    }
+    await prisma.budget.updateMany({
+      where: {
+        propertyId: budget.propertyId,
+        fiscalYear: budget.fiscalYear,
+        status: 'active',
+        id: { not: id },
+      },
+      data: { status: 'closed' },
+    });
 
-    budget.status = 'active';
-    budget.updatedAt = new Date();
-    budgets.set(id, budget);
+    const updated = await prisma.budget.update({
+      where: { id },
+      data: { status: 'active' },
+      include: { lineItems: true },
+    });
 
-    return reply.send({ success: true, data: budget });
+    return reply.send({ success: true, data: updated });
   });
 
   // -------------------------------------------------------------------------
@@ -582,9 +568,11 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
   // Record actual
   app.post('/actuals', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = recordActualSchema.parse(request.body);
-    const now = new Date();
 
-    const budget = budgets.get(body.budgetId);
+    const budget = await prisma.budget.findUnique({
+      where: { id: body.budgetId },
+      include: { lineItems: true },
+    });
     if (!budget) {
       return reply.status(404).send({ success: false, error: 'Budget not found' });
     }
@@ -594,39 +582,62 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ success: false, error: 'Line item not found' });
     }
 
-    const budgetedAmount = lineItem.monthlyAmounts[body.month - 1];
+    const monthlyAmounts = getMonthlyAmounts(lineItem);
+    const budgetedAmount = monthlyAmounts[body.month - 1];
     const { variance, percentage } = calculateVariance(budgetedAmount, body.actualAmount);
 
-    const transactions: ActualTransaction[] = (body.transactions ?? []).map((t, i) => ({
-      id: `txn-${i}`,
-      date: new Date(t.date),
-      description: t.description,
-      amount: t.amount,
-      referenceType: t.referenceType ?? null,
-      referenceId: t.referenceId ?? null,
-    }));
-
-    const actual: BudgetActual = {
-      id: crypto.randomUUID(),
-      budgetId: body.budgetId,
-      lineItemId: body.lineItemId,
-      month: body.month,
-      year: body.year,
-      budgetedAmount,
-      actualAmount: body.actualAmount,
-      variance,
-      variancePercentage: percentage,
-      notes: body.notes ?? null,
-      transactions,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    budgetActuals.set(actual.id, actual);
+    const actual = await prisma.budgetActual.upsert({
+      where: {
+        budgetId_lineItemId_month_year: {
+          budgetId: body.budgetId,
+          lineItemId: body.lineItemId,
+          month: body.month,
+          year: body.year,
+        },
+      },
+      create: {
+        budgetId: body.budgetId,
+        lineItemId: body.lineItemId,
+        month: body.month,
+        year: body.year,
+        budgetedAmount,
+        actualAmount: body.actualAmount,
+        variance,
+        variancePercent: percentage,
+        notes: body.notes,
+        transactions: body.transactions ? {
+          create: body.transactions.map((t) => ({
+            date: new Date(t.date),
+            description: t.description,
+            amount: t.amount,
+            referenceType: t.referenceType,
+            referenceId: t.referenceId,
+          })),
+        } : undefined,
+      },
+      update: {
+        budgetedAmount,
+        actualAmount: body.actualAmount,
+        variance,
+        variancePercent: percentage,
+        notes: body.notes,
+      },
+      include: { transactions: true },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: actual,
+      data: {
+        ...actual,
+        budgetedAmount: toNumber(actual.budgetedAmount),
+        actualAmount: toNumber(actual.actualAmount),
+        variance: toNumber(actual.variance),
+        variancePercentage: toNumber(actual.variancePercent),
+        transactions: actual.transactions.map((t) => ({
+          ...t,
+          amount: toNumber(t.amount),
+        })),
+      },
     });
   });
 
@@ -635,23 +646,35 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const query = request.query as { month?: string };
 
-    const budget = budgets.get(id);
+    const budget = await prisma.budget.findUnique({ where: { id } });
     if (!budget) {
       return reply.status(404).send({ success: false, error: 'Budget not found' });
     }
 
-    let actualsList = Array.from(budgetActuals.values())
-      .filter((a) => a.budgetId === id);
+    const actuals = await prisma.budgetActual.findMany({
+      where: {
+        budgetId: id,
+        ...(query.month && { month: parseInt(query.month, 10) }),
+      },
+      include: { transactions: true },
+    });
 
-    if (query.month) {
-      const month = parseInt(query.month, 10);
-      actualsList = actualsList.filter((a) => a.month === month);
-    }
+    const result = actuals.map((a) => ({
+      ...a,
+      budgetedAmount: toNumber(a.budgetedAmount),
+      actualAmount: toNumber(a.actualAmount),
+      variance: toNumber(a.variance),
+      variancePercentage: toNumber(a.variancePercent),
+      transactions: a.transactions.map((t) => ({
+        ...t,
+        amount: toNumber(t.amount),
+      })),
+    }));
 
     return reply.send({
       success: true,
-      data: actualsList,
-      total: actualsList.length,
+      data: result,
+      total: result.length,
     });
   });
 
@@ -664,15 +687,18 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const query = request.query as { month?: string; quarter?: string };
 
-    const budget = budgets.get(id);
+    const budget = await prisma.budget.findUnique({
+      where: { id },
+      include: { lineItems: true },
+    });
     if (!budget) {
       return reply.status(404).send({ success: false, error: 'Budget not found' });
     }
 
-    const actuals = Array.from(budgetActuals.values())
-      .filter((a) => a.budgetId === id);
+    const actuals = await prisma.budgetActual.findMany({
+      where: { budgetId: id },
+    });
 
-    // Determine period
     let period = 'YTD';
     let months: number[] = [];
 
@@ -691,31 +717,30 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
       months = Array.from({ length: currentMonth }, (_, i) => i + 1);
     }
 
-    // Calculate variance by category
     const categories: VarianceCategory[] = [];
 
     for (const lineItem of budget.lineItems) {
+      const monthlyAmounts = getMonthlyAmounts(lineItem);
       const itemActuals = actuals.filter(
         (a) => a.lineItemId === lineItem.id && months.includes(a.month)
       );
 
-      const budgeted = months.reduce((sum, m) => sum + lineItem.monthlyAmounts[m - 1], 0);
-      const actual = itemActuals.reduce((sum, a) => sum + a.actualAmount, 0);
+      const budgeted = months.reduce((sum, m) => sum + monthlyAmounts[m - 1], 0);
+      const actual = itemActuals.reduce((sum, a) => sum + toNumber(a.actualAmount), 0);
       const { variance, percentage } = calculateVariance(budgeted, actual);
 
       categories.push({
         category: lineItem.category,
         name: lineItem.name,
-        type: lineItem.type,
+        type: lineItem.type as 'income' | 'expense',
         budgeted: Math.round(budgeted * 100) / 100,
         actual: Math.round(actual * 100) / 100,
         variance,
         variancePercent: percentage,
-        status: getVarianceStatus(lineItem.type, percentage),
+        status: getVarianceStatus(lineItem.type as 'income' | 'expense', percentage),
       });
     }
 
-    // Calculate totals
     const incomeCategories = categories.filter((c) => c.type === 'income');
     const expenseCategories = categories.filter((c) => c.type === 'expense');
 
@@ -763,31 +788,64 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
   app.get('/forecasts', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = request.query as { propertyId?: string };
 
-    let forecastList = Array.from(forecasts.values());
+    const forecasts = await prisma.budgetForecast.findMany({
+      where: query.propertyId ? { propertyId: query.propertyId } : undefined,
+      include: {
+        assumptions: true,
+        projections: true,
+      },
+    });
 
-    if (query.propertyId) {
-      forecastList = forecastList.filter((f) => f.propertyId === query.propertyId);
-    }
+    const result = forecasts.map((f) => ({
+      ...f,
+      summary: {
+        totalIncome: toNumber(f.totalIncome),
+        totalExpenses: toNumber(f.totalExpenses),
+        totalNOI: toNumber(f.totalNOI),
+        averageOccupancy: toNumber(f.averageOccupancy),
+        irr: f.irr ? toNumber(f.irr) : null,
+        npv: f.npv ? toNumber(f.npv) : null,
+      },
+      assumptions: f.assumptions.map((a) => ({
+        category: a.category,
+        growthRate: toNumber(a.growthRate),
+        inflationAdjustment: a.inflationAdjustment,
+        customFormula: a.customFormula,
+        notes: a.notes,
+      })),
+      projections: f.projections.map((p) => ({
+        period: p.period,
+        income: toNumber(p.income),
+        expenses: toNumber(p.expenses),
+        noi: toNumber(p.noi),
+        cashFlow: toNumber(p.cashFlow),
+        occupancy: toNumber(p.occupancy),
+      })),
+    }));
 
     return reply.send({
       success: true,
-      data: forecastList,
-      total: forecastList.length,
+      data: result,
+      total: result.length,
     });
   });
 
   // Create forecast
   app.post('/forecasts', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createForecastSchema.parse(request.body);
-    const now = new Date();
 
-    // Calculate number of periods
     const startDate = new Date(body.startDate);
     const endDate = new Date(body.endDate);
     const months = Math.ceil((endDate.getTime() - startDate.getTime()) / (30 * 24 * 60 * 60 * 1000));
 
-    // Generate projections
-    const projections: ForecastProjection[] = [];
+    const projections: Array<{
+      period: string;
+      income: number;
+      expenses: number;
+      noi: number;
+      cashFlow: number;
+      occupancy: number;
+    }> = [];
     let currentIncome = body.initialIncome;
     let currentExpenses = body.initialExpenses;
     let currentOccupancy = body.initialOccupancy;
@@ -807,11 +865,9 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
       periodDate.setMonth(periodDate.getMonth() + i);
       const period = `${periodDate.getFullYear()}-${String(periodDate.getMonth() + 1).padStart(2, '0')}`;
 
-      // Apply monthly growth
       if (i > 0) {
-        currentIncome *= 1 + incomeGrowth / 1200; // Annual rate / 12
+        currentIncome *= 1 + incomeGrowth / 1200;
         currentExpenses *= 1 + expenseGrowth / 1200;
-        // Occupancy with slight variation
         currentOccupancy = Math.min(100, Math.max(80, currentOccupancy + (Math.random() - 0.5) * 2));
       }
 
@@ -832,41 +888,72 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
       totalOccupancy += currentOccupancy;
     }
 
-    // Calculate summary
     const cashFlows = projections.map((p) => p.cashFlow);
-    const npv = calculateNPV(cashFlows, 8); // 8% discount rate
-    const irr = calculateIRR(cashFlows, body.initialIncome * 12); // Initial investment = 1 year income
+    const npv = calculateNPV(cashFlows, 8);
+    const irr = calculateIRR(cashFlows, body.initialIncome * 12);
 
-    const summary: ForecastSummary = {
-      totalIncome: Math.round(totalIncome * 100) / 100,
-      totalExpenses: Math.round(totalExpenses * 100) / 100,
-      totalNOI: Math.round((totalIncome - totalExpenses) * 100) / 100,
-      averageOccupancy: Math.round((totalOccupancy / months) * 100) / 100,
-      irr,
-      npv,
-    };
-
-    const forecast: BudgetForecast = {
-      id: crypto.randomUUID(),
-      propertyId: body.propertyId,
-      name: body.name,
-      forecastType: body.forecastType,
-      baseBudgetId: body.baseBudgetId ?? null,
-      startDate,
-      endDate,
-      assumptions: body.assumptions,
-      projections,
-      summary,
-      createdById: 'system',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    forecasts.set(forecast.id, forecast);
+    const forecast = await prisma.budgetForecast.create({
+      data: {
+        propertyId: body.propertyId,
+        baseBudgetId: body.baseBudgetId,
+        name: body.name,
+        forecastType: body.forecastType as ForecastType,
+        startDate,
+        endDate,
+        totalIncome: Math.round(totalIncome * 100) / 100,
+        totalExpenses: Math.round(totalExpenses * 100) / 100,
+        totalNOI: Math.round((totalIncome - totalExpenses) * 100) / 100,
+        averageOccupancy: Math.round((totalOccupancy / months) * 100) / 100,
+        irr,
+        npv,
+        createdBy: 'system',
+        assumptions: {
+          create: body.assumptions.map((a) => ({
+            category: a.category,
+            growthRate: a.growthRate,
+            inflationAdjustment: a.inflationAdjustment,
+            customFormula: a.customFormula,
+            notes: a.notes,
+          })),
+        },
+        projections: {
+          create: projections,
+        },
+      },
+      include: {
+        assumptions: true,
+        projections: true,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: forecast,
+      data: {
+        ...forecast,
+        summary: {
+          totalIncome: toNumber(forecast.totalIncome),
+          totalExpenses: toNumber(forecast.totalExpenses),
+          totalNOI: toNumber(forecast.totalNOI),
+          averageOccupancy: toNumber(forecast.averageOccupancy),
+          irr: forecast.irr ? toNumber(forecast.irr) : null,
+          npv: forecast.npv ? toNumber(forecast.npv) : null,
+        },
+        assumptions: forecast.assumptions.map((a) => ({
+          category: a.category,
+          growthRate: toNumber(a.growthRate),
+          inflationAdjustment: a.inflationAdjustment,
+          customFormula: a.customFormula,
+          notes: a.notes,
+        })),
+        projections: forecast.projections.map((p) => ({
+          period: p.period,
+          income: toNumber(p.income),
+          expenses: toNumber(p.expenses),
+          noi: toNumber(p.noi),
+          cashFlow: toNumber(p.cashFlow),
+          occupancy: toNumber(p.occupancy),
+        })),
+      },
     });
   });
 
@@ -878,89 +965,96 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
   app.get('/capex', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = request.query as { propertyId?: string; status?: string; priority?: string };
 
-    let capExList = Array.from(capExItems.values());
+    const capExItems = await prisma.capExItem.findMany({
+      where: {
+        ...(query.propertyId && { propertyId: query.propertyId }),
+        ...(query.status && { status: query.status as CapExStatus }),
+        ...(query.priority && { priority: query.priority as CapExPriority }),
+      },
+      orderBy: { plannedDate: 'asc' },
+    });
 
-    if (query.propertyId) {
-      capExList = capExList.filter((c) => c.propertyId === query.propertyId);
-    }
-    if (query.status) {
-      capExList = capExList.filter((c) => c.status === query.status);
-    }
-    if (query.priority) {
-      capExList = capExList.filter((c) => c.priority === query.priority);
-    }
-
-    // Sort by planned date
-    capExList.sort((a, b) => a.plannedDate.getTime() - b.plannedDate.getTime());
+    const result = capExItems.map((item) => ({
+      ...item,
+      estimatedCost: toNumber(item.estimatedCost),
+      actualCost: item.actualCost ? toNumber(item.actualCost) : null,
+    }));
 
     return reply.send({
       success: true,
-      data: capExList,
-      total: capExList.length,
+      data: result,
+      total: result.length,
     });
   });
 
   // Create CapEx item
   app.post('/capex', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createCapExSchema.parse(request.body);
-    const now = new Date();
 
-    const item: CapExItem = {
-      id: crypto.randomUUID(),
-      propertyId: body.propertyId,
-      name: body.name,
-      description: body.description ?? null,
-      category: body.category,
-      estimatedCost: body.estimatedCost,
-      actualCost: null,
-      status: 'planned',
-      priority: body.priority,
-      plannedDate: new Date(body.plannedDate),
-      completedDate: null,
-      usefulLife: body.usefulLife,
-      fundingSource: body.fundingSource,
-      notes: body.notes ?? null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    capExItems.set(item.id, item);
+    const item = await prisma.capExItem.create({
+      data: {
+        propertyId: body.propertyId,
+        name: body.name,
+        description: body.description,
+        category: body.category,
+        estimatedCost: body.estimatedCost,
+        status: 'planned',
+        priority: body.priority as CapExPriority,
+        plannedDate: new Date(body.plannedDate),
+        usefulLife: body.usefulLife,
+        fundingSource: body.fundingSource as FundingSource,
+        notes: body.notes,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: item,
+      data: {
+        ...item,
+        estimatedCost: toNumber(item.estimatedCost),
+        actualCost: item.actualCost ? toNumber(item.actualCost) : null,
+      },
     });
   });
 
   // Update CapEx status
   app.patch('/capex/:id/status', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as { status: CapExItem['status']; actualCost?: number };
+    const body = request.body as { status: CapExStatus; actualCost?: number };
 
-    const item = capExItems.get(id);
+    const item = await prisma.capExItem.findUnique({ where: { id } });
     if (!item) {
       return reply.status(404).send({ success: false, error: 'CapEx item not found' });
     }
 
-    item.status = body.status;
-    if (body.status === 'completed') {
-      item.completedDate = new Date();
-      if (body.actualCost !== undefined) {
-        item.actualCost = body.actualCost;
-      }
-    }
-    item.updatedAt = new Date();
-    capExItems.set(id, item);
+    const updated = await prisma.capExItem.update({
+      where: { id },
+      data: {
+        status: body.status,
+        ...(body.status === 'completed' && {
+          completedDate: new Date(),
+          ...(body.actualCost !== undefined && { actualCost: body.actualCost }),
+        }),
+      },
+    });
 
-    return reply.send({ success: true, data: item });
+    return reply.send({
+      success: true,
+      data: {
+        ...updated,
+        estimatedCost: toNumber(updated.estimatedCost),
+        actualCost: updated.actualCost ? toNumber(updated.actualCost) : null,
+      },
+    });
   });
 
   // Get CapEx summary for property
   app.get('/capex/summary/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
 
-    const propertyCapEx = Array.from(capExItems.values())
-      .filter((c) => c.propertyId === propertyId);
+    const propertyCapEx = await prisma.capExItem.findMany({
+      where: { propertyId },
+    });
 
     const now = new Date();
     const thisYear = now.getFullYear();
@@ -986,10 +1080,10 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
       data: {
         propertyId,
         totals: {
-          planned: planned.reduce((sum, c) => sum + c.estimatedCost, 0),
-          budgeted: budgeted.reduce((sum, c) => sum + c.estimatedCost, 0),
-          inProgress: inProgress.reduce((sum, c) => sum + c.estimatedCost, 0),
-          completed: completed.reduce((sum, c) => sum + (c.actualCost ?? c.estimatedCost), 0),
+          planned: planned.reduce((sum, c) => sum + toNumber(c.estimatedCost), 0),
+          budgeted: budgeted.reduce((sum, c) => sum + toNumber(c.estimatedCost), 0),
+          inProgress: inProgress.reduce((sum, c) => sum + toNumber(c.estimatedCost), 0),
+          completed: completed.reduce((sum, c) => sum + (c.actualCost ? toNumber(c.actualCost) : toNumber(c.estimatedCost)), 0),
         },
         counts: {
           planned: planned.length,
@@ -1000,18 +1094,18 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
         timeline: {
           thisYear: {
             count: thisYearItems.length,
-            estimated: thisYearItems.reduce((sum, c) => sum + c.estimatedCost, 0),
+            estimated: thisYearItems.reduce((sum, c) => sum + toNumber(c.estimatedCost), 0),
           },
           nextYear: {
             count: nextYearItems.length,
-            estimated: nextYearItems.reduce((sum, c) => sum + c.estimatedCost, 0),
+            estimated: nextYearItems.reduce((sum, c) => sum + toNumber(c.estimatedCost), 0),
           },
         },
         byPriority: {
-          critical: { count: byPriority.critical.length, estimated: byPriority.critical.reduce((sum, c) => sum + c.estimatedCost, 0) },
-          high: { count: byPriority.high.length, estimated: byPriority.high.reduce((sum, c) => sum + c.estimatedCost, 0) },
-          medium: { count: byPriority.medium.length, estimated: byPriority.medium.reduce((sum, c) => sum + c.estimatedCost, 0) },
-          low: { count: byPriority.low.length, estimated: byPriority.low.reduce((sum, c) => sum + c.estimatedCost, 0) },
+          critical: { count: byPriority.critical.length, estimated: byPriority.critical.reduce((sum, c) => sum + toNumber(c.estimatedCost), 0) },
+          high: { count: byPriority.high.length, estimated: byPriority.high.reduce((sum, c) => sum + toNumber(c.estimatedCost), 0) },
+          medium: { count: byPriority.medium.length, estimated: byPriority.medium.reduce((sum, c) => sum + toNumber(c.estimatedCost), 0) },
+          low: { count: byPriority.low.length, estimated: byPriority.low.reduce((sum, c) => sum + toNumber(c.estimatedCost), 0) },
         },
       },
     });

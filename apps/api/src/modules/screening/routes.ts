@@ -1,5 +1,13 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import {
+  prisma,
+  Prisma,
+  type RiskLevel as PrismaRiskLevel,
+  type ScreeningProviderEnum as PrismaScreeningProvider,
+  type ScreeningTypeEnum as PrismaScreeningType,
+  type ScreeningReportStatus as PrismaReportStatus,
+} from '@realriches/database';
 
 // Types
 export type ScreeningProvider = 'transunion' | 'experian' | 'equifax' | 'checkr' | 'mock';
@@ -264,10 +272,6 @@ export interface ScreeningCriteria {
   minRentalHistoryMonths: number;
 }
 
-// In-memory stores
-const applications = new Map<string, RentalApplication>();
-const screeningCriteria = new Map<string, ScreeningCriteria>();
-
 // Schemas
 const addressSchema = z.object({
   street: z.string().min(1),
@@ -334,6 +338,19 @@ const criteriaSchema = z.object({
 // Helper functions
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function mapScreeningType(type: ScreeningType): PrismaScreeningType {
+  const typeMap: Record<ScreeningType, PrismaScreeningType> = {
+    credit: 'credit',
+    criminal: 'criminal',
+    eviction: 'eviction',
+    income: 'income',
+    employment: 'employment',
+    rental_history: 'rental_history',
+    identity: 'identity',
+  };
+  return typeMap[type];
 }
 
 function generateMockCreditReport(): CreditReport {
@@ -467,9 +484,11 @@ function calculateApplicantScore(applicant: Applicant, criteria: ScreeningCriter
   // Rental history component (5 points max)
   if (applicant.rentalHistory.length > 0) {
     const totalMonths = applicant.rentalHistory.reduce((sum, r) => {
-      const months = r.moveOutDate
-        ? (r.moveOutDate.getTime() - r.moveInDate.getTime()) / (1000 * 60 * 60 * 24 * 30)
-        : (Date.now() - r.moveInDate.getTime()) / (1000 * 60 * 60 * 24 * 30);
+      const moveInTime = r.moveInDate instanceof Date ? r.moveInDate.getTime() : new Date(r.moveInDate).getTime();
+      const moveOutTime = r.moveOutDate
+        ? (r.moveOutDate instanceof Date ? r.moveOutDate.getTime() : new Date(r.moveOutDate).getTime())
+        : Date.now();
+      const months = (moveOutTime - moveInTime) / (1000 * 60 * 60 * 24 * 30);
       return sum + months;
     }, 0);
     if (totalMonths >= criteria.minRentalHistoryMonths) score += 5;
@@ -521,39 +540,103 @@ function generateRiskFactors(applicant: Applicant, criteria: ScreeningCriteria):
   return factors;
 }
 
-// Initialize default criteria
-function initializeDefaultCriteria(): void {
-  const defaultCriteria: ScreeningCriteria = {
-    id: 'default',
-    name: 'Standard Screening Criteria',
-    propertyId: null,
-    isDefault: true,
-    minCreditScore: 650,
-    maxDebtToIncomeRatio: 43,
-    minIncomeToRentRatio: 3,
-    maxLatePayments: 3,
-    maxCollections: 2,
-    allowBankruptcy: false,
-    bankruptcyLookbackYears: 7,
-    allowEvictions: false,
-    evictionLookbackYears: 7,
-    allowFelonies: false,
-    felonyLookbackYears: 7,
-    allowMisdemeanors: true,
-    misdemeanorLookbackYears: 3,
-    requireEmploymentVerification: true,
-    requireIncomeVerification: true,
-    requireRentalHistory: true,
-    minRentalHistoryMonths: 12,
-  };
+// Helper to convert DB record to RentalApplication
+function dbToApplication(
+  dbApp: Awaited<ReturnType<typeof prisma.tenantApplication.findUnique>> & { screeningReports?: unknown[] },
+): RentalApplication | null {
+  if (!dbApp) return null;
+  const applicantsData = (dbApp.applicantsData || []) as Applicant[];
 
-  screeningCriteria.set(defaultCriteria.id, defaultCriteria);
+  return {
+    id: dbApp.id,
+    propertyId: dbApp.propertyId || dbApp.listingId, // fallback
+    unitId: dbApp.unitId,
+    listingId: dbApp.listingId,
+    status: dbApp.status as ApplicationStatus,
+    applicants: applicantsData,
+    desiredMoveIn: dbApp.desiredMoveIn || dbApp.createdAt,
+    desiredLeaseTerm: dbApp.desiredLeaseTerm || 12,
+    monthlyRent: dbApp.requestedMonthlyRent || 0,
+    applicationFee: dbApp.applicationFeeAmount || 50,
+    applicationFeePaid: dbApp.applicationFeePaid,
+    screeningConsent: dbApp.screeningConsent,
+    screeningConsentDate: dbApp.screeningConsentDate,
+    overallScore: dbApp.overallScore,
+    riskLevel: dbApp.riskLevel as RiskLevel | null,
+    decision: dbApp.decision as ApplicationDecision | null,
+    notes: dbApp.applicationNotes || [],
+    createdAt: dbApp.createdAt,
+    updatedAt: dbApp.updatedAt,
+    expiresAt: dbApp.expiresAt || new Date(dbApp.createdAt.getTime() + 30 * 24 * 60 * 60 * 1000),
+  };
 }
 
-initializeDefaultCriteria();
+// Helper to convert DB ScreeningCriteria to interface
+function dbToCriteria(dbCriteria: Awaited<ReturnType<typeof prisma.screeningCriteria.findUnique>>): ScreeningCriteria | null {
+  if (!dbCriteria) return null;
+  return {
+    id: dbCriteria.id,
+    name: dbCriteria.name,
+    propertyId: dbCriteria.propertyId,
+    isDefault: dbCriteria.isDefault,
+    minCreditScore: dbCriteria.minCreditScore || 650,
+    maxDebtToIncomeRatio: dbCriteria.maxDebtToIncomeRatio || 43,
+    minIncomeToRentRatio: dbCriteria.minIncomeToRentRatio || 3,
+    maxLatePayments: dbCriteria.maxLatePayments,
+    maxCollections: dbCriteria.maxCollections,
+    allowBankruptcy: dbCriteria.allowBankruptcy,
+    bankruptcyLookbackYears: dbCriteria.bankruptcyLookbackYears,
+    allowEvictions: dbCriteria.allowEvictions,
+    evictionLookbackYears: dbCriteria.evictionLookbackYears,
+    allowFelonies: dbCriteria.allowFelonies,
+    felonyLookbackYears: dbCriteria.felonyLookbackYears,
+    allowMisdemeanors: dbCriteria.allowMisdemeanors,
+    misdemeanorLookbackYears: dbCriteria.misdemeanorLookbackYears,
+    requireEmploymentVerification: dbCriteria.requireEmploymentVerification,
+    requireIncomeVerification: dbCriteria.requireIncomeVerification,
+    requireRentalHistory: dbCriteria.requireRentalHistory,
+    minRentalHistoryMonths: dbCriteria.minRentalHistoryMonths,
+  };
+}
+
+// Initialize default criteria
+async function initializeDefaultCriteria(): Promise<void> {
+  const existing = await prisma.screeningCriteria.findFirst({
+    where: { isDefault: true },
+  });
+
+  if (!existing) {
+    await prisma.screeningCriteria.create({
+      data: {
+        name: 'Standard Screening Criteria',
+        isDefault: true,
+        minCreditScore: 650,
+        maxDebtToIncomeRatio: 43,
+        minIncomeToRentRatio: 3,
+        maxLatePayments: 3,
+        maxCollections: 2,
+        allowBankruptcy: false,
+        bankruptcyLookbackYears: 7,
+        allowEvictions: false,
+        evictionLookbackYears: 7,
+        allowFelonies: false,
+        felonyLookbackYears: 7,
+        allowMisdemeanors: true,
+        misdemeanorLookbackYears: 3,
+        requireEmploymentVerification: true,
+        requireIncomeVerification: true,
+        requireRentalHistory: true,
+        minRentalHistoryMonths: 12,
+      },
+    });
+  }
+}
 
 // Route handlers
 export async function screeningRoutes(app: FastifyInstance): Promise<void> {
+  // Initialize default criteria on startup
+  await initializeDefaultCriteria();
+
   // Create rental application
   app.post('/applications', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createApplicationSchema.parse(request.body);
@@ -609,35 +692,71 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       riskFactors: [],
     }));
 
-    const application: RentalApplication = {
-      id: generateId(),
-      propertyId: body.propertyId,
-      unitId: body.unitId || null,
-      listingId: body.listingId || null,
-      status: 'pending',
-      applicants,
-      desiredMoveIn: new Date(body.desiredMoveIn),
-      desiredLeaseTerm: body.desiredLeaseTerm,
-      monthlyRent: body.monthlyRent,
-      applicationFee: 50,
-      applicationFeePaid: false,
-      screeningConsent: body.screeningConsent,
-      screeningConsentDate: body.screeningConsent ? now : null,
-      overallScore: null,
-      riskLevel: null,
-      decision: null,
-      notes: [],
-      createdAt: now,
-      updatedAt: now,
-      expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-    };
-
-    // Set application ID on applicants
-    application.applicants.forEach((a) => {
-      a.applicationId = application.id;
+    // Find or create a listing reference (required by the model)
+    let listing = await prisma.listing.findFirst({
+      where: { propertyId: body.propertyId },
     });
 
-    applications.set(application.id, application);
+    if (!listing) {
+      // Create a placeholder listing if none exists
+      listing = await prisma.listing.create({
+        data: {
+          propertyId: body.propertyId,
+          price: body.monthlyRent,
+          status: 'active',
+          type: 'rent',
+          title: 'Rental Application',
+          description: '',
+        },
+      });
+    }
+
+    // Get or create the applicant user
+    const primaryApplicant = applicants.find((a) => a.type === 'primary') || applicants[0];
+    let applicantUser = await prisma.user.findFirst({
+      where: { email: primaryApplicant.email },
+    });
+
+    if (!applicantUser) {
+      applicantUser = await prisma.user.create({
+        data: {
+          email: primaryApplicant.email,
+          firstName: primaryApplicant.firstName,
+          lastName: primaryApplicant.lastName,
+          phone: primaryApplicant.phone,
+          role: 'tenant',
+        },
+      });
+    }
+
+    const dbApp = await prisma.tenantApplication.create({
+      data: {
+        listingId: listing.id,
+        applicantId: applicantUser.id,
+        propertyId: body.propertyId,
+        unitId: body.unitId,
+        status: 'pending',
+        desiredMoveIn: new Date(body.desiredMoveIn),
+        desiredLeaseTerm: body.desiredLeaseTerm,
+        requestedMonthlyRent: Math.round(body.monthlyRent),
+        applicationFeeAmount: 50,
+        applicationFeePaid: false,
+        screeningConsent: body.screeningConsent,
+        screeningConsentDate: body.screeningConsent ? now : null,
+        applicantsData: applicants as unknown as Prisma.JsonValue,
+        applicationNotes: [],
+        expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    // Update applicants with application ID
+    const updatedApplicants = applicants.map((a) => ({ ...a, applicationId: dbApp.id }));
+    await prisma.tenantApplication.update({
+      where: { id: dbApp.id },
+      data: { applicantsData: updatedApplicants as unknown as Prisma.JsonValue },
+    });
+
+    const application = dbToApplication({ ...dbApp, applicantsData: updatedApplicants });
 
     return reply.status(201).send({
       success: true,
@@ -648,14 +767,20 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
   // Get application by ID
   app.get('/applications/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const application = applications.get(id);
 
-    if (!application) {
+    const dbApp = await prisma.tenantApplication.findUnique({
+      where: { id },
+      include: { screeningReports: true },
+    });
+
+    if (!dbApp) {
       return reply.status(404).send({
         success: false,
         error: 'Application not found',
       });
     }
+
+    const application = dbToApplication(dbApp);
 
     return reply.send({
       success: true,
@@ -671,19 +796,18 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       riskLevel?: RiskLevel;
     };
 
-    let results = Array.from(applications.values());
+    const where: Prisma.TenantApplicationWhereInput = {};
+    if (query.propertyId) where.propertyId = query.propertyId;
+    if (query.status) where.status = query.status;
+    if (query.riskLevel) where.riskLevel = query.riskLevel as PrismaRiskLevel;
 
-    if (query.propertyId) {
-      results = results.filter((a) => a.propertyId === query.propertyId);
-    }
-    if (query.status) {
-      results = results.filter((a) => a.status === query.status);
-    }
-    if (query.riskLevel) {
-      results = results.filter((a) => a.riskLevel === query.riskLevel);
-    }
+    const dbApps = await prisma.tenantApplication.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: { screeningReports: true },
+    });
 
-    results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const results = dbApps.map((app) => dbToApplication(app)).filter(Boolean);
 
     return reply.send({
       success: true,
@@ -696,16 +820,20 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
   app.post('/applications/:id/screen', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { types?: ScreeningType[] };
-    const application = applications.get(id);
 
-    if (!application) {
+    const dbApp = await prisma.tenantApplication.findUnique({
+      where: { id },
+      include: { screeningReports: true },
+    });
+
+    if (!dbApp) {
       return reply.status(404).send({
         success: false,
         error: 'Application not found',
       });
     }
 
-    if (!application.screeningConsent) {
+    if (!dbApp.screeningConsent) {
       return reply.status(400).send({
         success: false,
         error: 'Screening consent not provided',
@@ -714,12 +842,54 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
 
     const types = body.types || ['credit', 'criminal', 'eviction'];
     const now = new Date();
+    const applicantsData = (dbApp.applicantsData || []) as Applicant[];
 
-    application.status = 'screening';
+    // Update status to screening
+    await prisma.tenantApplication.update({
+      where: { id },
+      data: { status: 'screening' },
+    });
 
-    for (const applicant of application.applicants) {
+    // Create screening reports for each applicant
+    for (const applicant of applicantsData) {
       for (const type of types) {
-        const report: ScreeningReport = {
+        let reportData: CreditReport | CriminalReport | EvictionReport | null = null;
+        let score: number | null = null;
+
+        switch (type) {
+          case 'credit':
+            reportData = generateMockCreditReport();
+            score = reportData.creditScore;
+            break;
+          case 'criminal':
+            reportData = generateMockCriminalReport();
+            break;
+          case 'eviction':
+            reportData = generateMockEvictionReport();
+            break;
+        }
+
+        // Create the report in the database
+        await prisma.screeningReport.create({
+          data: {
+            applicationId: id,
+            applicantName: `${applicant.firstName} ${applicant.lastName}`,
+            applicantEmail: applicant.email,
+            type: mapScreeningType(type),
+            provider: 'mock' as PrismaScreeningProvider,
+            status: 'completed' as PrismaReportStatus,
+            requestedAt: now,
+            completedAt: now,
+            expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            score,
+            data: reportData as unknown as Prisma.JsonValue,
+            riskFactors: [],
+            recommendations: [],
+          },
+        });
+
+        // Add to applicant's local reports
+        applicant.screeningReports.push({
           id: generateId(),
           applicantId: applicant.id,
           type,
@@ -728,42 +898,64 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
           requestedAt: now,
           completedAt: now,
           expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-          score: null,
-          data: null,
+          score,
+          data: reportData,
           riskFactors: [],
           recommendations: [],
-        };
-
-        switch (type) {
-          case 'credit':
-            report.data = generateMockCreditReport();
-            report.score = (report.data as CreditReport).creditScore;
-            break;
-          case 'criminal':
-            report.data = generateMockCriminalReport();
-            break;
-          case 'eviction':
-            report.data = generateMockEvictionReport();
-            break;
-        }
-
-        applicant.screeningReports.push(report);
+        });
       }
 
-      // Calculate applicant score
-      const criteria = screeningCriteria.get('default')!;
+      // Get default criteria and calculate scores
+      const defaultCriteria = await prisma.screeningCriteria.findFirst({
+        where: { isDefault: true },
+      });
+      const criteria = dbToCriteria(defaultCriteria) || {
+        id: 'default',
+        name: 'Default',
+        propertyId: null,
+        isDefault: true,
+        minCreditScore: 650,
+        maxDebtToIncomeRatio: 43,
+        minIncomeToRentRatio: 3,
+        maxLatePayments: 3,
+        maxCollections: 2,
+        allowBankruptcy: false,
+        bankruptcyLookbackYears: 7,
+        allowEvictions: false,
+        evictionLookbackYears: 7,
+        allowFelonies: false,
+        felonyLookbackYears: 7,
+        allowMisdemeanors: true,
+        misdemeanorLookbackYears: 3,
+        requireEmploymentVerification: true,
+        requireIncomeVerification: true,
+        requireRentalHistory: true,
+        minRentalHistoryMonths: 12,
+      };
+
       applicant.score = calculateApplicantScore(applicant, criteria);
       applicant.riskFactors = generateRiskFactors(applicant, criteria);
     }
 
     // Calculate overall score
-    const scores = application.applicants.map((a) => a.score || 0);
-    application.overallScore = scores.reduce((sum, s) => sum + s, 0) / scores.length;
-    application.riskLevel = determineRiskLevel(application.overallScore);
-    application.status = 'review';
-    application.updatedAt = now;
+    const scores = applicantsData.map((a) => a.score || 0);
+    const overallScore = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+    const riskLevel = determineRiskLevel(overallScore);
 
-    applications.set(id, application);
+    // Update application with scores and new status
+    const updatedApp = await prisma.tenantApplication.update({
+      where: { id },
+      data: {
+        status: 'review',
+        overallScore,
+        riskLevel: riskLevel as PrismaRiskLevel,
+        applicantsData: applicantsData as unknown as Prisma.JsonValue,
+        updatedAt: now,
+      },
+      include: { screeningReports: true },
+    });
+
+    const application = dbToApplication(updatedApp);
 
     return reply.send({
       success: true,
@@ -781,16 +973,19 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       conditions?: string[];
       requiredDeposit?: number;
     };
-    const application = applications.get(id);
 
-    if (!application) {
+    const dbApp = await prisma.tenantApplication.findUnique({
+      where: { id },
+    });
+
+    if (!dbApp) {
       return reply.status(404).send({
         success: false,
         error: 'Application not found',
       });
     }
 
-    if (application.status !== 'review') {
+    if (dbApp.status !== 'review') {
       return reply.status(400).send({
         success: false,
         error: 'Application must be in review status',
@@ -798,23 +993,30 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const now = new Date();
-
-    application.decision = {
+    const decision: ApplicationDecision = {
       decision: body.decision,
       decidedAt: now,
       decidedBy: body.decidedBy,
       reason: body.reason,
       conditions: body.conditions || [],
       requiredDeposit: body.requiredDeposit || null,
-      approvedRent: body.decision !== 'denied' ? application.monthlyRent : null,
-      approvedLeaseTerm: body.decision !== 'denied' ? application.desiredLeaseTerm : null,
+      approvedRent: body.decision !== 'denied' ? (dbApp.requestedMonthlyRent || 0) : null,
+      approvedLeaseTerm: body.decision !== 'denied' ? (dbApp.desiredLeaseTerm || 12) : null,
       validUntil: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
     };
 
-    application.status = body.decision === 'denied' ? 'denied' : body.decision;
-    application.updatedAt = now;
+    const updatedApp = await prisma.tenantApplication.update({
+      where: { id },
+      data: {
+        status: body.decision === 'denied' ? 'denied' : body.decision,
+        decision: decision as unknown as Prisma.JsonValue,
+        reviewedBy: body.decidedBy,
+        reviewedAt: now,
+        updatedAt: now,
+      },
+    });
 
-    applications.set(id, application);
+    const application = dbToApplication(updatedApp);
 
     return reply.send({
       success: true,
@@ -830,15 +1032,19 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       reportId: string;
     };
 
-    const application = applications.get(appId);
-    if (!application) {
+    const dbApp = await prisma.tenantApplication.findUnique({
+      where: { id: appId },
+    });
+
+    if (!dbApp) {
       return reply.status(404).send({
         success: false,
         error: 'Application not found',
       });
     }
 
-    const applicant = application.applicants.find((a) => a.id === applicantId);
+    const applicantsData = (dbApp.applicantsData || []) as Applicant[];
+    const applicant = applicantsData.find((a) => a.id === applicantId);
     if (!applicant) {
       return reply.status(404).send({
         success: false,
@@ -862,7 +1068,11 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
 
   // Screening criteria routes
   app.get('/criteria', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const results = Array.from(screeningCriteria.values());
+    const dbCriteria = await prisma.screeningCriteria.findMany({
+      orderBy: { isDefault: 'desc' },
+    });
+
+    const results = dbCriteria.map((c) => dbToCriteria(c)).filter(Boolean);
 
     return reply.send({
       success: true,
@@ -873,23 +1083,40 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
   app.post('/criteria', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = criteriaSchema.parse(request.body);
 
-    const criteria: ScreeningCriteria = {
-      id: generateId(),
-      ...body,
-      propertyId: body.propertyId || null,
-    };
-
     // If setting as default, unset other defaults
     if (body.isDefault) {
-      for (const [id, c] of screeningCriteria) {
-        if (c.isDefault) {
-          c.isDefault = false;
-          screeningCriteria.set(id, c);
-        }
-      }
+      await prisma.screeningCriteria.updateMany({
+        where: { isDefault: true },
+        data: { isDefault: false },
+      });
     }
 
-    screeningCriteria.set(criteria.id, criteria);
+    const dbCriteria = await prisma.screeningCriteria.create({
+      data: {
+        name: body.name,
+        propertyId: body.propertyId,
+        isDefault: body.isDefault,
+        minCreditScore: body.minCreditScore,
+        maxDebtToIncomeRatio: body.maxDebtToIncomeRatio,
+        minIncomeToRentRatio: body.minIncomeToRentRatio,
+        maxLatePayments: body.maxLatePayments,
+        maxCollections: body.maxCollections,
+        allowBankruptcy: body.allowBankruptcy,
+        bankruptcyLookbackYears: body.bankruptcyLookbackYears,
+        allowEvictions: body.allowEvictions,
+        evictionLookbackYears: body.evictionLookbackYears,
+        allowFelonies: body.allowFelonies,
+        felonyLookbackYears: body.felonyLookbackYears,
+        allowMisdemeanors: body.allowMisdemeanors,
+        misdemeanorLookbackYears: body.misdemeanorLookbackYears,
+        requireEmploymentVerification: body.requireEmploymentVerification,
+        requireIncomeVerification: body.requireIncomeVerification,
+        requireRentalHistory: body.requireRentalHistory,
+        minRentalHistoryMonths: body.minRentalHistoryMonths,
+      },
+    });
+
+    const criteria = dbToCriteria(dbCriteria);
 
     return reply.status(201).send({
       success: true,
@@ -899,14 +1126,19 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/criteria/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const criteria = screeningCriteria.get(id);
 
-    if (!criteria) {
+    const dbCriteria = await prisma.screeningCriteria.findUnique({
+      where: { id },
+    });
+
+    if (!dbCriteria) {
       return reply.status(404).send({
         success: false,
         error: 'Criteria not found',
       });
     }
+
+    const criteria = dbToCriteria(dbCriteria);
 
     return reply.send({
       success: true,
@@ -923,16 +1155,20 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       documents: string[];
       notes?: string;
     };
-    const application = applications.get(id);
 
-    if (!application) {
+    const dbApp = await prisma.tenantApplication.findUnique({
+      where: { id },
+    });
+
+    if (!dbApp) {
       return reply.status(404).send({
         success: false,
         error: 'Application not found',
       });
     }
 
-    const applicant = application.applicants.find((a) => a.id === body.applicantId);
+    const applicantsData = (dbApp.applicantsData || []) as Applicant[];
+    const applicant = applicantsData.find((a) => a.id === body.applicantId);
     if (!applicant) {
       return reply.status(404).send({
         success: false,
@@ -945,6 +1181,15 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
     applicant.incomeInfo.verificationMethod = 'document_review';
     applicant.incomeInfo.verificationDate = now;
 
+    const incomeReportData: IncomeReport = {
+      verified: true,
+      reportedIncome: applicant.incomeInfo.annualIncome,
+      verifiedIncome: body.verifiedIncome,
+      discrepancy: Math.abs(applicant.incomeInfo.annualIncome - body.verifiedIncome),
+      documents: body.documents,
+      notes: body.notes || '',
+    };
+
     const incomeReport: ScreeningReport = {
       id: generateId(),
       applicantId: applicant.id,
@@ -955,21 +1200,37 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       completedAt: now,
       expiresAt: null,
       score: null,
-      data: {
-        verified: true,
-        reportedIncome: applicant.incomeInfo.annualIncome,
-        verifiedIncome: body.verifiedIncome,
-        discrepancy: Math.abs(applicant.incomeInfo.annualIncome - body.verifiedIncome),
-        documents: body.documents,
-        notes: body.notes || '',
-      } as IncomeReport,
+      data: incomeReportData,
       riskFactors: [],
       recommendations: [],
     };
 
     applicant.screeningReports.push(incomeReport);
-    application.updatedAt = now;
-    applications.set(id, application);
+
+    // Save to database
+    await prisma.screeningReport.create({
+      data: {
+        applicationId: id,
+        applicantName: `${applicant.firstName} ${applicant.lastName}`,
+        applicantEmail: applicant.email,
+        type: 'income' as PrismaScreeningType,
+        provider: 'mock' as PrismaScreeningProvider,
+        status: 'completed' as PrismaReportStatus,
+        requestedAt: now,
+        completedAt: now,
+        data: incomeReportData as unknown as Prisma.JsonValue,
+        riskFactors: [],
+        recommendations: [],
+      },
+    });
+
+    await prisma.tenantApplication.update({
+      where: { id },
+      data: {
+        applicantsData: applicantsData as unknown as Prisma.JsonValue,
+        updatedAt: now,
+      },
+    });
 
     return reply.send({
       success: true,
@@ -989,16 +1250,20 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       verifiedBy: string;
       notes?: string;
     };
-    const application = applications.get(id);
 
-    if (!application) {
+    const dbApp = await prisma.tenantApplication.findUnique({
+      where: { id },
+    });
+
+    if (!dbApp) {
       return reply.status(404).send({
         success: false,
         error: 'Application not found',
       });
     }
 
-    const applicant = application.applicants.find((a) => a.id === body.applicantId);
+    const applicantsData = (dbApp.applicantsData || []) as Applicant[];
+    const applicant = applicantsData.find((a) => a.id === body.applicantId);
     if (!applicant) {
       return reply.status(404).send({
         success: false,
@@ -1007,6 +1272,17 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const now = new Date();
+
+    const employmentReportData: EmploymentReport = {
+      verified: true,
+      employer: body.employer,
+      jobTitle: body.jobTitle,
+      startDate: new Date(body.startDate),
+      salary: body.salary || null,
+      verifiedBy: body.verifiedBy,
+      verifiedDate: now,
+      notes: body.notes || '',
+    };
 
     const employmentReport: ScreeningReport = {
       id: generateId(),
@@ -1018,23 +1294,37 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       completedAt: now,
       expiresAt: null,
       score: null,
-      data: {
-        verified: true,
-        employer: body.employer,
-        jobTitle: body.jobTitle,
-        startDate: new Date(body.startDate),
-        salary: body.salary || null,
-        verifiedBy: body.verifiedBy,
-        verifiedDate: now,
-        notes: body.notes || '',
-      } as EmploymentReport,
+      data: employmentReportData,
       riskFactors: [],
       recommendations: [],
     };
 
     applicant.screeningReports.push(employmentReport);
-    application.updatedAt = now;
-    applications.set(id, application);
+
+    // Save to database
+    await prisma.screeningReport.create({
+      data: {
+        applicationId: id,
+        applicantName: `${applicant.firstName} ${applicant.lastName}`,
+        applicantEmail: applicant.email,
+        type: 'employment' as PrismaScreeningType,
+        provider: 'mock' as PrismaScreeningProvider,
+        status: 'completed' as PrismaReportStatus,
+        requestedAt: now,
+        completedAt: now,
+        data: employmentReportData as unknown as Prisma.JsonValue,
+        riskFactors: [],
+        recommendations: [],
+      },
+    });
+
+    await prisma.tenantApplication.update({
+      where: { id },
+      data: {
+        applicantsData: applicantsData as unknown as Prisma.JsonValue,
+        updatedAt: now,
+      },
+    });
 
     return reply.send({
       success: true,
@@ -1045,8 +1335,6 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
 
 // Export for testing
 export {
-  applications,
-  screeningCriteria,
   calculateApplicantScore,
   determineRiskLevel,
   generateRiskFactors,

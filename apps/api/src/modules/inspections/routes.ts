@@ -1,67 +1,19 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import {
+  prisma,
+  Prisma,
+  type InspectionType as PrismaInspectionType,
+  type InspectionStatus as PrismaInspectionStatus,
+  type ItemCondition as PrismaItemCondition,
+  type RoomType as PrismaRoomType,
+} from '@realriches/database';
 
 // Types
 export type InspectionType = 'move_in' | 'move_out' | 'routine' | 'pre_listing' | 'annual' | 'complaint';
 export type InspectionStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'rescheduled';
 export type ItemCondition = 'excellent' | 'good' | 'fair' | 'poor' | 'damaged' | 'missing';
 export type RoomType = 'living_room' | 'bedroom' | 'bathroom' | 'kitchen' | 'dining_room' | 'garage' | 'basement' | 'attic' | 'exterior' | 'yard' | 'other';
-
-export interface Inspection {
-  id: string;
-  propertyId: string;
-  unitId: string | null;
-  leaseId: string | null;
-  tenantId: string | null;
-  type: InspectionType;
-  status: InspectionStatus;
-  scheduledDate: Date;
-  completedDate: Date | null;
-  inspectorId: string;
-  inspectorName: string;
-  notes: string | null;
-  tenantPresent: boolean | null;
-  tenantSignature: string | null;
-  inspectorSignature: string | null;
-  rooms: InspectionRoom[];
-  summary: InspectionSummary | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface InspectionRoom {
-  id: string;
-  inspectionId: string;
-  roomType: RoomType;
-  roomName: string;
-  items: InspectionItem[];
-  photos: InspectionPhoto[];
-  overallCondition: ItemCondition | null;
-  notes: string | null;
-}
-
-export interface InspectionItem {
-  id: string;
-  roomId: string;
-  name: string;
-  description: string | null;
-  condition: ItemCondition;
-  previousCondition: ItemCondition | null;
-  notes: string | null;
-  requiresRepair: boolean;
-  estimatedRepairCost: number | null;
-  photos: string[];
-}
-
-export interface InspectionPhoto {
-  id: string;
-  roomId: string;
-  itemId: string | null;
-  url: string;
-  thumbnailUrl: string;
-  caption: string | null;
-  takenAt: Date;
-}
 
 export interface InspectionSummary {
   totalRooms: number;
@@ -71,19 +23,6 @@ export interface InspectionSummary {
   estimatedTotalRepairCost: number;
   overallCondition: ItemCondition;
   recommendations: string[];
-}
-
-export interface InspectionTemplate {
-  id: string;
-  name: string;
-  propertyType: string;
-  rooms: Array<{
-    roomType: RoomType;
-    roomName: string;
-    items: Array<{ name: string; description: string | null }>;
-  }>;
-  isDefault: boolean;
-  createdAt: Date;
 }
 
 export interface ConditionReport {
@@ -110,9 +49,14 @@ export interface ConditionReport {
   generatedAt: Date;
 }
 
-// In-memory stores
-const inspections = new Map<string, Inspection>();
-const templates = new Map<string, InspectionTemplate>();
+// Helper: convert Decimal to number
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
 
 // Schemas
 const scheduleInspectionSchema = z.object({
@@ -180,11 +124,7 @@ const createTemplateSchema = z.object({
 });
 
 // Helper functions
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-}
-
-function calculateOverallCondition(items: InspectionItem[]): ItemCondition {
+function calculateOverallCondition(items: Array<{ condition: ItemCondition }>): ItemCondition {
   if (items.length === 0) return 'good';
 
   const conditionScores: Record<ItemCondition, number> = {
@@ -206,7 +146,13 @@ function calculateOverallCondition(items: InspectionItem[]): ItemCondition {
   return 'damaged';
 }
 
-function generateSummary(rooms: InspectionRoom[]): InspectionSummary {
+function generateSummary(rooms: Array<{
+  items: Array<{
+    condition: ItemCondition;
+    requiresRepair: boolean;
+    estimatedRepairCost: number | null;
+  }>;
+}>): InspectionSummary {
   const allItems = rooms.flatMap((r) => r.items);
 
   const conditionBreakdown: Record<ItemCondition, number> = {
@@ -252,144 +198,103 @@ function generateSummary(rooms: InspectionRoom[]): InspectionSummary {
   };
 }
 
-// Initialize default templates
-function initializeDefaultTemplates(): void {
-  const apartmentTemplate: InspectionTemplate = {
-    id: 'default-apartment',
-    name: 'Standard Apartment Inspection',
-    propertyType: 'apartment',
-    rooms: [
-      {
-        roomType: 'living_room',
-        roomName: 'Living Room',
-        items: [
-          { name: 'Walls', description: 'Check for holes, marks, damage' },
-          { name: 'Ceiling', description: 'Check for stains, cracks' },
-          { name: 'Flooring', description: 'Check carpet/hardwood condition' },
-          { name: 'Windows', description: 'Check glass, locks, screens' },
-          { name: 'Light Fixtures', description: 'Check all lights work' },
-          { name: 'Outlets', description: 'Test all electrical outlets' },
-        ],
-      },
-      {
-        roomType: 'kitchen',
-        roomName: 'Kitchen',
-        items: [
-          { name: 'Refrigerator', description: 'Check operation, cleanliness' },
-          { name: 'Stove/Oven', description: 'Check burners, oven operation' },
-          { name: 'Dishwasher', description: 'Check operation, leaks' },
-          { name: 'Sink', description: 'Check faucet, drainage, disposal' },
-          { name: 'Cabinets', description: 'Check doors, hinges, shelves' },
-          { name: 'Countertops', description: 'Check for damage, stains' },
-        ],
-      },
-      {
-        roomType: 'bathroom',
-        roomName: 'Bathroom',
-        items: [
-          { name: 'Toilet', description: 'Check flushing, leaks, seat' },
-          { name: 'Sink', description: 'Check faucet, drainage' },
-          { name: 'Shower/Tub', description: 'Check faucet, drainage, tiles' },
-          { name: 'Exhaust Fan', description: 'Check operation' },
-          { name: 'Mirror/Cabinet', description: 'Check condition' },
-        ],
-      },
-      {
-        roomType: 'bedroom',
-        roomName: 'Bedroom',
-        items: [
-          { name: 'Walls', description: 'Check for holes, marks, damage' },
-          { name: 'Closet', description: 'Check doors, shelves, rod' },
-          { name: 'Windows', description: 'Check glass, locks, screens' },
-          { name: 'Flooring', description: 'Check condition' },
-        ],
-      },
-    ],
-    isDefault: true,
-    createdAt: new Date(),
-  };
-
-  templates.set(apartmentTemplate.id, apartmentTemplate);
-}
-
-initializeDefaultTemplates();
-
 // Route handlers
 export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
   // Schedule new inspection
   app.post('/', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = scheduleInspectionSchema.parse(request.body);
-    const now = new Date();
 
-    const inspection: Inspection = {
-      id: generateId(),
-      propertyId: body.propertyId,
-      unitId: body.unitId || null,
-      leaseId: body.leaseId || null,
-      tenantId: body.tenantId || null,
-      type: body.type,
-      status: 'scheduled',
-      scheduledDate: new Date(body.scheduledDate),
-      completedDate: null,
-      inspectorId: body.inspectorId,
-      inspectorName: body.inspectorName,
-      notes: body.notes || null,
-      tenantPresent: null,
-      tenantSignature: null,
-      inspectorSignature: null,
-      rooms: [],
-      summary: null,
-      createdAt: now,
-      updatedAt: now,
-    };
+    // Get template if provided
+    let templateRooms: Array<{
+      roomType: RoomType;
+      roomName: string;
+      items: Array<{ name: string; description: string | null }>;
+    }> = [];
 
-    // Apply template if provided
     if (body.templateId) {
-      const template = templates.get(body.templateId);
+      const template = await prisma.inspectionTemplate.findUnique({
+        where: { id: body.templateId },
+      });
       if (template) {
-        inspection.rooms = template.rooms.map((r) => ({
-          id: generateId(),
-          inspectionId: inspection.id,
-          roomType: r.roomType,
-          roomName: r.roomName,
-          items: r.items.map((i) => ({
-            id: generateId(),
-            roomId: '',
-            name: i.name,
-            description: i.description || null,
-            condition: 'good' as ItemCondition,
-            previousCondition: null,
-            notes: null,
-            requiresRepair: false,
-            estimatedRepairCost: null,
-            photos: [],
-          })),
-          photos: [],
-          overallCondition: null,
-          notes: null,
-        }));
-
-        // Set room IDs on items
-        for (const room of inspection.rooms) {
-          for (const item of room.items) {
-            item.roomId = room.id;
-          }
-        }
+        templateRooms = template.rooms as typeof templateRooms;
       }
     }
 
-    inspections.set(inspection.id, inspection);
+    const inspection = await prisma.inspection.create({
+      data: {
+        propertyId: body.propertyId,
+        unitId: body.unitId || null,
+        leaseId: body.leaseId || null,
+        tenantId: body.tenantId || null,
+        type: body.type,
+        status: 'scheduled',
+        scheduledDate: new Date(body.scheduledDate),
+        inspectorId: body.inspectorId,
+        findings: body.notes || null,
+        checklist: [],
+        photos: [],
+      },
+    });
+
+    // Create rooms from template
+    for (const templateRoom of templateRooms) {
+      const room = await prisma.inspectionRoom.create({
+        data: {
+          inspectionId: inspection.id,
+          roomType: templateRoom.roomType as PrismaRoomType,
+          roomName: templateRoom.roomName,
+        },
+      });
+
+      // Create items in the room
+      for (const templateItem of templateRoom.items) {
+        await prisma.inspectionItem.create({
+          data: {
+            roomId: room.id,
+            name: templateItem.name,
+            description: templateItem.description,
+            condition: 'good' as PrismaItemCondition,
+            requiresRepair: false,
+          },
+        });
+      }
+    }
+
+    // Fetch with rooms and items
+    const fullInspection = await prisma.inspection.findUnique({
+      where: { id: inspection.id },
+    });
+
+    const rooms = await prisma.inspectionRoom.findMany({
+      where: { inspectionId: inspection.id },
+      include: {
+        items: true,
+        photos: true,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: inspection,
+      data: {
+        ...fullInspection,
+        rooms: rooms.map((r) => ({
+          ...r,
+          items: r.items.map((i) => ({
+            ...i,
+            estimatedRepairCost: i.estimatedRepairCost ? toNumber(i.estimatedRepairCost) : null,
+          })),
+        })),
+      },
     });
   });
 
   // Get inspection by ID
   app.get('/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const inspection = inspections.get(id);
+
+    const inspection = await prisma.inspection.findUnique({
+      where: { id },
+    });
 
     if (!inspection) {
       return reply.status(404).send({
@@ -398,9 +303,26 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
+    const rooms = await prisma.inspectionRoom.findMany({
+      where: { inspectionId: id },
+      include: {
+        items: true,
+        photos: true,
+      },
+    });
+
     return reply.send({
       success: true,
-      data: inspection,
+      data: {
+        ...inspection,
+        rooms: rooms.map((r) => ({
+          ...r,
+          items: r.items.map((i) => ({
+            ...i,
+            estimatedRepairCost: i.estimatedRepairCost ? toNumber(i.estimatedRepairCost) : null,
+          })),
+        })),
+      },
     });
   });
 
@@ -416,33 +338,24 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       toDate?: string;
     };
 
-    let results = Array.from(inspections.values());
+    const where: Record<string, unknown> = {};
 
-    if (query.propertyId) {
-      results = results.filter((i) => i.propertyId === query.propertyId);
-    }
-    if (query.unitId) {
-      results = results.filter((i) => i.unitId === query.unitId);
-    }
-    if (query.tenantId) {
-      results = results.filter((i) => i.tenantId === query.tenantId);
-    }
-    if (query.type) {
-      results = results.filter((i) => i.type === query.type);
-    }
-    if (query.status) {
-      results = results.filter((i) => i.status === query.status);
-    }
-    if (query.fromDate) {
-      const from = new Date(query.fromDate);
-      results = results.filter((i) => i.scheduledDate >= from);
-    }
-    if (query.toDate) {
-      const to = new Date(query.toDate);
-      results = results.filter((i) => i.scheduledDate <= to);
+    if (query.propertyId) where.propertyId = query.propertyId;
+    if (query.unitId) where.unitId = query.unitId;
+    if (query.tenantId) where.tenantId = query.tenantId;
+    if (query.type) where.type = query.type;
+    if (query.status) where.status = query.status;
+
+    if (query.fromDate || query.toDate) {
+      where.scheduledDate = {};
+      if (query.fromDate) (where.scheduledDate as Record<string, Date>).gte = new Date(query.fromDate);
+      if (query.toDate) (where.scheduledDate as Record<string, Date>).lte = new Date(query.toDate);
     }
 
-    results.sort((a, b) => b.scheduledDate.getTime() - a.scheduledDate.getTime());
+    const results = await prisma.inspection.findMany({
+      where,
+      orderBy: { scheduledDate: 'desc' },
+    });
 
     return reply.send({
       success: true,
@@ -455,7 +368,10 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = updateInspectionSchema.parse(request.body);
-    const inspection = inspections.get(id);
+
+    const inspection = await prisma.inspection.findUnique({
+      where: { id },
+    });
 
     if (!inspection) {
       return reply.status(404).send({
@@ -471,14 +387,15 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const updated: Inspection = {
-      ...inspection,
-      ...body,
-      scheduledDate: body.scheduledDate ? new Date(body.scheduledDate) : inspection.scheduledDate,
-      updatedAt: new Date(),
-    };
-
-    inspections.set(id, updated);
+    const updated = await prisma.inspection.update({
+      where: { id },
+      data: {
+        scheduledDate: body.scheduledDate ? new Date(body.scheduledDate) : undefined,
+        inspectorId: body.inspectorId,
+        findings: body.notes,
+        status: body.status,
+      },
+    });
 
     return reply.send({
       success: true,
@@ -489,7 +406,10 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
   // Start inspection
   app.post('/:id/start', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const inspection = inspections.get(id);
+
+    const inspection = await prisma.inspection.findUnique({
+      where: { id },
+    });
 
     if (!inspection) {
       return reply.status(404).send({
@@ -505,13 +425,14 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    inspection.status = 'in_progress';
-    inspection.updatedAt = new Date();
-    inspections.set(id, inspection);
+    const updated = await prisma.inspection.update({
+      where: { id },
+      data: { status: 'in_progress' },
+    });
 
     return reply.send({
       success: true,
-      data: inspection,
+      data: updated,
     });
   });
 
@@ -519,7 +440,10 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
   app.post('/:id/rooms', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = addRoomSchema.parse(request.body);
-    const inspection = inspections.get(id);
+
+    const inspection = await prisma.inspection.findUnique({
+      where: { id },
+    });
 
     if (!inspection) {
       return reply.status(404).send({
@@ -528,20 +452,14 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const room: InspectionRoom = {
-      id: generateId(),
-      inspectionId: id,
-      roomType: body.roomType,
-      roomName: body.roomName,
-      items: [],
-      photos: [],
-      overallCondition: null,
-      notes: body.notes || null,
-    };
-
-    inspection.rooms.push(room);
-    inspection.updatedAt = new Date();
-    inspections.set(id, inspection);
+    const room = await prisma.inspectionRoom.create({
+      data: {
+        inspectionId: id,
+        roomType: body.roomType as PrismaRoomType,
+        roomName: body.roomName,
+        notes: body.notes || null,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
@@ -553,7 +471,10 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
   app.post('/:id/rooms/:roomId/items', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id, roomId } = request.params as { id: string; roomId: string };
     const body = addItemSchema.parse(request.body);
-    const inspection = inspections.get(id);
+
+    const inspection = await prisma.inspection.findUnique({
+      where: { id },
+    });
 
     if (!inspection) {
       return reply.status(404).send({
@@ -562,7 +483,10 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const room = inspection.rooms.find((r) => r.id === roomId);
+    const room = await prisma.inspectionRoom.findFirst({
+      where: { id: roomId, inspectionId: id },
+    });
+
     if (!room) {
       return reply.status(404).send({
         success: false,
@@ -570,35 +494,54 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const item: InspectionItem = {
-      id: generateId(),
-      roomId,
-      name: body.name,
-      description: body.description || null,
-      condition: body.condition,
-      previousCondition: null,
-      notes: body.notes || null,
-      requiresRepair: body.requiresRepair,
-      estimatedRepairCost: body.estimatedRepairCost || null,
-      photos: [],
-    };
+    const item = await prisma.inspectionItem.create({
+      data: {
+        roomId,
+        name: body.name,
+        description: body.description || null,
+        condition: body.condition as PrismaItemCondition,
+        notes: body.notes || null,
+        requiresRepair: body.requiresRepair,
+        estimatedRepairCost: body.estimatedRepairCost || null,
+      },
+    });
 
-    room.items.push(item);
-    room.overallCondition = calculateOverallCondition(room.items);
-    inspection.updatedAt = new Date();
-    inspections.set(id, inspection);
+    // Update room overall condition
+    const allItems = await prisma.inspectionItem.findMany({
+      where: { roomId },
+    });
+
+    const overallCondition = calculateOverallCondition(
+      allItems.map((i) => ({ condition: i.condition as ItemCondition }))
+    );
+
+    await prisma.inspectionRoom.update({
+      where: { id: roomId },
+      data: { overallCondition: overallCondition as PrismaItemCondition },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: item,
+      data: {
+        ...item,
+        estimatedRepairCost: item.estimatedRepairCost ? toNumber(item.estimatedRepairCost) : null,
+      },
     });
   });
 
   // Update item condition
   app.patch('/:id/rooms/:roomId/items/:itemId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id, roomId, itemId } = request.params as { id: string; roomId: string; itemId: string };
-    const body = request.body as Partial<InspectionItem>;
-    const inspection = inspections.get(id);
+    const body = request.body as {
+      condition?: ItemCondition;
+      notes?: string;
+      requiresRepair?: boolean;
+      estimatedRepairCost?: number;
+    };
+
+    const inspection = await prisma.inspection.findUnique({
+      where: { id },
+    });
 
     if (!inspection) {
       return reply.status(404).send({
@@ -607,7 +550,10 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const room = inspection.rooms.find((r) => r.id === roomId);
+    const room = await prisma.inspectionRoom.findFirst({
+      where: { id: roomId, inspectionId: id },
+    });
+
     if (!room) {
       return reply.status(404).send({
         success: false,
@@ -615,28 +561,47 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const itemIndex = room.items.findIndex((i) => i.id === itemId);
-    if (itemIndex === -1) {
+    const existingItem = await prisma.inspectionItem.findFirst({
+      where: { id: itemId, roomId },
+    });
+
+    if (!existingItem) {
       return reply.status(404).send({
         success: false,
         error: 'Item not found',
       });
     }
 
-    room.items[itemIndex] = {
-      ...room.items[itemIndex],
-      ...body,
-      id: itemId,
-      roomId,
-    };
+    const updatedItem = await prisma.inspectionItem.update({
+      where: { id: itemId },
+      data: {
+        condition: body.condition as PrismaItemCondition | undefined,
+        notes: body.notes,
+        requiresRepair: body.requiresRepair,
+        estimatedRepairCost: body.estimatedRepairCost,
+      },
+    });
 
-    room.overallCondition = calculateOverallCondition(room.items);
-    inspection.updatedAt = new Date();
-    inspections.set(id, inspection);
+    // Update room overall condition
+    const allItems = await prisma.inspectionItem.findMany({
+      where: { roomId },
+    });
+
+    const overallCondition = calculateOverallCondition(
+      allItems.map((i) => ({ condition: i.condition as ItemCondition }))
+    );
+
+    await prisma.inspectionRoom.update({
+      where: { id: roomId },
+      data: { overallCondition: overallCondition as PrismaItemCondition },
+    });
 
     return reply.send({
       success: true,
-      data: room.items[itemIndex],
+      data: {
+        ...updatedItem,
+        estimatedRepairCost: updatedItem.estimatedRepairCost ? toNumber(updatedItem.estimatedRepairCost) : null,
+      },
     });
   });
 
@@ -644,7 +609,10 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
   app.post('/:id/rooms/:roomId/photos', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id, roomId } = request.params as { id: string; roomId: string };
     const body = addPhotoSchema.parse(request.body);
-    const inspection = inspections.get(id);
+
+    const inspection = await prisma.inspection.findUnique({
+      where: { id },
+    });
 
     if (!inspection) {
       return reply.status(404).send({
@@ -653,7 +621,10 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const room = inspection.rooms.find((r) => r.id === roomId);
+    const room = await prisma.inspectionRoom.findFirst({
+      where: { id: roomId, inspectionId: id },
+    });
+
     if (!room) {
       return reply.status(404).send({
         success: false,
@@ -661,28 +632,30 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const photo: InspectionPhoto = {
-      id: generateId(),
-      roomId,
-      itemId: body.itemId || null,
-      url: body.url,
-      thumbnailUrl: body.thumbnailUrl || body.url,
-      caption: body.caption || null,
-      takenAt: new Date(),
-    };
+    const photo = await prisma.inspectionPhoto.create({
+      data: {
+        roomId,
+        itemId: body.itemId || null,
+        url: body.url,
+        thumbnailUrl: body.thumbnailUrl || body.url,
+        caption: body.caption || null,
+        takenAt: new Date(),
+      },
+    });
 
-    room.photos.push(photo);
-
-    // Also add to item if itemId provided
+    // Also add to item photos if itemId provided
     if (body.itemId) {
-      const item = room.items.find((i) => i.id === body.itemId);
+      const item = await prisma.inspectionItem.findUnique({
+        where: { id: body.itemId },
+      });
       if (item) {
-        item.photos.push(photo.url);
+        const currentPhotos = (item.photos as string[]) || [];
+        await prisma.inspectionItem.update({
+          where: { id: body.itemId },
+          data: { photos: [...currentPhotos, photo.url] },
+        });
       }
     }
-
-    inspection.updatedAt = new Date();
-    inspections.set(id, inspection);
 
     return reply.status(201).send({
       success: true,
@@ -694,7 +667,10 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
   app.post('/:id/complete', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = completeInspectionSchema.parse(request.body);
-    const inspection = inspections.get(id);
+
+    const inspection = await prisma.inspection.findUnique({
+      where: { id },
+    });
 
     if (!inspection) {
       return reply.status(404).send({
@@ -710,27 +686,60 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    inspection.status = 'completed';
-    inspection.completedDate = new Date();
-    inspection.tenantPresent = body.tenantPresent;
-    inspection.tenantSignature = body.tenantSignature || null;
-    inspection.inspectorSignature = body.inspectorSignature;
-    inspection.notes = body.notes || inspection.notes;
-    inspection.summary = generateSummary(inspection.rooms);
-    inspection.updatedAt = new Date();
+    // Get rooms with items
+    const rooms = await prisma.inspectionRoom.findMany({
+      where: { inspectionId: id },
+      include: { items: true },
+    });
 
-    inspections.set(id, inspection);
+    const summary = generateSummary(
+      rooms.map((r) => ({
+        items: r.items.map((i) => ({
+          condition: i.condition as ItemCondition,
+          requiresRepair: i.requiresRepair,
+          estimatedRepairCost: i.estimatedRepairCost ? toNumber(i.estimatedRepairCost) : null,
+        })),
+      }))
+    );
+
+    const updated = await prisma.inspection.update({
+      where: { id },
+      data: {
+        status: 'completed',
+        completedDate: new Date(),
+        tenantSignature: body.tenantSignature || null,
+        landlordSignature: body.inspectorSignature,
+        tenantSignedAt: body.tenantPresent && body.tenantSignature ? new Date() : null,
+        landlordSignedAt: new Date(),
+        findings: body.notes || inspection.findings,
+        overallCondition: summary.overallCondition,
+        checklist: summary as unknown as Prisma.JsonValue,
+      },
+    });
 
     return reply.send({
       success: true,
-      data: inspection,
+      data: {
+        ...updated,
+        rooms: rooms.map((r) => ({
+          ...r,
+          items: r.items.map((i) => ({
+            ...i,
+            estimatedRepairCost: i.estimatedRepairCost ? toNumber(i.estimatedRepairCost) : null,
+          })),
+        })),
+        summary,
+      },
     });
   });
 
   // Generate condition report
   app.get('/:id/report', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const inspection = inspections.get(id);
+
+    const inspection = await prisma.inspection.findUnique({
+      where: { id },
+    });
 
     if (!inspection) {
       return reply.status(404).send({
@@ -746,25 +755,40 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
+    const rooms = await prisma.inspectionRoom.findMany({
+      where: { inspectionId: id },
+      include: { items: true },
+    });
+
+    const summary = generateSummary(
+      rooms.map((r) => ({
+        items: r.items.map((i) => ({
+          condition: i.condition as ItemCondition,
+          requiresRepair: i.requiresRepair,
+          estimatedRepairCost: i.estimatedRepairCost ? toNumber(i.estimatedRepairCost) : null,
+        })),
+      }))
+    );
+
     const report: ConditionReport = {
       inspectionId: inspection.id,
-      propertyAddress: `Property ${inspection.propertyId}`, // Would fetch from DB
+      propertyAddress: `Property ${inspection.propertyId}`,
       unitNumber: inspection.unitId,
       inspectionDate: inspection.completedDate || inspection.scheduledDate,
-      type: inspection.type,
-      rooms: inspection.rooms.map((r) => ({
+      type: inspection.type as InspectionType,
+      rooms: rooms.map((r) => ({
         name: r.roomName,
-        condition: r.overallCondition || 'good',
+        condition: (r.overallCondition || 'good') as ItemCondition,
         items: r.items.map((i) => ({
           name: i.name,
-          condition: i.condition,
+          condition: i.condition as ItemCondition,
           notes: i.notes,
-          photos: i.photos,
+          photos: (i.photos as string[]) || [],
         })),
       })),
-      summary: inspection.summary!,
+      summary,
       signatures: {
-        inspector: inspection.inspectorSignature,
+        inspector: inspection.landlordSignature,
         tenant: inspection.tenantSignature,
       },
       generatedAt: new Date(),
@@ -780,8 +804,12 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
   app.get('/compare', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = request.query as { moveInId: string; moveOutId: string };
 
-    const moveIn = inspections.get(query.moveInId);
-    const moveOut = inspections.get(query.moveOutId);
+    const moveIn = await prisma.inspection.findUnique({
+      where: { id: query.moveInId },
+    });
+    const moveOut = await prisma.inspection.findUnique({
+      where: { id: query.moveOutId },
+    });
 
     if (!moveIn || !moveOut) {
       return reply.status(404).send({
@@ -789,6 +817,15 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
         error: 'One or both inspections not found',
       });
     }
+
+    const moveInRooms = await prisma.inspectionRoom.findMany({
+      where: { inspectionId: query.moveInId },
+      include: { items: true },
+    });
+    const moveOutRooms = await prisma.inspectionRoom.findMany({
+      where: { inspectionId: query.moveOutId },
+      include: { items: true },
+    });
 
     const comparison: Array<{
       roomName: string;
@@ -808,16 +845,16 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       missing: 0,
     };
 
-    for (const moveOutRoom of moveOut.rooms) {
-      const moveInRoom = moveIn.rooms.find((r) => r.roomName === moveOutRoom.roomName);
+    for (const moveOutRoom of moveOutRooms) {
+      const moveInRoom = moveInRooms.find((r) => r.roomName === moveOutRoom.roomName);
       if (!moveInRoom) continue;
 
       for (const moveOutItem of moveOutRoom.items) {
         const moveInItem = moveInRoom.items.find((i) => i.name === moveOutItem.name);
         if (!moveInItem) continue;
 
-        const moveInValue = conditionValue[moveInItem.condition];
-        const moveOutValue = conditionValue[moveOutItem.condition];
+        const moveInValue = conditionValue[moveInItem.condition as ItemCondition];
+        const moveOutValue = conditionValue[moveOutItem.condition as ItemCondition];
 
         let conditionChange: 'improved' | 'same' | 'declined';
         if (moveOutValue > moveInValue) {
@@ -831,10 +868,12 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
         comparison.push({
           roomName: moveOutRoom.roomName,
           itemName: moveOutItem.name,
-          moveInCondition: moveInItem.condition,
-          moveOutCondition: moveOutItem.condition,
+          moveInCondition: moveInItem.condition as ItemCondition,
+          moveOutCondition: moveOutItem.condition as ItemCondition,
           conditionChange,
-          damageCharge: conditionChange === 'declined' ? moveOutItem.estimatedRepairCost : null,
+          damageCharge: conditionChange === 'declined' && moveOutItem.estimatedRepairCost
+            ? toNumber(moveOutItem.estimatedRepairCost)
+            : null,
         });
       }
     }
@@ -843,18 +882,21 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
       .filter((c) => c.damageCharge)
       .reduce((sum, c) => sum + (c.damageCharge || 0), 0);
 
+    const moveInSummary = moveIn.checklist as unknown as InspectionSummary | null;
+    const moveOutSummary = moveOut.checklist as unknown as InspectionSummary | null;
+
     return reply.send({
       success: true,
       data: {
         moveInInspection: {
           id: moveIn.id,
           date: moveIn.completedDate,
-          overallCondition: moveIn.summary?.overallCondition,
+          overallCondition: moveInSummary?.overallCondition || moveIn.overallCondition,
         },
         moveOutInspection: {
           id: moveOut.id,
           date: moveOut.completedDate,
-          overallCondition: moveOut.summary?.overallCondition,
+          overallCondition: moveOutSummary?.overallCondition || moveOut.overallCondition,
         },
         comparison,
         summary: {
@@ -870,7 +912,9 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
 
   // Template routes
   app.get('/templates', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const results = Array.from(templates.values());
+    const results = await prisma.inspectionTemplate.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
 
     return reply.send({
       success: true,
@@ -880,35 +924,33 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/templates', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createTemplateSchema.parse(request.body);
-    const now = new Date();
 
-    // If setting as default, unset other defaults
+    // If setting as default, unset other defaults for same property type
     if (body.isDefault) {
-      for (const [id, template] of templates) {
-        if (template.propertyType === body.propertyType && template.isDefault) {
-          template.isDefault = false;
-          templates.set(id, template);
-        }
-      }
+      await prisma.inspectionTemplate.updateMany({
+        where: {
+          propertyType: body.propertyType,
+          isDefault: true,
+        },
+        data: { isDefault: false },
+      });
     }
 
-    const template: InspectionTemplate = {
-      id: generateId(),
-      name: body.name,
-      propertyType: body.propertyType,
-      rooms: body.rooms.map((r) => ({
-        roomType: r.roomType,
-        roomName: r.roomName,
-        items: r.items.map((i) => ({
-          name: i.name,
-          description: i.description || null,
+    const template = await prisma.inspectionTemplate.create({
+      data: {
+        name: body.name,
+        propertyType: body.propertyType,
+        rooms: body.rooms.map((r) => ({
+          roomType: r.roomType,
+          roomName: r.roomName,
+          items: r.items.map((i) => ({
+            name: i.name,
+            description: i.description || null,
+          })),
         })),
-      })),
-      isDefault: body.isDefault,
-      createdAt: now,
-    };
-
-    templates.set(template.id, template);
+        isDefault: body.isDefault,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
@@ -918,7 +960,10 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/templates/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const template = templates.get(id);
+
+    const template = await prisma.inspectionTemplate.findUnique({
+      where: { id },
+    });
 
     if (!template) {
       return reply.status(404).send({
@@ -933,6 +978,3 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 }
-
-// Export for testing
-export { inspections, templates, calculateOverallCondition, generateSummary };

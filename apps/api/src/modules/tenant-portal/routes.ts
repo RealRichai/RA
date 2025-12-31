@@ -66,11 +66,12 @@ interface RentPaymentRequest {
 }
 
 // =============================================================================
-// In-Memory Storage
+// Prisma Storage (replaced in-memory Maps)
 // =============================================================================
 
-const paymentMethods = new Map<string, PaymentMethod & { userId: string }>();
-const announcements = new Map<string, { id: string; propertyId: string; title: string; message: string; createdAt: Date }>();
+// paymentMethods and announcements now use Prisma models:
+// - prisma.paymentMethod
+// - prisma.propertyAnnouncement
 
 // =============================================================================
 // Schemas
@@ -234,10 +235,14 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
         const daysRemaining = Math.ceil((lease.endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 
         // Get property announcements
-        const propertyAnnouncements = Array.from(announcements.values())
-          .filter(a => a.propertyId === lease.unit.propertyId)
-          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-          .slice(0, 5);
+        const propertyAnnouncements = await prisma.propertyAnnouncement.findMany({
+          where: {
+            propertyId: lease.unit.propertyId,
+            isActive: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+        });
 
         dashboard = {
           lease: {
@@ -398,8 +403,10 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Verify payment method belongs to user
-      const paymentMethod = paymentMethods.get(data.paymentMethodId);
-      if (!paymentMethod || paymentMethod.userId !== request.user.id) {
+      const paymentMethod = await prisma.paymentMethod.findFirst({
+        where: { id: data.paymentMethodId, userId: request.user.id },
+      });
+      if (!paymentMethod) {
         throw new AppError('NOT_FOUND', 'Payment method not found', 404);
       }
 
@@ -477,21 +484,23 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      const methods = Array.from(paymentMethods.values())
-        .filter(m => m.userId === request.user!.id)
-        .map(m => ({
-          id: m.id,
-          type: m.type,
-          last4: m.last4,
-          brand: m.brand,
-          bankName: m.bankName,
-          isDefault: m.isDefault,
-          expiresAt: m.expiresAt,
-        }));
+      const methods = await prisma.paymentMethod.findMany({
+        where: { userId: request.user.id, status: 'active' },
+      });
 
       return reply.send({
         success: true,
-        data: { paymentMethods: methods },
+        data: {
+          paymentMethods: methods.map(m => ({
+            id: m.id,
+            type: m.type,
+            last4: m.cardLast4 || m.bankLast4 || '',
+            brand: m.cardBrand,
+            bankName: m.bankName,
+            isDefault: m.isDefault,
+            expiresAt: m.cardExpMonth && m.cardExpYear ? `${m.cardExpMonth}/${m.cardExpYear}` : undefined,
+          })),
+        },
       });
     }
   );
@@ -522,32 +531,45 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
 
       const data = AddPaymentMethodSchema.parse(request.body);
 
-      // In production: Verify token with Stripe/Plaid
-      const method: PaymentMethod & { userId: string } = {
-        id: generatePrefixedId('pm'),
-        userId: request.user.id,
-        type: data.type,
-        last4: '4242', // Would come from Stripe
-        brand: data.type === 'card' ? 'Visa' : undefined,
-        bankName: data.type === 'bank_account' ? 'Chase' : undefined,
-        isDefault: data.isDefault,
-        expiresAt: data.type === 'card' ? '12/28' : undefined,
-      };
-
       // If setting as default, unset others
       if (data.isDefault) {
-        for (const m of paymentMethods.values()) {
-          if (m.userId === request.user.id) {
-            m.isDefault = false;
-          }
-        }
+        await prisma.paymentMethod.updateMany({
+          where: { userId: request.user.id, isDefault: true },
+          data: { isDefault: false },
+        });
       }
 
-      paymentMethods.set(method.id, method);
+      // In production: Verify token with Stripe/Plaid and get actual card details
+      const method = await prisma.paymentMethod.create({
+        data: {
+          id: generatePrefixedId('pm'),
+          userId: request.user.id,
+          type: data.type,
+          cardLast4: data.type === 'card' ? '4242' : null, // Would come from Stripe
+          cardBrand: data.type === 'card' ? 'Visa' : null,
+          cardExpMonth: data.type === 'card' ? 12 : null,
+          cardExpYear: data.type === 'card' ? 2028 : null,
+          bankName: data.type === 'bank_account' ? 'Chase' : null,
+          bankLast4: data.type === 'bank_account' ? '6789' : null,
+          bankAccountType: data.type === 'bank_account' ? 'checking' : null,
+          isDefault: data.isDefault,
+          status: 'active',
+        },
+      });
 
       return reply.status(201).send({
         success: true,
-        data: { paymentMethod: method },
+        data: {
+          paymentMethod: {
+            id: method.id,
+            type: method.type,
+            last4: method.cardLast4 || method.bankLast4 || '',
+            brand: method.cardBrand,
+            bankName: method.bankName,
+            isDefault: method.isDefault,
+            expiresAt: method.cardExpMonth && method.cardExpYear ? `${method.cardExpMonth}/${method.cardExpYear}` : undefined,
+          },
+        },
       });
     }
   );
@@ -577,13 +599,18 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { methodId } = request.params;
-      const method = paymentMethods.get(methodId);
+      const method = await prisma.paymentMethod.findFirst({
+        where: { id: methodId, userId: request.user.id },
+      });
 
-      if (!method || method.userId !== request.user.id) {
+      if (!method) {
         throw new AppError('NOT_FOUND', 'Payment method not found', 404);
       }
 
-      paymentMethods.delete(methodId);
+      await prisma.paymentMethod.update({
+        where: { id: methodId },
+        data: { status: 'deleted' },
+      });
 
       return reply.send({
         success: true,
@@ -1198,8 +1225,6 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
 // =============================================================================
 
 export {
-  paymentMethods,
-  announcements,
   getTenantLease,
   getTenantBalance,
 };

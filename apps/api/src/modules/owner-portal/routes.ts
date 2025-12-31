@@ -1,5 +1,25 @@
+import {
+  prisma,
+  Prisma,
+  type OwnershipType as PrismaOwnershipType,
+  type DistributionMethod as PrismaDistributionMethod,
+  type StatementPeriod as PrismaStatementPeriod,
+  type StatementStatus as PrismaStatementStatus,
+  type DistributionStatus as PrismaDistributionStatus,
+  type TaxFormType as PrismaTaxFormType,
+  type TaxDocumentStatus as PrismaTaxDocumentStatus,
+} from '@realriches/database';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+
+// Helper for Decimal to number conversion
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
 
 // ============================================================================
 // Types
@@ -184,16 +204,17 @@ export interface TaxDocument1099 {
 }
 
 // ============================================================================
-// In-memory stores (placeholder for Prisma)
+// Prisma Storage (replaced in-memory Maps)
 // ============================================================================
 
-export const owners = new Map<string, Owner>();
-export const ownerships = new Map<string, PropertyOwnership>();
-export const statements = new Map<string, OwnerStatement>();
-export const distributions = new Map<string, Distribution>();
-export const documents = new Map<string, OwnerDocument>();
-export const bankAccounts = new Map<string, OwnerBankAccount>();
-export const taxDocuments = new Map<string, TaxDocument1099>();
+// All data now uses Prisma models:
+// - prisma.owner
+// - prisma.propertyOwnershipRecord
+// - prisma.ownerStatement
+// - prisma.ownerDistribution
+// - prisma.ownerDocument
+// - prisma.ownerBankAccount
+// - prisma.taxDocument1099
 
 // ============================================================================
 // Helper Functions
@@ -457,18 +478,27 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   app.get('/owners', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = request.query as { propertyId?: string };
 
-    let ownerList = Array.from(owners.values());
+    let where: Prisma.OwnerWhereInput = {};
 
     if (query.propertyId) {
-      const propertyOwnerIds = Array.from(ownerships.values())
-        .filter((o) => o.propertyId === query.propertyId && !o.endDate)
-        .map((o) => o.ownerId);
-      ownerList = ownerList.filter((o) => propertyOwnerIds.includes(o.id));
+      where = {
+        ownerships: {
+          some: {
+            propertyId: query.propertyId,
+            endDate: null,
+          },
+        },
+      };
     }
+
+    const ownerList = await prisma.owner.findMany({ where });
 
     return reply.send({
       success: true,
-      data: ownerList,
+      data: ownerList.map(o => ({
+        ...o,
+        minimumDistributionAmount: toNumber(o.minimumDistributionAmount),
+      })),
       total: ownerList.length,
     });
   });
@@ -476,21 +506,30 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   // Get owner
   app.get('/owners/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const owner = owners.get(id);
+    const owner = await prisma.owner.findUnique({
+      where: { id },
+      include: {
+        ownerships: {
+          where: { endDate: null },
+        },
+      },
+    });
 
     if (!owner) {
       return reply.status(404).send({ success: false, error: 'Owner not found' });
     }
 
-    // Get their properties
-    const ownerProperties = Array.from(ownerships.values())
-      .filter((o) => o.ownerId === id && !o.endDate);
-
     return reply.send({
       success: true,
       data: {
         ...owner,
-        properties: ownerProperties,
+        minimumDistributionAmount: toNumber(owner.minimumDistributionAmount),
+        properties: owner.ownerships.map(o => ({
+          ...o,
+          ownershipPercentage: toNumber(o.ownershipPercentage),
+          managementFeeAmount: toNumber(o.managementFeeAmount),
+          reservePercentage: toNumber(o.reservePercentage),
+        })),
       },
     });
   });
@@ -498,34 +537,30 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   // Create owner
   app.post('/owners', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createOwnerSchema.parse(request.body);
-    const now = new Date();
 
-    const owner: Owner = {
-      id: crypto.randomUUID(),
-      userId: body.userId ?? null,
-      name: body.name,
-      email: body.email,
-      phone: body.phone ?? null,
-      address: body.address ?? null,
-      taxId: body.taxId ?? null,
-      taxIdType: body.taxIdType ?? null,
-      ownershipType: body.ownershipType,
-      distributionMethod: body.distributionMethod,
-      bankAccountId: null,
-      holdDistributions: false,
-      minimumDistributionAmount: body.minimumDistributionAmount,
-      statementDelivery: body.statementDelivery,
-      portalEnabled: body.portalEnabled,
-      lastLoginAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    owners.set(owner.id, owner);
+    const owner = await prisma.owner.create({
+      data: {
+        userId: body.userId ?? null,
+        name: body.name,
+        email: body.email,
+        phone: body.phone ?? null,
+        address: body.address ?? null,
+        taxId: body.taxId ?? null,
+        taxIdType: body.taxIdType ?? null,
+        ownershipType: body.ownershipType as PrismaOwnershipType,
+        distributionMethod: body.distributionMethod as PrismaDistributionMethod,
+        minimumDistributionAmount: body.minimumDistributionAmount,
+        statementDelivery: body.statementDelivery,
+        portalEnabled: body.portalEnabled,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: owner,
+      data: {
+        ...owner,
+        minimumDistributionAmount: toNumber(owner.minimumDistributionAmount),
+      },
     });
   });
 
@@ -536,27 +571,28 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   // Add ownership
   app.post('/ownerships', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createOwnershipSchema.parse(request.body);
-    const now = new Date();
 
-    const ownership: PropertyOwnership = {
-      id: crypto.randomUUID(),
-      ownerId: body.ownerId,
-      propertyId: body.propertyId,
-      ownershipPercentage: body.ownershipPercentage,
-      effectiveDate: new Date(body.effectiveDate),
-      endDate: null,
-      isPrimaryContact: body.isPrimaryContact,
-      managementFeeType: body.managementFeeType,
-      managementFeeAmount: body.managementFeeAmount,
-      reservePercentage: body.reservePercentage,
-      createdAt: now,
-    };
-
-    ownerships.set(ownership.id, ownership);
+    const ownership = await prisma.propertyOwnershipRecord.create({
+      data: {
+        ownerId: body.ownerId,
+        propertyId: body.propertyId,
+        ownershipPercentage: body.ownershipPercentage,
+        effectiveDate: new Date(body.effectiveDate),
+        isPrimaryContact: body.isPrimaryContact,
+        managementFeeType: body.managementFeeType,
+        managementFeeAmount: body.managementFeeAmount,
+        reservePercentage: body.reservePercentage,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: ownership,
+      data: {
+        ...ownership,
+        ownershipPercentage: toNumber(ownership.ownershipPercentage),
+        managementFeeAmount: toNumber(ownership.managementFeeAmount),
+        reservePercentage: toNumber(ownership.reservePercentage),
+      },
     });
   });
 
@@ -564,19 +600,24 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   app.get('/properties/:propertyId/ownerships', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
 
-    const propertyOwnerships = Array.from(ownerships.values())
-      .filter((o) => o.propertyId === propertyId && !o.endDate);
-
-    // Enrich with owner data
-    const enriched = propertyOwnerships.map((o) => ({
-      ...o,
-      owner: owners.get(o.ownerId),
-    }));
+    const propertyOwnerships = await prisma.propertyOwnershipRecord.findMany({
+      where: { propertyId, endDate: null },
+      include: { owner: true },
+    });
 
     return reply.send({
       success: true,
-      data: enriched,
-      total: enriched.length,
+      data: propertyOwnerships.map(o => ({
+        ...o,
+        ownershipPercentage: toNumber(o.ownershipPercentage),
+        managementFeeAmount: toNumber(o.managementFeeAmount),
+        reservePercentage: toNumber(o.reservePercentage),
+        owner: o.owner ? {
+          ...o.owner,
+          minimumDistributionAmount: toNumber(o.owner.minimumDistributionAmount),
+        } : null,
+      })),
+      total: propertyOwnerships.length,
     });
   });
 
@@ -593,28 +634,30 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
       status?: string;
     };
 
-    let statementList = Array.from(statements.values());
-
-    if (query.ownerId) {
-      statementList = statementList.filter((s) => s.ownerId === query.ownerId);
-    }
-    if (query.propertyId) {
-      statementList = statementList.filter((s) => s.propertyId === query.propertyId);
-    }
+    const where: Prisma.OwnerStatementWhereInput = {};
+    if (query.ownerId) where.ownerId = query.ownerId;
+    if (query.propertyId) where.propertyId = query.propertyId;
     if (query.year) {
       const year = parseInt(query.year, 10);
-      statementList = statementList.filter((s) => s.periodEnd.getFullYear() === year);
+      where.periodEnd = {
+        gte: new Date(year, 0, 1),
+        lt: new Date(year + 1, 0, 1),
+      };
     }
-    if (query.status) {
-      statementList = statementList.filter((s) => s.status === query.status);
-    }
+    if (query.status) where.status = query.status as PrismaStatementStatus;
 
-    // Sort by period end descending
-    statementList.sort((a, b) => b.periodEnd.getTime() - a.periodEnd.getTime());
+    const statementList = await prisma.ownerStatement.findMany({
+      where,
+      orderBy: { periodEnd: 'desc' },
+    });
 
     return reply.send({
       success: true,
-      data: statementList,
+      data: statementList.map(s => ({
+        ...s,
+        previousBalance: toNumber(s.previousBalance),
+        currentBalance: toNumber(s.currentBalance),
+      })),
       total: statementList.length,
     });
   });
@@ -622,7 +665,7 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   // Get statement
   app.get('/statements/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const statement = statements.get(id);
+    let statement = await prisma.ownerStatement.findUnique({ where: { id } });
 
     if (!statement) {
       return reply.status(404).send({ success: false, error: 'Statement not found' });
@@ -630,27 +673,33 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
 
     // Mark as viewed
     if (statement.status === 'sent' && !statement.viewedAt) {
-      statement.viewedAt = new Date();
-      statement.status = 'viewed';
-      statements.set(id, statement);
+      statement = await prisma.ownerStatement.update({
+        where: { id },
+        data: { viewedAt: new Date(), status: 'viewed' },
+      });
     }
 
-    return reply.send({ success: true, data: statement });
+    return reply.send({
+      success: true,
+      data: {
+        ...statement,
+        previousBalance: toNumber(statement.previousBalance),
+        currentBalance: toNumber(statement.currentBalance),
+      },
+    });
   });
 
   // Generate statement
   app.post('/statements', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = generateStatementSchema.parse(request.body);
 
-    const ownership = Array.from(ownerships.values()).find(
-      (o) => o.ownerId === body.ownerId && o.propertyId === body.propertyId && !o.endDate
-    );
+    const ownership = await prisma.propertyOwnershipRecord.findFirst({
+      where: { ownerId: body.ownerId, propertyId: body.propertyId, endDate: null },
+    });
 
     if (!ownership) {
       return reply.status(404).send({ success: false, error: 'Ownership not found' });
     }
-
-    const now = new Date();
 
     // Convert line items
     const lineItems: StatementLineItem[] = body.lineItems.map((item, index) => ({
@@ -673,7 +722,7 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
     const managementFee = calculateManagementFee(
       income.totalIncome,
       ownership.managementFeeType,
-      ownership.managementFeeAmount
+      toNumber(ownership.managementFeeAmount)
     );
     expenses.managementFee = managementFee;
     expenses.totalExpenses += managementFee;
@@ -682,55 +731,60 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
     const summary = calculateStatementSummary(
       income,
       expenses,
-      ownership.ownershipPercentage,
-      ownership.reservePercentage
+      toNumber(ownership.ownershipPercentage),
+      toNumber(ownership.reservePercentage)
     );
 
-    const statement: OwnerStatement = {
-      id: crypto.randomUUID(),
-      ownerId: body.ownerId,
-      propertyId: body.propertyId,
-      period: body.period,
-      periodStart: new Date(body.periodStart),
-      periodEnd: new Date(body.periodEnd),
-      status: 'generated',
-      income,
-      expenses,
-      summary,
-      lineItems,
-      previousBalance: body.previousBalance,
-      currentBalance: body.previousBalance + summary.distributionAmount,
-      generatedAt: now,
-      sentAt: null,
-      viewedAt: null,
-      documentUrl: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    statements.set(statement.id, statement);
+    const statement = await prisma.ownerStatement.create({
+      data: {
+        ownerId: body.ownerId,
+        propertyId: body.propertyId,
+        period: body.period as PrismaStatementPeriod,
+        periodStart: new Date(body.periodStart),
+        periodEnd: new Date(body.periodEnd),
+        status: 'generated',
+        income: income as unknown as Prisma.JsonValue,
+        expenses: expenses as unknown as Prisma.JsonValue,
+        summary: summary as unknown as Prisma.JsonValue,
+        lineItems: lineItems as unknown as Prisma.JsonValue,
+        previousBalance: body.previousBalance,
+        currentBalance: body.previousBalance + summary.distributionAmount,
+        generatedAt: new Date(),
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: statement,
+      data: {
+        ...statement,
+        previousBalance: toNumber(statement.previousBalance),
+        currentBalance: toNumber(statement.currentBalance),
+      },
     });
   });
 
   // Send statement
   app.post('/statements/:id/send', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const statement = statements.get(id);
+    const existing = await prisma.ownerStatement.findUnique({ where: { id } });
 
-    if (!statement) {
+    if (!existing) {
       return reply.status(404).send({ success: false, error: 'Statement not found' });
     }
 
-    statement.status = 'sent';
-    statement.sentAt = new Date();
-    statement.updatedAt = new Date();
-    statements.set(id, statement);
+    const statement = await prisma.ownerStatement.update({
+      where: { id },
+      data: { status: 'sent', sentAt: new Date() },
+    });
 
-    return reply.send({ success: true, data: statement });
+    return reply.send({
+      success: true,
+      data: {
+        ...statement,
+        previousBalance: toNumber(statement.previousBalance),
+        currentBalance: toNumber(statement.currentBalance),
+      },
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -746,29 +800,26 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
       endDate?: string;
     };
 
-    let distributionList = Array.from(distributions.values());
-
-    if (query.ownerId) {
-      distributionList = distributionList.filter((d) => d.ownerId === query.ownerId);
-    }
-    if (query.status) {
-      distributionList = distributionList.filter((d) => d.status === query.status);
-    }
-    if (query.startDate) {
-      const start = new Date(query.startDate);
-      distributionList = distributionList.filter((d) => d.scheduledDate >= start);
-    }
-    if (query.endDate) {
-      const end = new Date(query.endDate);
-      distributionList = distributionList.filter((d) => d.scheduledDate <= end);
+    const where: Prisma.OwnerDistributionWhereInput = {};
+    if (query.ownerId) where.ownerId = query.ownerId;
+    if (query.status) where.status = query.status as PrismaDistributionStatus;
+    if (query.startDate || query.endDate) {
+      where.scheduledDate = {};
+      if (query.startDate) where.scheduledDate.gte = new Date(query.startDate);
+      if (query.endDate) where.scheduledDate.lte = new Date(query.endDate);
     }
 
-    // Sort by scheduled date descending
-    distributionList.sort((a, b) => b.scheduledDate.getTime() - a.scheduledDate.getTime());
+    const distributionList = await prisma.ownerDistribution.findMany({
+      where,
+      orderBy: { scheduledDate: 'desc' },
+    });
 
     return reply.send({
       success: true,
-      data: distributionList,
+      data: distributionList.map(d => ({
+        ...d,
+        amount: toNumber(d.amount),
+      })),
       total: distributionList.length,
     });
   });
@@ -776,69 +827,68 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   // Create distribution
   app.post('/distributions', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createDistributionSchema.parse(request.body);
-    const now = new Date();
 
-    const owner = owners.get(body.ownerId);
+    const owner = await prisma.owner.findUnique({ where: { id: body.ownerId } });
     if (!owner) {
       return reply.status(404).send({ success: false, error: 'Owner not found' });
     }
 
-    const distribution: Distribution = {
-      id: crypto.randomUUID(),
-      ownerId: body.ownerId,
-      statementId: body.statementId ?? null,
-      propertyId: body.propertyId,
-      amount: body.amount,
-      method: body.method,
-      status: 'pending',
-      scheduledDate: new Date(body.scheduledDate),
-      processedDate: null,
-      bankAccountId: owner.bankAccountId,
-      checkNumber: null,
-      wireReference: null,
-      achTransactionId: null,
-      failureReason: null,
-      notes: body.notes ?? null,
-      createdById: 'system',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    distributions.set(distribution.id, distribution);
+    const distribution = await prisma.ownerDistribution.create({
+      data: {
+        ownerId: body.ownerId,
+        statementId: body.statementId ?? null,
+        propertyId: body.propertyId,
+        amount: body.amount,
+        method: body.method as PrismaDistributionMethod,
+        status: 'pending',
+        scheduledDate: new Date(body.scheduledDate),
+        bankAccountId: owner.bankAccountId,
+        notes: body.notes ?? null,
+        createdById: 'system',
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: distribution,
+      data: {
+        ...distribution,
+        amount: toNumber(distribution.amount),
+      },
     });
   });
 
   // Process distribution
   app.post('/distributions/:id/process', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const distribution = distributions.get(id);
+    let distribution = await prisma.ownerDistribution.findUnique({ where: { id } });
 
     if (!distribution) {
       return reply.status(404).send({ success: false, error: 'Distribution not found' });
     }
 
-    distribution.status = 'processing';
-    distribution.updatedAt = new Date();
-    distributions.set(id, distribution);
+    distribution = await prisma.ownerDistribution.update({
+      where: { id },
+      data: { status: 'processing' },
+    });
 
     // Mock processing (would integrate with payment provider)
-    setTimeout(() => {
-      distribution.status = 'completed';
-      distribution.processedDate = new Date();
-      if (distribution.method === 'ach') {
-        distribution.achTransactionId = `ach_${crypto.randomUUID().substring(0, 8)}`;
-      } else if (distribution.method === 'check') {
-        distribution.checkNumber = String(Math.floor(Math.random() * 10000) + 1000);
+    setTimeout(async () => {
+      const updateData: Prisma.OwnerDistributionUpdateInput = {
+        status: 'completed',
+        processedDate: new Date(),
+      };
+      if (distribution!.method === 'ach') {
+        updateData.achTransactionId = `ach_${crypto.randomUUID().substring(0, 8)}`;
+      } else if (distribution!.method === 'check') {
+        updateData.checkNumber = String(Math.floor(Math.random() * 10000) + 1000);
       }
-      distribution.updatedAt = new Date();
-      distributions.set(id, distribution);
+      await prisma.ownerDistribution.update({ where: { id }, data: updateData });
     }, 100);
 
-    return reply.send({ success: true, data: distribution });
+    return reply.send({
+      success: true,
+      data: { ...distribution, amount: toNumber(distribution.amount) },
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -849,8 +899,9 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   app.get('/owners/:ownerId/bank-accounts', async (request: FastifyRequest, reply: FastifyReply) => {
     const { ownerId } = request.params as { ownerId: string };
 
-    const accountList = Array.from(bankAccounts.values())
-      .filter((a) => a.ownerId === ownerId);
+    const accountList = await prisma.ownerBankAccount.findMany({
+      where: { ownerId },
+    });
 
     // Mask account numbers
     const masked = accountList.map((a) => ({
@@ -869,43 +920,34 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   // Add bank account
   app.post('/bank-accounts', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createBankAccountSchema.parse(request.body);
-    const now = new Date();
 
     // If setting as default, unset others
     if (body.isDefault) {
-      for (const [id, account] of bankAccounts) {
-        if (account.ownerId === body.ownerId && account.isDefault) {
-          account.isDefault = false;
-          bankAccounts.set(id, account);
-        }
-      }
+      await prisma.ownerBankAccount.updateMany({
+        where: { ownerId: body.ownerId, isDefault: true },
+        data: { isDefault: false },
+      });
     }
 
-    const account: OwnerBankAccount = {
-      id: crypto.randomUUID(),
-      ownerId: body.ownerId,
-      accountName: body.accountName,
-      bankName: body.bankName,
-      accountType: body.accountType,
-      routingNumber: body.routingNumber,
-      accountNumber: body.accountNumber,
-      isDefault: body.isDefault,
-      isVerified: false,
-      verifiedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    bankAccounts.set(account.id, account);
+    const account = await prisma.ownerBankAccount.create({
+      data: {
+        ownerId: body.ownerId,
+        accountName: body.accountName,
+        bankName: body.bankName,
+        accountType: body.accountType,
+        routingNumber: body.routingNumber,
+        accountNumber: body.accountNumber,
+        isDefault: body.isDefault,
+        isVerified: false,
+      },
+    });
 
     // Update owner if this is default
     if (body.isDefault) {
-      const owner = owners.get(body.ownerId);
-      if (owner) {
-        owner.bankAccountId = account.id;
-        owner.updatedAt = now;
-        owners.set(owner.id, owner);
-      }
+      await prisma.owner.update({
+        where: { id: body.ownerId },
+        data: { bankAccountId: account.id },
+      });
     }
 
     return reply.status(201).send({
@@ -927,19 +969,14 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
     const { ownerId } = request.params as { ownerId: string };
     const query = request.query as { type?: string; year?: string };
 
-    let documentList = Array.from(documents.values())
-      .filter((d) => d.ownerId === ownerId);
+    const where: Prisma.OwnerDocumentWhereInput = { ownerId };
+    if (query.type) where.documentType = query.type;
+    if (query.year) where.year = parseInt(query.year, 10);
 
-    if (query.type) {
-      documentList = documentList.filter((d) => d.documentType === query.type);
-    }
-    if (query.year) {
-      const year = parseInt(query.year, 10);
-      documentList = documentList.filter((d) => d.year === year);
-    }
-
-    // Sort by upload date descending
-    documentList.sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
+    const documentList = await prisma.ownerDocument.findMany({
+      where,
+      orderBy: { uploadedAt: 'desc' },
+    });
 
     return reply.send({
       success: true,
@@ -957,20 +994,22 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
     const { ownerId } = request.params as { ownerId: string };
     const query = request.query as { year?: string };
 
-    let taxDocList = Array.from(taxDocuments.values())
-      .filter((d) => d.ownerId === ownerId);
+    const where: Prisma.TaxDocument1099WhereInput = { ownerId };
+    if (query.year) where.taxYear = parseInt(query.year, 10);
 
-    if (query.year) {
-      const year = parseInt(query.year, 10);
-      taxDocList = taxDocList.filter((d) => d.taxYear === year);
-    }
-
-    // Sort by year descending
-    taxDocList.sort((a, b) => b.taxYear - a.taxYear);
+    const taxDocList = await prisma.taxDocument1099.findMany({
+      where,
+      orderBy: { taxYear: 'desc' },
+    });
 
     return reply.send({
       success: true,
-      data: taxDocList,
+      data: taxDocList.map(d => ({
+        ...d,
+        totalRents: toNumber(d.totalRents),
+        totalOtherIncome: toNumber(d.totalOtherIncome),
+        grossProceeds: toNumber(d.grossProceeds),
+      })),
       total: taxDocList.length,
     });
   });
@@ -978,42 +1017,42 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   // Generate 1099
   app.post('/tax-documents/1099', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = request.body as { ownerId: string; taxYear: number };
-    const now = new Date();
 
-    const owner = owners.get(body.ownerId);
+    const owner = await prisma.owner.findUnique({ where: { id: body.ownerId } });
     if (!owner) {
       return reply.status(404).send({ success: false, error: 'Owner not found' });
     }
 
     // Get all statements for this owner in the tax year
-    const ownerStatements = Array.from(statements.values())
-      .filter((s) => s.ownerId === body.ownerId);
+    const ownerStatements = await prisma.ownerStatement.findMany({
+      where: { ownerId: body.ownerId },
+    });
 
-    const taxData = generate1099Data(body.ownerId, body.taxYear, ownerStatements);
+    const taxData = generate1099Data(body.ownerId, body.taxYear, ownerStatements as unknown as OwnerStatement[]);
 
-    const taxDoc: TaxDocument1099 = {
-      id: crypto.randomUUID(),
-      ownerId: body.ownerId,
-      taxYear: body.taxYear,
-      formType: '1099-MISC',
-      recipientTin: owner.taxId ? `***-**-${owner.taxId.slice(-4)}` : 'N/A',
-      payerTin: '**-***1234',
-      totalRents: taxData.totalRents,
-      totalOtherIncome: taxData.totalOtherIncome,
-      grossProceeds: taxData.grossProceeds,
-      status: 'generated',
-      generatedAt: now,
-      sentAt: null,
-      documentUrl: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    taxDocuments.set(taxDoc.id, taxDoc);
+    const taxDoc = await prisma.taxDocument1099.create({
+      data: {
+        ownerId: body.ownerId,
+        taxYear: body.taxYear,
+        formType: 'form_1099_misc',
+        recipientTin: owner.taxId ? `***-**-${owner.taxId.slice(-4)}` : 'N/A',
+        payerTin: '**-***1234',
+        totalRents: taxData.totalRents,
+        totalOtherIncome: taxData.totalOtherIncome,
+        grossProceeds: taxData.grossProceeds,
+        status: 'generated',
+        generatedAt: new Date(),
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: taxDoc,
+      data: {
+        ...taxDoc,
+        totalRents: toNumber(taxDoc.totalRents),
+        totalOtherIncome: toNumber(taxDoc.totalOtherIncome),
+        grossProceeds: toNumber(taxDoc.grossProceeds),
+      },
     });
   });
 
@@ -1025,35 +1064,41 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
   app.get('/portal/dashboard/:ownerId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { ownerId } = request.params as { ownerId: string };
 
-    const owner = owners.get(ownerId);
+    const owner = await prisma.owner.findUnique({ where: { id: ownerId } });
     if (!owner) {
       return reply.status(404).send({ success: false, error: 'Owner not found' });
     }
 
     // Get properties
-    const ownerProperties = Array.from(ownerships.values())
-      .filter((o) => o.ownerId === ownerId && !o.endDate);
+    const ownerProperties = await prisma.propertyOwnershipRecord.findMany({
+      where: { ownerId, endDate: null },
+    });
 
     // Get recent statements
-    const recentStatements = Array.from(statements.values())
-      .filter((s) => s.ownerId === ownerId)
-      .sort((a, b) => b.periodEnd.getTime() - a.periodEnd.getTime())
-      .slice(0, 6);
+    const recentStatements = await prisma.ownerStatement.findMany({
+      where: { ownerId },
+      orderBy: { periodEnd: 'desc' },
+      take: 6,
+    });
 
     // Get pending/recent distributions
-    const ownerDistributions = Array.from(distributions.values())
-      .filter((d) => d.ownerId === ownerId)
-      .sort((a, b) => b.scheduledDate.getTime() - a.scheduledDate.getTime())
-      .slice(0, 5);
+    const ownerDistributions = await prisma.ownerDistribution.findMany({
+      where: { ownerId },
+      orderBy: { scheduledDate: 'desc' },
+      take: 5,
+    });
 
     // Calculate YTD
     const now = new Date();
     const yearStart = new Date(now.getFullYear(), 0, 1);
     const ytdStatements = recentStatements.filter((s) => s.periodEnd >= yearStart);
-    const ytdIncome = ytdStatements.reduce((sum, s) => sum + s.summary.ownerShare, 0);
+    const ytdIncome = ytdStatements.reduce((sum, s) => {
+      const summary = s.summary as { ownerShare?: number } | null;
+      return sum + (summary?.ownerShare || 0);
+    }, 0);
     const ytdDistributed = ownerDistributions
       .filter((d) => d.status === 'completed' && d.processedDate && d.processedDate >= yearStart)
-      .reduce((sum, d) => sum + d.amount, 0);
+      .reduce((sum, d) => sum + toNumber(d.amount), 0);
 
     return reply.send({
       success: true,
@@ -1070,19 +1115,27 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
           pendingDistributions: ownerDistributions.filter((d) => d.status === 'pending').length,
           unreadStatements: recentStatements.filter((s) => s.status === 'sent').length,
         },
-        properties: ownerProperties,
-        recentStatements: recentStatements.map((s) => ({
-          id: s.id,
-          propertyId: s.propertyId,
-          period: s.period,
-          periodEnd: s.periodEnd,
-          netOperatingIncome: s.summary.netOperatingIncome,
-          ownerShare: s.summary.ownerShare,
-          status: s.status,
+        properties: ownerProperties.map(p => ({
+          ...p,
+          ownershipPercentage: toNumber(p.ownershipPercentage),
+          managementFeeAmount: toNumber(p.managementFeeAmount),
+          reservePercentage: toNumber(p.reservePercentage),
         })),
+        recentStatements: recentStatements.map((s) => {
+          const summary = s.summary as { netOperatingIncome?: number; ownerShare?: number } | null;
+          return {
+            id: s.id,
+            propertyId: s.propertyId,
+            period: s.period,
+            periodEnd: s.periodEnd,
+            netOperatingIncome: summary?.netOperatingIncome || 0,
+            ownerShare: summary?.ownerShare || 0,
+            status: s.status,
+          };
+        }),
         recentDistributions: ownerDistributions.map((d) => ({
           id: d.id,
-          amount: d.amount,
+          amount: toNumber(d.amount),
           method: d.method,
           status: d.status,
           scheduledDate: d.scheduledDate,

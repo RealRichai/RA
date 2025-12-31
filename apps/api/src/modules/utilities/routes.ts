@@ -1,118 +1,23 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import {
+  prisma,
+  Prisma,
+  type UtilityAccountType as PrismaUtilityAccountType,
+  type UtilityAccountStatus as PrismaUtilityAccountStatus,
+  type UtilityBillStatus as PrismaUtilityBillStatus,
+  type ResponsibleParty as PrismaResponsibleParty,
+  type AllocationMethod as PrismaAllocationMethod,
+  type AdminFeeType as PrismaAdminFeeType,
+  type RUBSAllocationStatus as PrismaRUBSAllocationStatus,
+  type ReadingType as PrismaReadingType,
+} from '@realriches/database';
 
-// ============================================================================
 // Types
-// ============================================================================
-
 export type UtilityType = 'electric' | 'gas' | 'water' | 'sewer' | 'trash' | 'internet' | 'cable' | 'other';
 export type AccountStatus = 'active' | 'inactive' | 'pending_setup' | 'pending_transfer' | 'closed';
 export type BillStatus = 'pending' | 'paid' | 'overdue' | 'disputed' | 'credited';
 export type AllocationMethod = 'equal' | 'square_footage' | 'occupancy' | 'bedroom_count' | 'submeter' | 'custom';
-
-export interface UtilityProvider {
-  id: string;
-  name: string;
-  type: UtilityType;
-  accountNumber: string | null;
-  phone: string | null;
-  email: string | null;
-  website: string | null;
-  billingAddress: string | null;
-  notes: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface UtilityAccount {
-  id: string;
-  propertyId: string;
-  unitId: string | null; // null = property-level account
-  providerId: string;
-  accountNumber: string;
-  meterNumber: string | null;
-  utilityType: UtilityType;
-  status: AccountStatus;
-  responsibleParty: 'landlord' | 'tenant';
-  tenantId: string | null;
-  serviceAddress: string;
-  billingAddress: string | null;
-  averageMonthlyBill: number | null;
-  lastReadingDate: Date | null;
-  lastReadingValue: number | null;
-  nextReadingDate: Date | null;
-  autoPayEnabled: boolean;
-  notes: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface UtilityBill {
-  id: string;
-  accountId: string;
-  propertyId: string;
-  unitId: string | null;
-  providerId: string;
-  utilityType: UtilityType;
-  billNumber: string | null;
-  statementDate: Date;
-  dueDate: Date;
-  periodStart: Date;
-  periodEnd: Date;
-  previousReading: number | null;
-  currentReading: number | null;
-  usage: number | null;
-  usageUnit: string | null;
-  amount: number;
-  taxes: number;
-  fees: number;
-  totalAmount: number;
-  status: BillStatus;
-  paidDate: Date | null;
-  paidAmount: number | null;
-  paymentMethod: string | null;
-  paymentReference: string | null;
-  documentUrl: string | null;
-  notes: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface RUBSConfig {
-  id: string;
-  propertyId: string;
-  utilityType: UtilityType;
-  allocationMethod: AllocationMethod;
-  adminFeeType: 'flat' | 'percentage' | 'none';
-  adminFeeAmount: number;
-  includeVacantUnits: boolean;
-  minimumCharge: number | null;
-  maximumCharge: number | null;
-  customWeights: Record<string, number> | null; // unitId -> weight
-  effectiveDate: Date;
-  endDate: Date | null;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface RUBSAllocation {
-  id: string;
-  configId: string;
-  billId: string;
-  propertyId: string;
-  periodStart: Date;
-  periodEnd: Date;
-  totalBillAmount: number;
-  adminFee: number;
-  totalAllocated: number;
-  allocations: UnitAllocation[];
-  status: 'draft' | 'approved' | 'billed' | 'voided';
-  approvedById: string | null;
-  approvedAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
 
 export interface UnitAllocation {
   unitId: string;
@@ -128,40 +33,26 @@ export interface UnitAllocation {
   notes: string | null;
 }
 
-export interface UsageReading {
-  id: string;
-  accountId: string;
-  propertyId: string;
-  unitId: string | null;
-  readingDate: Date;
-  readingValue: number;
-  previousValue: number | null;
-  usage: number | null;
-  usageUnit: string;
-  readingType: 'actual' | 'estimated' | 'submeter';
-  readBy: string | null;
-  photoUrl: string | null;
-  notes: string | null;
-  createdAt: Date;
+// Helper: convert Decimal to number
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
 }
 
-// ============================================================================
-// In-memory stores (placeholder for Prisma)
-// ============================================================================
-
-export const providers = new Map<string, UtilityProvider>();
-export const accounts = new Map<string, UtilityAccount>();
-export const bills = new Map<string, UtilityBill>();
-export const rubsConfigs = new Map<string, RUBSConfig>();
-export const rubsAllocations = new Map<string, RUBSAllocation>();
-export const usageReadings = new Map<string, UsageReading>();
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
+// Helper functions
 export function calculateRUBSAllocation(
-  config: RUBSConfig,
+  config: {
+    allocationMethod: AllocationMethod;
+    adminFeeType: 'flat' | 'percentage' | 'none';
+    adminFeeAmount: number;
+    includeVacantUnits: boolean;
+    minimumCharge: number | null;
+    maximumCharge: number | null;
+    customWeights: Record<string, number> | null;
+  },
   billAmount: number,
   units: Array<{
     id: string;
@@ -175,7 +66,6 @@ export function calculateRUBSAllocation(
     customWeight?: number;
   }>
 ): UnitAllocation[] {
-  // Filter out vacant units if not included
   const eligibleUnits = config.includeVacantUnits
     ? units
     : units.filter((u) => !u.isVacant);
@@ -184,7 +74,6 @@ export function calculateRUBSAllocation(
     return [];
   }
 
-  // Calculate allocation factors based on method
   let totalFactor = 0;
   const unitFactors: Array<{ unit: typeof units[0]; factor: number }> = [];
 
@@ -199,16 +88,15 @@ export function calculateRUBSAllocation(
         factor = unit.squareFootage;
         break;
       case 'bedroom_count':
-        factor = Math.max(unit.bedrooms, 1); // Minimum 1 for studios
+        factor = Math.max(unit.bedrooms, 1);
         break;
       case 'occupancy':
-        factor = Math.max(unit.occupants, 1); // Minimum 1
+        factor = Math.max(unit.occupants, 1);
         break;
       case 'custom':
         factor = config.customWeights?.[unit.id] ?? unit.customWeight ?? 1;
         break;
       case 'submeter':
-        // Submeter uses actual readings, factor = 1 as placeholder
         factor = unit.customWeight ?? 1;
         break;
     }
@@ -217,7 +105,6 @@ export function calculateRUBSAllocation(
     unitFactors.push({ unit, factor });
   }
 
-  // Calculate admin fee
   let adminFee = 0;
   if (config.adminFeeType === 'flat') {
     adminFee = config.adminFeeAmount;
@@ -225,16 +112,12 @@ export function calculateRUBSAllocation(
     adminFee = billAmount * (config.adminFeeAmount / 100);
   }
 
-  const totalToAllocate = billAmount + adminFee;
-
-  // Allocate to each unit
   const allocations: UnitAllocation[] = unitFactors.map(({ unit, factor }) => {
     const percentage = (factor / totalFactor) * 100;
     let baseAmount = (factor / totalFactor) * billAmount;
     const unitAdminFee = (factor / totalFactor) * adminFee;
     let totalAmount = baseAmount + unitAdminFee;
 
-    // Apply min/max constraints
     if (config.minimumCharge !== null && totalAmount < config.minimumCharge) {
       totalAmount = config.minimumCharge;
       baseAmount = totalAmount - unitAdminFee;
@@ -266,30 +149,7 @@ export function calculateUsage(current: number, previous: number): number {
   return Math.max(0, current - previous);
 }
 
-export function estimateMonthlyAverage(bills: UtilityBill[]): number {
-  if (bills.length === 0) return 0;
-  const total = bills.reduce((sum, b) => sum + b.totalAmount, 0);
-  return Math.round((total / bills.length) * 100) / 100;
-}
-
-export function getBillsDueSoon(bills: UtilityBill[], daysAhead: number = 7): UtilityBill[] {
-  const now = new Date();
-  const cutoff = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
-
-  return bills.filter(
-    (b) => b.status === 'pending' && b.dueDate <= cutoff && b.dueDate >= now
-  );
-}
-
-export function getOverdueBills(bills: UtilityBill[]): UtilityBill[] {
-  const now = new Date();
-  return bills.filter((b) => b.status === 'pending' && b.dueDate < now);
-}
-
-// ============================================================================
-// Validation Schemas
-// ============================================================================
-
+// Schemas
 const createProviderSchema = z.object({
   name: z.string().min(1),
   type: z.enum(['electric', 'gas', 'water', 'sewer', 'trash', 'internet', 'cable', 'other']),
@@ -374,45 +234,42 @@ const createReadingSchema = z.object({
   notes: z.string().optional(),
 });
 
-// ============================================================================
 // Routes
-// ============================================================================
-
 export async function utilityRoutes(app: FastifyInstance): Promise<void> {
-  // -------------------------------------------------------------------------
   // Providers
-  // -------------------------------------------------------------------------
+  app.get('/providers', async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = request.query as { type?: UtilityType };
 
-  // List providers
-  app.get('/providers', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const providerList = Array.from(providers.values());
+    const where: Record<string, unknown> = {};
+    if (query.type) where.type = query.type;
+
+    const results = await prisma.utilityProvider.findMany({
+      where,
+      orderBy: { name: 'asc' },
+    });
+
     return reply.send({
       success: true,
-      data: providerList,
-      total: providerList.length,
+      data: results,
+      total: results.length,
     });
   });
 
-  // Create provider
   app.post('/providers', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createProviderSchema.parse(request.body);
-    const now = new Date();
 
-    const provider: UtilityProvider = {
-      id: crypto.randomUUID(),
-      name: body.name,
-      type: body.type,
-      accountNumber: body.accountNumber ?? null,
-      phone: body.phone ?? null,
-      email: body.email ?? null,
-      website: body.website ?? null,
-      billingAddress: body.billingAddress ?? null,
-      notes: body.notes ?? null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    providers.set(provider.id, provider);
+    const provider = await prisma.utilityProvider.create({
+      data: {
+        name: body.name,
+        type: body.type as PrismaUtilityAccountType,
+        accountNumber: body.accountNumber || null,
+        phone: body.phone || null,
+        email: body.email || null,
+        website: body.website || null,
+        billingAddress: body.billingAddress || null,
+        notes: body.notes || null,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
@@ -420,74 +277,91 @@ export async function utilityRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // -------------------------------------------------------------------------
   // Accounts
-  // -------------------------------------------------------------------------
-
-  // List accounts
   app.get('/accounts', async (request: FastifyRequest, reply: FastifyReply) => {
-    const query = request.query as { propertyId?: string; unitId?: string; status?: string };
+    const query = request.query as { propertyId?: string; unitId?: string; status?: AccountStatus };
 
-    let accountList = Array.from(accounts.values());
+    const where: Record<string, unknown> = {};
+    if (query.propertyId) where.propertyId = query.propertyId;
+    if (query.unitId) where.unitId = query.unitId;
+    if (query.status) where.status = query.status;
 
-    if (query.propertyId) {
-      accountList = accountList.filter((a) => a.propertyId === query.propertyId);
-    }
-    if (query.unitId) {
-      accountList = accountList.filter((a) => a.unitId === query.unitId);
-    }
-    if (query.status) {
-      accountList = accountList.filter((a) => a.status === query.status);
-    }
+    const results = await prisma.utilityAccount.findMany({
+      where,
+      include: { provider: true },
+      orderBy: { createdAt: 'desc' },
+    });
 
     return reply.send({
       success: true,
-      data: accountList,
-      total: accountList.length,
+      data: results.map((a) => ({
+        ...a,
+        averageMonthlyBill: a.averageMonthlyBill ? toNumber(a.averageMonthlyBill) : null,
+        lastReadingValue: a.lastReadingValue ? toNumber(a.lastReadingValue) : null,
+      })),
+      total: results.length,
     });
   });
 
-  // Get account
   app.get('/accounts/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const account = accounts.get(id);
+
+    const account = await prisma.utilityAccount.findUnique({
+      where: { id },
+      include: { provider: true, bills: true, readings: true },
+    });
 
     if (!account) {
       return reply.status(404).send({ success: false, error: 'Account not found' });
     }
 
-    return reply.send({ success: true, data: account });
+    return reply.send({
+      success: true,
+      data: {
+        ...account,
+        averageMonthlyBill: account.averageMonthlyBill ? toNumber(account.averageMonthlyBill) : null,
+        lastReadingValue: account.lastReadingValue ? toNumber(account.lastReadingValue) : null,
+        bills: account.bills.map((b) => ({
+          ...b,
+          previousReading: b.previousReading ? toNumber(b.previousReading) : null,
+          currentReading: b.currentReading ? toNumber(b.currentReading) : null,
+          usage: b.usage ? toNumber(b.usage) : null,
+          amount: toNumber(b.amount),
+          taxes: toNumber(b.taxes),
+          fees: toNumber(b.fees),
+          totalAmount: toNumber(b.totalAmount),
+          paidAmount: b.paidAmount ? toNumber(b.paidAmount) : null,
+        })),
+        readings: account.readings.map((r) => ({
+          ...r,
+          readingValue: toNumber(r.readingValue),
+          previousValue: r.previousValue ? toNumber(r.previousValue) : null,
+          usage: r.usage ? toNumber(r.usage) : null,
+        })),
+      },
+    });
   });
 
-  // Create account
   app.post('/accounts', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createAccountSchema.parse(request.body);
-    const now = new Date();
 
-    const account: UtilityAccount = {
-      id: crypto.randomUUID(),
-      propertyId: body.propertyId,
-      unitId: body.unitId ?? null,
-      providerId: body.providerId,
-      accountNumber: body.accountNumber,
-      meterNumber: body.meterNumber ?? null,
-      utilityType: body.utilityType,
-      status: 'pending_setup',
-      responsibleParty: body.responsibleParty,
-      tenantId: body.tenantId ?? null,
-      serviceAddress: body.serviceAddress,
-      billingAddress: body.billingAddress ?? null,
-      averageMonthlyBill: null,
-      lastReadingDate: null,
-      lastReadingValue: null,
-      nextReadingDate: null,
-      autoPayEnabled: body.autoPayEnabled,
-      notes: body.notes ?? null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    accounts.set(account.id, account);
+    const account = await prisma.utilityAccount.create({
+      data: {
+        propertyId: body.propertyId,
+        unitId: body.unitId || null,
+        providerId: body.providerId,
+        accountNumber: body.accountNumber,
+        meterNumber: body.meterNumber || null,
+        utilityType: body.utilityType as PrismaUtilityAccountType,
+        status: 'pending_setup' as PrismaUtilityAccountStatus,
+        responsibleParty: body.responsibleParty as PrismaResponsibleParty,
+        tenantId: body.tenantId || null,
+        serviceAddress: body.serviceAddress,
+        billingAddress: body.billingAddress || null,
+        autoPayEnabled: body.autoPayEnabled,
+        notes: body.notes || null,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
@@ -495,123 +369,138 @@ export async function utilityRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // Update account status
   app.patch('/accounts/:id/status', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const { status } = request.body as { status: AccountStatus };
-    const account = accounts.get(id);
+
+    const account = await prisma.utilityAccount.findUnique({ where: { id } });
 
     if (!account) {
       return reply.status(404).send({ success: false, error: 'Account not found' });
     }
 
-    account.status = status;
-    account.updatedAt = new Date();
-    accounts.set(id, account);
+    const updated = await prisma.utilityAccount.update({
+      where: { id },
+      data: { status: status as PrismaUtilityAccountStatus },
+    });
 
-    return reply.send({ success: true, data: account });
+    return reply.send({ success: true, data: updated });
   });
 
-  // -------------------------------------------------------------------------
   // Bills
-  // -------------------------------------------------------------------------
-
-  // List bills
   app.get('/bills', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = request.query as {
       propertyId?: string;
       accountId?: string;
-      status?: string;
+      status?: BillStatus;
       dueSoon?: string;
       overdue?: string;
     };
 
-    let billList = Array.from(bills.values());
+    const where: Record<string, unknown> = {};
+    if (query.propertyId) where.propertyId = query.propertyId;
+    if (query.accountId) where.accountId = query.accountId;
+    if (query.status) where.status = query.status;
 
-    if (query.propertyId) {
-      billList = billList.filter((b) => b.propertyId === query.propertyId);
-    }
-    if (query.accountId) {
-      billList = billList.filter((b) => b.accountId === query.accountId);
-    }
-    if (query.status) {
-      billList = billList.filter((b) => b.status === query.status);
-    }
     if (query.dueSoon === 'true') {
-      billList = getBillsDueSoon(billList);
-    }
-    if (query.overdue === 'true') {
-      billList = getOverdueBills(billList);
+      const now = new Date();
+      const cutoff = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      where.status = 'pending';
+      where.dueDate = { lte: cutoff, gte: now };
     }
 
-    // Sort by due date
-    billList.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+    if (query.overdue === 'true') {
+      where.status = 'pending';
+      where.dueDate = { lt: new Date() };
+    }
+
+    const results = await prisma.utilityBill.findMany({
+      where,
+      orderBy: { dueDate: 'asc' },
+    });
 
     return reply.send({
       success: true,
-      data: billList,
-      total: billList.length,
+      data: results.map((b) => ({
+        ...b,
+        previousReading: b.previousReading ? toNumber(b.previousReading) : null,
+        currentReading: b.currentReading ? toNumber(b.currentReading) : null,
+        usage: b.usage ? toNumber(b.usage) : null,
+        amount: toNumber(b.amount),
+        taxes: toNumber(b.taxes),
+        fees: toNumber(b.fees),
+        totalAmount: toNumber(b.totalAmount),
+        paidAmount: b.paidAmount ? toNumber(b.paidAmount) : null,
+      })),
+      total: results.length,
     });
   });
 
-  // Create bill
   app.post('/bills', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createBillSchema.parse(request.body);
-    const account = accounts.get(body.accountId);
+
+    const account = await prisma.utilityAccount.findUnique({
+      where: { id: body.accountId },
+    });
 
     if (!account) {
       return reply.status(404).send({ success: false, error: 'Account not found' });
     }
 
-    const now = new Date();
     const totalAmount = body.amount + body.taxes + body.fees;
 
-    const bill: UtilityBill = {
-      id: crypto.randomUUID(),
-      accountId: body.accountId,
-      propertyId: account.propertyId,
-      unitId: account.unitId,
-      providerId: account.providerId,
-      utilityType: account.utilityType,
-      billNumber: body.billNumber ?? null,
-      statementDate: new Date(body.statementDate),
-      dueDate: new Date(body.dueDate),
-      periodStart: new Date(body.periodStart),
-      periodEnd: new Date(body.periodEnd),
-      previousReading: body.previousReading ?? null,
-      currentReading: body.currentReading ?? null,
-      usage: body.usage ?? null,
-      usageUnit: body.usageUnit ?? null,
-      amount: body.amount,
-      taxes: body.taxes,
-      fees: body.fees,
-      totalAmount,
-      status: 'pending',
-      paidDate: null,
-      paidAmount: null,
-      paymentMethod: null,
-      paymentReference: null,
-      documentUrl: body.documentUrl ?? null,
-      notes: body.notes ?? null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    bills.set(bill.id, bill);
+    const bill = await prisma.utilityBill.create({
+      data: {
+        accountId: body.accountId,
+        propertyId: account.propertyId,
+        unitId: account.unitId,
+        providerId: account.providerId,
+        utilityType: account.utilityType,
+        billNumber: body.billNumber || null,
+        statementDate: new Date(body.statementDate),
+        dueDate: new Date(body.dueDate),
+        periodStart: new Date(body.periodStart),
+        periodEnd: new Date(body.periodEnd),
+        previousReading: body.previousReading || null,
+        currentReading: body.currentReading || null,
+        usage: body.usage || null,
+        usageUnit: body.usageUnit || null,
+        amount: body.amount,
+        taxes: body.taxes,
+        fees: body.fees,
+        totalAmount,
+        status: 'pending' as PrismaUtilityBillStatus,
+        documentUrl: body.documentUrl || null,
+        notes: body.notes || null,
+      },
+    });
 
     // Update account average
-    const accountBills = Array.from(bills.values()).filter((b) => b.accountId === body.accountId);
-    account.averageMonthlyBill = estimateMonthlyAverage(accountBills);
-    account.updatedAt = now;
-    accounts.set(account.id, account);
+    const accountBills = await prisma.utilityBill.findMany({
+      where: { accountId: body.accountId },
+    });
+
+    const avgTotal = accountBills.length > 0
+      ? accountBills.reduce((sum, b) => sum + toNumber(b.totalAmount), 0) / accountBills.length
+      : 0;
+
+    await prisma.utilityAccount.update({
+      where: { id: body.accountId },
+      data: { averageMonthlyBill: avgTotal },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: bill,
+      data: {
+        ...bill,
+        amount: toNumber(bill.amount),
+        taxes: toNumber(bill.taxes),
+        fees: toNumber(bill.fees),
+        totalAmount: toNumber(bill.totalAmount),
+      },
     });
   });
 
-  // Mark bill as paid
   app.post('/bills/:id/pay', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = request.body as {
@@ -620,108 +509,147 @@ export async function utilityRoutes(app: FastifyInstance): Promise<void> {
       paymentReference?: string;
     };
 
-    const bill = bills.get(id);
+    const bill = await prisma.utilityBill.findUnique({ where: { id } });
     if (!bill) {
       return reply.status(404).send({ success: false, error: 'Bill not found' });
     }
 
-    bill.status = 'paid';
-    bill.paidDate = new Date();
-    bill.paidAmount = body.paidAmount;
-    bill.paymentMethod = body.paymentMethod;
-    bill.paymentReference = body.paymentReference ?? null;
-    bill.updatedAt = new Date();
-    bills.set(id, bill);
-
-    return reply.send({ success: true, data: bill });
-  });
-
-  // -------------------------------------------------------------------------
-  // RUBS Configuration
-  // -------------------------------------------------------------------------
-
-  // List RUBS configs
-  app.get('/rubs/configs', async (request: FastifyRequest, reply: FastifyReply) => {
-    const query = request.query as { propertyId?: string; utilityType?: string };
-
-    let configList = Array.from(rubsConfigs.values()).filter((c) => c.isActive);
-
-    if (query.propertyId) {
-      configList = configList.filter((c) => c.propertyId === query.propertyId);
-    }
-    if (query.utilityType) {
-      configList = configList.filter((c) => c.utilityType === query.utilityType);
-    }
+    const updated = await prisma.utilityBill.update({
+      where: { id },
+      data: {
+        status: 'paid',
+        paidDate: new Date(),
+        paidAmount: body.paidAmount,
+        paymentMethod: body.paymentMethod,
+        paymentReference: body.paymentReference || null,
+      },
+    });
 
     return reply.send({
       success: true,
-      data: configList,
-      total: configList.length,
+      data: {
+        ...updated,
+        amount: toNumber(updated.amount),
+        taxes: toNumber(updated.taxes),
+        fees: toNumber(updated.fees),
+        totalAmount: toNumber(updated.totalAmount),
+        paidAmount: updated.paidAmount ? toNumber(updated.paidAmount) : null,
+      },
     });
   });
 
-  // Create RUBS config
+  // RUBS Configuration
+  app.get('/rubs/configs', async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = request.query as { propertyId?: string; utilityType?: UtilityType };
+
+    const where: Record<string, unknown> = { isActive: true };
+    if (query.propertyId) where.propertyId = query.propertyId;
+    if (query.utilityType) where.utilityType = query.utilityType;
+
+    const results = await prisma.rUBSConfig.findMany({
+      where,
+      orderBy: { effectiveDate: 'desc' },
+    });
+
+    return reply.send({
+      success: true,
+      data: results.map((c) => ({
+        ...c,
+        adminFeeAmount: toNumber(c.adminFeeAmount),
+        minimumCharge: c.minimumCharge ? toNumber(c.minimumCharge) : null,
+        maximumCharge: c.maximumCharge ? toNumber(c.maximumCharge) : null,
+      })),
+      total: results.length,
+    });
+  });
+
   app.post('/rubs/configs', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createRUBSConfigSchema.parse(request.body);
-    const now = new Date();
 
     // Deactivate existing config for same property/utility
-    for (const [id, config] of rubsConfigs) {
-      if (config.propertyId === body.propertyId && config.utilityType === body.utilityType && config.isActive) {
-        config.isActive = false;
-        config.endDate = now;
-        rubsConfigs.set(id, config);
-      }
-    }
+    await prisma.rUBSConfig.updateMany({
+      where: {
+        propertyId: body.propertyId,
+        utilityType: body.utilityType as PrismaUtilityAccountType,
+        isActive: true,
+      },
+      data: {
+        isActive: false,
+        endDate: new Date(),
+      },
+    });
 
-    const config: RUBSConfig = {
-      id: crypto.randomUUID(),
-      propertyId: body.propertyId,
-      utilityType: body.utilityType,
-      allocationMethod: body.allocationMethod,
-      adminFeeType: body.adminFeeType,
-      adminFeeAmount: body.adminFeeAmount,
-      includeVacantUnits: body.includeVacantUnits,
-      minimumCharge: body.minimumCharge ?? null,
-      maximumCharge: body.maximumCharge ?? null,
-      customWeights: body.customWeights ?? null,
-      effectiveDate: new Date(body.effectiveDate),
-      endDate: null,
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    rubsConfigs.set(config.id, config);
+    const config = await prisma.rUBSConfig.create({
+      data: {
+        propertyId: body.propertyId,
+        utilityType: body.utilityType as PrismaUtilityAccountType,
+        allocationMethod: body.allocationMethod as PrismaAllocationMethod,
+        adminFeeType: body.adminFeeType as PrismaAdminFeeType,
+        adminFeeAmount: body.adminFeeAmount,
+        includeVacantUnits: body.includeVacantUnits,
+        minimumCharge: body.minimumCharge || null,
+        maximumCharge: body.maximumCharge || null,
+        customWeights: body.customWeights || null,
+        effectiveDate: new Date(body.effectiveDate),
+        isActive: true,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: config,
+      data: {
+        ...config,
+        adminFeeAmount: toNumber(config.adminFeeAmount),
+        minimumCharge: config.minimumCharge ? toNumber(config.minimumCharge) : null,
+        maximumCharge: config.maximumCharge ? toNumber(config.maximumCharge) : null,
+      },
     });
   });
 
-  // Calculate RUBS allocation (preview)
   app.post('/rubs/calculate', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = calculateAllocationSchema.parse(request.body);
 
-    const config = rubsConfigs.get(body.configId);
+    const config = await prisma.rUBSConfig.findUnique({ where: { id: body.configId } });
     if (!config) {
       return reply.status(404).send({ success: false, error: 'RUBS config not found' });
     }
 
-    const bill = bills.get(body.billId);
+    const bill = await prisma.utilityBill.findUnique({ where: { id: body.billId } });
     if (!bill) {
       return reply.status(404).send({ success: false, error: 'Bill not found' });
     }
 
-    const allocations = calculateRUBSAllocation(config, bill.totalAmount, body.units);
+    const unitsForCalc = body.units.map(u => ({
+      id: u.id,
+      name: u.name,
+      squareFootage: u.squareFootage,
+      bedrooms: u.bedrooms,
+      occupants: u.occupants,
+      tenantId: u.tenantId,
+      tenantName: u.tenantName,
+      isVacant: u.isVacant,
+      customWeight: u.customWeight,
+    }));
 
-    // Calculate admin fee
+    const allocations = calculateRUBSAllocation(
+      {
+        allocationMethod: config.allocationMethod as AllocationMethod,
+        adminFeeType: config.adminFeeType as 'flat' | 'percentage' | 'none',
+        adminFeeAmount: toNumber(config.adminFeeAmount),
+        includeVacantUnits: config.includeVacantUnits,
+        minimumCharge: config.minimumCharge ? toNumber(config.minimumCharge) : null,
+        maximumCharge: config.maximumCharge ? toNumber(config.maximumCharge) : null,
+        customWeights: config.customWeights as Record<string, number> | null,
+      },
+      toNumber(bill.totalAmount),
+      unitsForCalc
+    );
+
     let adminFee = 0;
     if (config.adminFeeType === 'flat') {
-      adminFee = config.adminFeeAmount;
+      adminFee = toNumber(config.adminFeeAmount);
     } else if (config.adminFeeType === 'percentage') {
-      adminFee = bill.totalAmount * (config.adminFeeAmount / 100);
+      adminFee = toNumber(bill.totalAmount) * (toNumber(config.adminFeeAmount) / 100);
     }
 
     const totalAllocated = allocations.reduce((sum, a) => sum + a.totalAmount, 0);
@@ -736,7 +664,7 @@ export async function utilityRoutes(app: FastifyInstance): Promise<void> {
         allocationMethod: config.allocationMethod,
         periodStart: bill.periodStart,
         periodEnd: bill.periodEnd,
-        totalBillAmount: bill.totalAmount,
+        totalBillAmount: toNumber(bill.totalAmount),
         adminFee: Math.round(adminFee * 100) / 100,
         totalAllocated: Math.round(totalAllocated * 100) / 100,
         unitCount: allocations.length,
@@ -745,162 +673,193 @@ export async function utilityRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // Create RUBS allocation
   app.post('/rubs/allocations', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = calculateAllocationSchema.parse(request.body);
 
-    const config = rubsConfigs.get(body.configId);
+    const config = await prisma.rUBSConfig.findUnique({ where: { id: body.configId } });
     if (!config) {
       return reply.status(404).send({ success: false, error: 'RUBS config not found' });
     }
 
-    const bill = bills.get(body.billId);
+    const bill = await prisma.utilityBill.findUnique({ where: { id: body.billId } });
     if (!bill) {
       return reply.status(404).send({ success: false, error: 'Bill not found' });
     }
 
-    const allocations = calculateRUBSAllocation(config, bill.totalAmount, body.units);
+    const unitsForAlloc = body.units.map(u => ({
+      id: u.id,
+      name: u.name,
+      squareFootage: u.squareFootage,
+      bedrooms: u.bedrooms,
+      occupants: u.occupants,
+      tenantId: u.tenantId,
+      tenantName: u.tenantName,
+      isVacant: u.isVacant,
+      customWeight: u.customWeight,
+    }));
+
+    const allocations = calculateRUBSAllocation(
+      {
+        allocationMethod: config.allocationMethod as AllocationMethod,
+        adminFeeType: config.adminFeeType as 'flat' | 'percentage' | 'none',
+        adminFeeAmount: toNumber(config.adminFeeAmount),
+        includeVacantUnits: config.includeVacantUnits,
+        minimumCharge: config.minimumCharge ? toNumber(config.minimumCharge) : null,
+        maximumCharge: config.maximumCharge ? toNumber(config.maximumCharge) : null,
+        customWeights: config.customWeights as Record<string, number> | null,
+      },
+      toNumber(bill.totalAmount),
+      unitsForAlloc
+    );
 
     let adminFee = 0;
     if (config.adminFeeType === 'flat') {
-      adminFee = config.adminFeeAmount;
+      adminFee = toNumber(config.adminFeeAmount);
     } else if (config.adminFeeType === 'percentage') {
-      adminFee = bill.totalAmount * (config.adminFeeAmount / 100);
+      adminFee = toNumber(bill.totalAmount) * (toNumber(config.adminFeeAmount) / 100);
     }
 
     const totalAllocated = allocations.reduce((sum, a) => sum + a.totalAmount, 0);
-    const now = new Date();
 
-    const allocation: RUBSAllocation = {
-      id: crypto.randomUUID(),
-      configId: config.id,
-      billId: bill.id,
-      propertyId: config.propertyId,
-      periodStart: bill.periodStart,
-      periodEnd: bill.periodEnd,
-      totalBillAmount: bill.totalAmount,
-      adminFee: Math.round(adminFee * 100) / 100,
-      totalAllocated: Math.round(totalAllocated * 100) / 100,
-      allocations,
-      status: 'draft',
-      approvedById: null,
-      approvedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    rubsAllocations.set(allocation.id, allocation);
+    const allocation = await prisma.rUBSAllocation.create({
+      data: {
+        configId: config.id,
+        billId: bill.id,
+        propertyId: config.propertyId,
+        periodStart: bill.periodStart,
+        periodEnd: bill.periodEnd,
+        totalBillAmount: toNumber(bill.totalAmount),
+        adminFee: Math.round(adminFee * 100) / 100,
+        totalAllocated: Math.round(totalAllocated * 100) / 100,
+        allocations: allocations as unknown as Prisma.JsonValue,
+        status: 'draft' as PrismaRUBSAllocationStatus,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: allocation,
+      data: {
+        ...allocation,
+        totalBillAmount: toNumber(allocation.totalBillAmount),
+        adminFee: toNumber(allocation.adminFee),
+        totalAllocated: toNumber(allocation.totalAllocated),
+      },
     });
   });
 
-  // Approve RUBS allocation
   app.post('/rubs/allocations/:id/approve', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const { userId } = request.body as { userId: string };
 
-    const allocation = rubsAllocations.get(id);
+    const allocation = await prisma.rUBSAllocation.findUnique({ where: { id } });
     if (!allocation) {
       return reply.status(404).send({ success: false, error: 'Allocation not found' });
     }
 
-    allocation.status = 'approved';
-    allocation.approvedById = userId;
-    allocation.approvedAt = new Date();
-    allocation.updatedAt = new Date();
-    rubsAllocations.set(id, allocation);
-
-    return reply.send({ success: true, data: allocation });
-  });
-
-  // -------------------------------------------------------------------------
-  // Usage Readings
-  // -------------------------------------------------------------------------
-
-  // List readings
-  app.get('/readings', async (request: FastifyRequest, reply: FastifyReply) => {
-    const query = request.query as { accountId?: string; propertyId?: string };
-
-    let readingList = Array.from(usageReadings.values());
-
-    if (query.accountId) {
-      readingList = readingList.filter((r) => r.accountId === query.accountId);
-    }
-    if (query.propertyId) {
-      readingList = readingList.filter((r) => r.propertyId === query.propertyId);
-    }
-
-    // Sort by date descending
-    readingList.sort((a, b) => b.readingDate.getTime() - a.readingDate.getTime());
+    const updated = await prisma.rUBSAllocation.update({
+      where: { id },
+      data: {
+        status: 'approved',
+        approvedById: userId,
+        approvedAt: new Date(),
+      },
+    });
 
     return reply.send({
       success: true,
-      data: readingList,
-      total: readingList.length,
+      data: {
+        ...updated,
+        totalBillAmount: toNumber(updated.totalBillAmount),
+        adminFee: toNumber(updated.adminFee),
+        totalAllocated: toNumber(updated.totalAllocated),
+      },
     });
   });
 
-  // Create reading
+  // Usage Readings
+  app.get('/readings', async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = request.query as { accountId?: string; propertyId?: string };
+
+    const where: Record<string, unknown> = {};
+    if (query.accountId) where.accountId = query.accountId;
+    if (query.propertyId) where.propertyId = query.propertyId;
+
+    const results = await prisma.usageReading.findMany({
+      where,
+      orderBy: { readingDate: 'desc' },
+    });
+
+    return reply.send({
+      success: true,
+      data: results.map((r) => ({
+        ...r,
+        readingValue: toNumber(r.readingValue),
+        previousValue: r.previousValue ? toNumber(r.previousValue) : null,
+        usage: r.usage ? toNumber(r.usage) : null,
+      })),
+      total: results.length,
+    });
+  });
+
   app.post('/readings', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createReadingSchema.parse(request.body);
-    const account = accounts.get(body.accountId);
 
+    const account = await prisma.utilityAccount.findUnique({ where: { id: body.accountId } });
     if (!account) {
       return reply.status(404).send({ success: false, error: 'Account not found' });
     }
 
-    const previousValue = account.lastReadingValue;
+    const previousValue = account.lastReadingValue ? toNumber(account.lastReadingValue) : null;
     const usage = previousValue !== null ? calculateUsage(body.readingValue, previousValue) : null;
-    const now = new Date();
 
-    const reading: UsageReading = {
-      id: crypto.randomUUID(),
-      accountId: body.accountId,
-      propertyId: account.propertyId,
-      unitId: account.unitId,
-      readingDate: new Date(body.readingDate),
-      readingValue: body.readingValue,
-      previousValue,
-      usage,
-      usageUnit: body.usageUnit,
-      readingType: body.readingType,
-      readBy: body.readBy ?? null,
-      photoUrl: body.photoUrl ?? null,
-      notes: body.notes ?? null,
-      createdAt: now,
-    };
-
-    usageReadings.set(reading.id, reading);
+    const reading = await prisma.usageReading.create({
+      data: {
+        accountId: body.accountId,
+        propertyId: account.propertyId,
+        unitId: account.unitId,
+        readingDate: new Date(body.readingDate),
+        readingValue: body.readingValue,
+        previousValue,
+        usage,
+        usageUnit: body.usageUnit,
+        readingType: body.readingType as PrismaReadingType,
+        readBy: body.readBy || null,
+        photoUrl: body.photoUrl || null,
+        notes: body.notes || null,
+      },
+    });
 
     // Update account
-    account.lastReadingDate = reading.readingDate;
-    account.lastReadingValue = body.readingValue;
-    account.updatedAt = now;
-    accounts.set(account.id, account);
+    await prisma.utilityAccount.update({
+      where: { id: body.accountId },
+      data: {
+        lastReadingDate: reading.readingDate,
+        lastReadingValue: body.readingValue,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: reading,
+      data: {
+        ...reading,
+        readingValue: toNumber(reading.readingValue),
+        previousValue: reading.previousValue ? toNumber(reading.previousValue) : null,
+        usage: reading.usage ? toNumber(reading.usage) : null,
+      },
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Dashboard / Summary
-  // -------------------------------------------------------------------------
-
-  // Get utility summary for property
+  // Summary
   app.get('/summary/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
 
-    const propertyAccounts = Array.from(accounts.values()).filter(
-      (a) => a.propertyId === propertyId
-    );
-    const propertyBills = Array.from(bills.values()).filter(
-      (b) => b.propertyId === propertyId
-    );
+    const propertyAccounts = await prisma.utilityAccount.findMany({
+      where: { propertyId },
+    });
+
+    const propertyBills = await prisma.utilityBill.findMany({
+      where: { propertyId },
+    });
 
     const now = new Date();
     const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -914,8 +873,11 @@ export async function utilityRoutes(app: FastifyInstance): Promise<void> {
     );
 
     const pendingBills = propertyBills.filter((b) => b.status === 'pending');
-    const overdueBills = getOverdueBills(propertyBills);
-    const dueSoonBills = getBillsDueSoon(propertyBills);
+    const overdueBills = pendingBills.filter((b) => b.dueDate < now);
+    const dueSoonBills = pendingBills.filter((b) => {
+      const cutoff = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      return b.dueDate >= now && b.dueDate <= cutoff;
+    });
 
     // Group by utility type
     const byType: Record<string, { count: number; total: number; avgMonthly: number }> = {};
@@ -924,12 +886,14 @@ export async function utilityRoutes(app: FastifyInstance): Promise<void> {
         byType[bill.utilityType] = { count: 0, total: 0, avgMonthly: 0 };
       }
       byType[bill.utilityType].count++;
-      byType[bill.utilityType].total += bill.totalAmount;
+      byType[bill.utilityType].total += toNumber(bill.totalAmount);
     }
 
     for (const type of Object.keys(byType)) {
       const typeBills = propertyBills.filter((b) => b.utilityType === type);
-      byType[type].avgMonthly = estimateMonthlyAverage(typeBills);
+      byType[type].avgMonthly = typeBills.length > 0
+        ? Math.round((byType[type].total / typeBills.length) * 100) / 100
+        : 0;
     }
 
     return reply.send({
@@ -944,18 +908,18 @@ export async function utilityRoutes(app: FastifyInstance): Promise<void> {
         },
         bills: {
           pending: pendingBills.length,
-          pendingAmount: pendingBills.reduce((sum, b) => sum + b.totalAmount, 0),
+          pendingAmount: pendingBills.reduce((sum, b) => sum + toNumber(b.totalAmount), 0),
           overdue: overdueBills.length,
-          overdueAmount: overdueBills.reduce((sum, b) => sum + b.totalAmount, 0),
+          overdueAmount: overdueBills.reduce((sum, b) => sum + toNumber(b.totalAmount), 0),
           dueSoon: dueSoonBills.length,
-          dueSoonAmount: dueSoonBills.reduce((sum, b) => sum + b.totalAmount, 0),
+          dueSoonAmount: dueSoonBills.reduce((sum, b) => sum + toNumber(b.totalAmount), 0),
         },
         spending: {
-          thisMonth: thisMonthBills.reduce((sum, b) => sum + b.totalAmount, 0),
-          lastMonth: lastMonthBills.reduce((sum, b) => sum + b.totalAmount, 0),
+          thisMonth: thisMonthBills.reduce((sum, b) => sum + toNumber(b.totalAmount), 0),
+          lastMonth: lastMonthBills.reduce((sum, b) => sum + toNumber(b.totalAmount), 0),
           yearToDate: propertyBills
             .filter((b) => b.statementDate.getFullYear() === now.getFullYear())
-            .reduce((sum, b) => sum + b.totalAmount, 0),
+            .reduce((sum, b) => sum + toNumber(b.totalAmount), 0),
         },
         byUtilityType: byType,
       },

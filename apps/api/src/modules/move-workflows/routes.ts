@@ -1,5 +1,17 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import {
+  prisma,
+  Prisma,
+  type MoveWorkflowType as PrismaMoveWorkflowType,
+  type MoveWorkflowStatus as PrismaMoveWorkflowStatus,
+  type MoveChecklistItemStatus as PrismaChecklistItemStatus,
+  type MoveConditionRating as PrismaConditionRating,
+  type MoveKeyType as PrismaMoveKeyType,
+  type MoveDepositType as PrismaMoveDepositType,
+  type MoveDepositStatus as PrismaMoveDepositStatus,
+  type MoveUtilityTransferStatus as PrismaUtilityTransferStatus,
+} from '@realriches/database';
 
 // ============================================================================
 // TYPES
@@ -32,7 +44,7 @@ interface ChecklistTemplate {
   id: string;
   name: string;
   type: WorkflowType;
-  propertyId?: string; // null for global templates
+  propertyId?: string;
   items: ChecklistTemplateItem[];
   isActive: boolean;
   createdAt: string;
@@ -135,25 +147,20 @@ interface UtilityTransfer {
 }
 
 // ============================================================================
-// IN-MEMORY STORAGE
-// ============================================================================
-
-const workflows = new Map<string, MoveWorkflow>();
-const checklistTemplates = new Map<string, ChecklistTemplate>();
-const checklistItems = new Map<string, ChecklistItem>();
-const conditionReports = new Map<string, ConditionReport>();
-const keyRecords = new Map<string, KeyRecord>();
-const depositRecords = new Map<string, DepositRecord>();
-const depositDeductions = new Map<string, DepositDeduction>();
-const utilityTransfers = new Map<string, UtilityTransfer>();
-
-// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
+
 export function calculateDepositRefund(
-  deposit: DepositRecord,
-  deductions: DepositDeduction[]
+  deposit: { amount: number; interestAccrued: number },
+  deductions: { amount: number }[]
 ): { totalDeductions: number; refundAmount: number; refundPercentage: number } {
   const totalDeductions = deductions.reduce((sum, d) => sum + d.amount, 0);
   const refundAmount = Math.max(0, deposit.amount + deposit.interestAccrued - totalDeductions);
@@ -167,7 +174,7 @@ export function calculateDepositRefund(
 }
 
 export function generateChecklistFromTemplate(
-  template: ChecklistTemplate,
+  template: { items: ChecklistTemplateItem[] },
   workflowId: string
 ): Omit<ChecklistItem, 'id'>[] {
   return template.items.map((item) => ({
@@ -183,7 +190,7 @@ export function generateChecklistFromTemplate(
   }));
 }
 
-export function calculateWorkflowProgress(items: ChecklistItem[]): {
+export function calculateWorkflowProgress(items: { status: ChecklistItemStatus }[]): {
   total: number;
   completed: number;
   pending: number;
@@ -225,8 +232,8 @@ export function compareConditions(
 }
 
 export function generateDepositItemization(
-  deposit: DepositRecord,
-  deductions: DepositDeduction[]
+  deposit: { amount: number; interestAccrued: number },
+  deductions: { category: string; description: string; amount: number }[]
 ): {
   depositAmount: number;
   interestAccrued: number;
@@ -263,20 +270,20 @@ export function getDepositDeadline(moveOutDate: string, stateDays: number = 30):
 // ============================================================================
 
 const WorkflowSchema = z.object({
-  leaseId: z.string(),
-  propertyId: z.string(),
-  unitId: z.string(),
-  tenantId: z.string(),
+  leaseId: z.string().uuid(),
+  propertyId: z.string().uuid(),
+  unitId: z.string().uuid(),
+  tenantId: z.string().uuid(),
   type: z.enum(['move_in', 'move_out']),
   scheduledDate: z.string(),
-  inspectorId: z.string().optional(),
+  inspectorId: z.string().uuid().optional(),
   notes: z.string().optional(),
 });
 
 const ChecklistTemplateSchema = z.object({
   name: z.string(),
   type: z.enum(['move_in', 'move_out']),
-  propertyId: z.string().optional(),
+  propertyId: z.string().uuid().optional(),
   items: z.array(
     z.object({
       category: z.string(),
@@ -294,7 +301,7 @@ const ChecklistItemUpdateSchema = z.object({
 });
 
 const ConditionReportSchema = z.object({
-  workflowId: z.string(),
+  workflowId: z.string().uuid(),
   room: z.string(),
   area: z.string(),
   conditionIn: z.enum(['excellent', 'good', 'fair', 'poor', 'damaged']).optional(),
@@ -308,8 +315,8 @@ const ConditionReportSchema = z.object({
 });
 
 const KeyRecordSchema = z.object({
-  propertyId: z.string(),
-  unitId: z.string(),
+  propertyId: z.string().uuid(),
+  unitId: z.string().uuid(),
   keyType: z.enum(['unit', 'mailbox', 'garage', 'storage', 'amenity', 'fob', 'other']),
   keyNumber: z.string(),
   quantity: z.number().default(1),
@@ -317,23 +324,23 @@ const KeyRecordSchema = z.object({
 });
 
 const KeyIssueSchema = z.object({
-  issuedTo: z.string(),
+  issuedTo: z.string().uuid(),
 });
 
 const DepositSchema = z.object({
-  leaseId: z.string(),
-  tenantId: z.string(),
+  leaseId: z.string().uuid(),
+  tenantId: z.string().uuid(),
   amount: z.number(),
   depositType: z.enum(['security', 'pet', 'last_month', 'key', 'other']),
   heldInAccount: z.string().optional(),
 });
 
 const DeductionSchema = z.object({
-  depositId: z.string(),
+  depositId: z.string().uuid(),
   category: z.string(),
   description: z.string(),
   amount: z.number(),
-  invoiceId: z.string().optional(),
+  invoiceId: z.string().uuid().optional(),
   photos: z.array(z.string()).default([]),
 });
 
@@ -342,7 +349,7 @@ const DepositRefundSchema = z.object({
 });
 
 const UtilityTransferSchema = z.object({
-  workflowId: z.string(),
+  workflowId: z.string().uuid(),
   utilityType: z.string(),
   accountNumber: z.string().optional(),
   provider: z.string(),
@@ -367,35 +374,68 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = WorkflowSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const workflow: MoveWorkflow = {
-        id: `wf_${Date.now()}`,
-        ...data,
-        status: 'pending',
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      workflows.set(workflow.id, workflow);
+      const workflow = await prisma.moveWorkflow.create({
+        data: {
+          leaseId: data.leaseId,
+          propertyId: data.propertyId,
+          unitId: data.unitId,
+          tenantId: data.tenantId,
+          type: data.type as PrismaMoveWorkflowType,
+          status: 'pending' as PrismaMoveWorkflowStatus,
+          scheduledDate: new Date(data.scheduledDate),
+          inspectorId: data.inspectorId,
+          notes: data.notes,
+        },
+      });
 
       // Auto-generate checklist from template if available
-      const template = Array.from(checklistTemplates.values()).find(
-        (t) => t.type === data.type && t.isActive && (!t.propertyId || t.propertyId === data.propertyId)
-      );
+      const template = await prisma.moveChecklistTemplate.findFirst({
+        where: {
+          type: data.type as PrismaMoveWorkflowType,
+          isActive: true,
+          OR: [
+            { propertyId: null },
+            { propertyId: data.propertyId },
+          ],
+        },
+        orderBy: { propertyId: 'desc' }, // Prefer property-specific template
+      });
 
       if (template) {
-        const items = generateChecklistFromTemplate(template, workflow.id);
-        items.forEach((item) => {
-          const checklistItem: ChecklistItem = {
-            id: `cli_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            ...item,
-          };
-          checklistItems.set(checklistItem.id, checklistItem);
-        });
+        const templateItems = (template.items || []) as ChecklistTemplateItem[];
+        const checklistData = templateItems.map((item, index) => ({
+          workflowId: workflow.id,
+          templateItemId: item.id,
+          category: item.category,
+          description: item.description,
+          status: 'pending' as PrismaChecklistItemStatus,
+          photos: [],
+          isRequired: item.isRequired,
+          order: item.order ?? index,
+        }));
+
+        if (checklistData.length > 0) {
+          await prisma.moveChecklistItem.createMany({
+            data: checklistData,
+          });
+        }
       }
 
-      return reply.status(201).send(workflow);
+      return reply.status(201).send({
+        id: workflow.id,
+        leaseId: workflow.leaseId,
+        propertyId: workflow.propertyId,
+        unitId: workflow.unitId,
+        tenantId: workflow.tenantId,
+        type: workflow.type,
+        status: workflow.status,
+        scheduledDate: workflow.scheduledDate.toISOString(),
+        inspectorId: workflow.inspectorId,
+        notes: workflow.notes,
+        createdAt: workflow.createdAt.toISOString(),
+        updatedAt: workflow.updatedAt.toISOString(),
+      });
     }
   );
 
@@ -410,28 +450,35 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
     ) => {
       const { propertyId, type, status } = request.query;
 
-      let results = Array.from(workflows.values());
+      const where: Prisma.MoveWorkflowWhereInput = {};
+      if (propertyId) where.propertyId = propertyId;
+      if (type) where.type = type as PrismaMoveWorkflowType;
+      if (status) where.status = status as PrismaMoveWorkflowStatus;
 
-      if (propertyId) {
-        results = results.filter((w) => w.propertyId === propertyId);
-      }
-      if (type) {
-        results = results.filter((w) => w.type === type);
-      }
-      if (status) {
-        results = results.filter((w) => w.status === status);
-      }
-
-      // Add progress to each workflow
-      const workflowsWithProgress = results.map((w) => {
-        const items = Array.from(checklistItems.values()).filter(
-          (i) => i.workflowId === w.id
-        );
-        return {
-          ...w,
-          progress: calculateWorkflowProgress(items),
-        };
+      const workflows = await prisma.moveWorkflow.findMany({
+        where,
+        include: { checklistItems: true },
+        orderBy: { createdAt: 'desc' },
       });
+
+      const workflowsWithProgress = workflows.map((w) => ({
+        id: w.id,
+        leaseId: w.leaseId,
+        propertyId: w.propertyId,
+        unitId: w.unitId,
+        tenantId: w.tenantId,
+        type: w.type,
+        status: w.status,
+        scheduledDate: w.scheduledDate.toISOString(),
+        completedDate: w.completedDate?.toISOString(),
+        inspectorId: w.inspectorId,
+        notes: w.notes,
+        createdAt: w.createdAt.toISOString(),
+        updatedAt: w.updatedAt.toISOString(),
+        progress: calculateWorkflowProgress(
+          w.checklistItems.map((i) => ({ status: i.status as ChecklistItemStatus }))
+        ),
+      }));
 
       return reply.send({ workflows: workflowsWithProgress });
     }
@@ -441,27 +488,84 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const workflow = workflows.get(request.params.id);
+      const workflow = await prisma.moveWorkflow.findUnique({
+        where: { id: request.params.id },
+        include: {
+          checklistItems: { orderBy: { order: 'asc' } },
+          conditionReports: true,
+          utilityTransfers: true,
+        },
+      });
+
       if (!workflow) {
         return reply.status(404).send({ error: 'Workflow not found' });
       }
 
-      const items = Array.from(checklistItems.values()).filter(
-        (i) => i.workflowId === workflow.id
-      );
-      const conditions = Array.from(conditionReports.values()).filter(
-        (c) => c.workflowId === workflow.id
-      );
-      const transfers = Array.from(utilityTransfers.values()).filter(
-        (t) => t.workflowId === workflow.id
-      );
+      const checklist = workflow.checklistItems.map((i) => ({
+        id: i.id,
+        workflowId: i.workflowId,
+        templateItemId: i.templateItemId,
+        category: i.category,
+        description: i.description,
+        status: i.status,
+        completedAt: i.completedAt?.toISOString(),
+        completedBy: i.completedBy,
+        notes: i.notes,
+        photos: i.photos,
+        isRequired: i.isRequired,
+        order: i.order,
+      }));
+
+      const conditionReports = workflow.conditionReports.map((c) => ({
+        id: c.id,
+        workflowId: c.workflowId,
+        room: c.room,
+        area: c.area,
+        conditionIn: c.conditionIn,
+        conditionOut: c.conditionOut,
+        notesIn: c.notesIn,
+        notesOut: c.notesOut,
+        photosIn: c.photosIn,
+        photosOut: c.photosOut,
+        damageDescription: c.damageDescription,
+        estimatedRepairCost: c.estimatedRepairCost ? toNumber(c.estimatedRepairCost) : undefined,
+        createdAt: c.createdAt.toISOString(),
+        updatedAt: c.updatedAt.toISOString(),
+      }));
+
+      const utilityTransfers = workflow.utilityTransfers.map((t) => ({
+        id: t.id,
+        workflowId: t.workflowId,
+        utilityType: t.utilityType,
+        accountNumber: t.accountNumber,
+        provider: t.provider,
+        transferDate: t.transferDate.toISOString(),
+        status: t.status,
+        confirmationNumber: t.confirmationNumber,
+        notes: t.notes,
+        createdAt: t.createdAt.toISOString(),
+      }));
 
       return reply.send({
-        ...workflow,
-        progress: calculateWorkflowProgress(items),
-        checklist: items.sort((a, b) => a.order - b.order),
-        conditionReports: conditions,
-        utilityTransfers: transfers,
+        id: workflow.id,
+        leaseId: workflow.leaseId,
+        propertyId: workflow.propertyId,
+        unitId: workflow.unitId,
+        tenantId: workflow.tenantId,
+        type: workflow.type,
+        status: workflow.status,
+        scheduledDate: workflow.scheduledDate.toISOString(),
+        completedDate: workflow.completedDate?.toISOString(),
+        inspectorId: workflow.inspectorId,
+        notes: workflow.notes,
+        createdAt: workflow.createdAt.toISOString(),
+        updatedAt: workflow.updatedAt.toISOString(),
+        progress: calculateWorkflowProgress(
+          workflow.checklistItems.map((i) => ({ status: i.status as ChecklistItemStatus }))
+        ),
+        checklist,
+        conditionReports,
+        utilityTransfers,
       });
     }
   );
@@ -476,20 +580,42 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const workflow = workflows.get(request.params.id);
+      const workflow = await prisma.moveWorkflow.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!workflow) {
         return reply.status(404).send({ error: 'Workflow not found' });
       }
 
-      workflow.status = request.body.status;
-      workflow.updatedAt = new Date().toISOString();
+      const updateData: Prisma.MoveWorkflowUpdateInput = {
+        status: request.body.status as PrismaMoveWorkflowStatus,
+      };
 
       if (request.body.status === 'completed') {
-        workflow.completedDate = new Date().toISOString();
+        updateData.completedDate = new Date();
       }
 
-      workflows.set(workflow.id, workflow);
-      return reply.send(workflow);
+      const updated = await prisma.moveWorkflow.update({
+        where: { id: request.params.id },
+        data: updateData,
+      });
+
+      return reply.send({
+        id: updated.id,
+        leaseId: updated.leaseId,
+        propertyId: updated.propertyId,
+        unitId: updated.unitId,
+        tenantId: updated.tenantId,
+        type: updated.type,
+        status: updated.status,
+        scheduledDate: updated.scheduledDate.toISOString(),
+        completedDate: updated.completedDate?.toISOString(),
+        inspectorId: updated.inspectorId,
+        notes: updated.notes,
+        createdAt: updated.createdAt.toISOString(),
+        updatedAt: updated.updatedAt.toISOString(),
+      });
     }
   );
 
@@ -506,19 +632,30 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
     ) => {
       const data = ChecklistTemplateSchema.parse(request.body);
 
-      const template: ChecklistTemplate = {
-        id: `tpl_${Date.now()}`,
-        ...data,
-        items: data.items.map((item, index) => ({
-          id: `tpli_${Date.now()}_${index}`,
-          ...item,
-        })),
-        isActive: true,
-        createdAt: new Date().toISOString(),
-      };
+      const templateItems = data.items.map((item, index) => ({
+        id: `tpli_${Date.now()}_${index}`,
+        ...item,
+      }));
 
-      checklistTemplates.set(template.id, template);
-      return reply.status(201).send(template);
+      const template = await prisma.moveChecklistTemplate.create({
+        data: {
+          name: data.name,
+          type: data.type as PrismaMoveWorkflowType,
+          propertyId: data.propertyId,
+          items: templateItems as unknown as Prisma.JsonValue,
+          isActive: true,
+        },
+      });
+
+      return reply.status(201).send({
+        id: template.id,
+        name: template.name,
+        type: template.type,
+        propertyId: template.propertyId,
+        items: templateItems,
+        isActive: template.isActive,
+        createdAt: template.createdAt.toISOString(),
+      });
     }
   );
 
@@ -529,11 +666,25 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       request: FastifyRequest<{ Querystring: { type?: string } }>,
       reply
     ) => {
-      let results = Array.from(checklistTemplates.values());
-
+      const where: Prisma.MoveChecklistTemplateWhereInput = {};
       if (request.query.type) {
-        results = results.filter((t) => t.type === request.query.type);
+        where.type = request.query.type as PrismaMoveWorkflowType;
       }
+
+      const templates = await prisma.moveChecklistTemplate.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const results = templates.map((t) => ({
+        id: t.id,
+        name: t.name,
+        type: t.type,
+        propertyId: t.propertyId,
+        items: t.items as ChecklistTemplateItem[],
+        isActive: t.isActive,
+        createdAt: t.createdAt.toISOString(),
+      }));
 
       return reply.send({ templates: results });
     }
@@ -553,24 +704,45 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const item = checklistItems.get(request.params.itemId);
+      const item = await prisma.moveChecklistItem.findUnique({
+        where: { id: request.params.itemId },
+      });
+
       if (!item || item.workflowId !== request.params.workflowId) {
         return reply.status(404).send({ error: 'Checklist item not found' });
       }
 
       const updates = ChecklistItemUpdateSchema.parse(request.body);
+      const updateData: Prisma.MoveChecklistItemUpdateInput = {};
 
       if (updates.status) {
-        item.status = updates.status;
+        updateData.status = updates.status as PrismaChecklistItemStatus;
         if (updates.status === 'completed') {
-          item.completedAt = new Date().toISOString();
+          updateData.completedAt = new Date();
         }
       }
-      if (updates.notes !== undefined) item.notes = updates.notes;
-      if (updates.photos) item.photos = updates.photos;
+      if (updates.notes !== undefined) updateData.notes = updates.notes;
+      if (updates.photos) updateData.photos = updates.photos;
 
-      checklistItems.set(item.id, item);
-      return reply.send(item);
+      const updated = await prisma.moveChecklistItem.update({
+        where: { id: item.id },
+        data: updateData,
+      });
+
+      return reply.send({
+        id: updated.id,
+        workflowId: updated.workflowId,
+        templateItemId: updated.templateItemId,
+        category: updated.category,
+        description: updated.description,
+        status: updated.status,
+        completedAt: updated.completedAt?.toISOString(),
+        completedBy: updated.completedBy,
+        notes: updated.notes,
+        photos: updated.photos,
+        isRequired: updated.isRequired,
+        order: updated.order,
+      });
     }
   );
 
@@ -584,28 +756,38 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const workflow = workflows.get(request.params.workflowId);
+      const workflow = await prisma.moveWorkflow.findUnique({
+        where: { id: request.params.workflowId },
+        include: { checklistItems: true },
+      });
+
       if (!workflow) {
         return reply.status(404).send({ error: 'Workflow not found' });
       }
 
-      const existingItems = Array.from(checklistItems.values()).filter(
-        (i) => i.workflowId === workflow.id
-      );
+      const item = await prisma.moveChecklistItem.create({
+        data: {
+          workflowId: workflow.id,
+          category: request.body.category,
+          description: request.body.description,
+          status: 'pending' as PrismaChecklistItemStatus,
+          photos: [],
+          isRequired: request.body.isRequired ?? false,
+          order: workflow.checklistItems.length + 1,
+        },
+      });
 
-      const item: ChecklistItem = {
-        id: `cli_${Date.now()}`,
-        workflowId: workflow.id,
-        category: request.body.category,
-        description: request.body.description,
-        status: 'pending',
-        photos: [],
-        isRequired: request.body.isRequired ?? false,
-        order: existingItems.length + 1,
-      };
-
-      checklistItems.set(item.id, item);
-      return reply.status(201).send(item);
+      return reply.status(201).send({
+        id: item.id,
+        workflowId: item.workflowId,
+        templateItemId: item.templateItemId,
+        category: item.category,
+        description: item.description,
+        status: item.status,
+        photos: item.photos,
+        isRequired: item.isRequired,
+        order: item.order,
+      });
     }
   );
 
@@ -621,32 +803,82 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = ConditionReportSchema.parse(request.body);
-      const now = new Date().toISOString();
 
       // Check if report exists for this room/area
-      const existing = Array.from(conditionReports.values()).find(
-        (r) =>
-          r.workflowId === data.workflowId &&
-          r.room === data.room &&
-          r.area === data.area
-      );
+      const existing = await prisma.moveConditionReport.findFirst({
+        where: {
+          workflowId: data.workflowId,
+          room: data.room,
+          area: data.area,
+        },
+      });
 
       if (existing) {
         // Update existing
-        Object.assign(existing, data, { updatedAt: now });
-        conditionReports.set(existing.id, existing);
-        return reply.send(existing);
+        const updated = await prisma.moveConditionReport.update({
+          where: { id: existing.id },
+          data: {
+            conditionIn: data.conditionIn as PrismaConditionRating | undefined,
+            conditionOut: data.conditionOut as PrismaConditionRating | undefined,
+            notesIn: data.notesIn,
+            notesOut: data.notesOut,
+            photosIn: data.photosIn,
+            photosOut: data.photosOut,
+            damageDescription: data.damageDescription,
+            estimatedRepairCost: data.estimatedRepairCost,
+          },
+        });
+
+        return reply.send({
+          id: updated.id,
+          workflowId: updated.workflowId,
+          room: updated.room,
+          area: updated.area,
+          conditionIn: updated.conditionIn,
+          conditionOut: updated.conditionOut,
+          notesIn: updated.notesIn,
+          notesOut: updated.notesOut,
+          photosIn: updated.photosIn,
+          photosOut: updated.photosOut,
+          damageDescription: updated.damageDescription,
+          estimatedRepairCost: updated.estimatedRepairCost ? toNumber(updated.estimatedRepairCost) : undefined,
+          createdAt: updated.createdAt.toISOString(),
+          updatedAt: updated.updatedAt.toISOString(),
+        });
       }
 
-      const report: ConditionReport = {
-        id: `cr_${Date.now()}`,
-        ...data,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const report = await prisma.moveConditionReport.create({
+        data: {
+          workflowId: data.workflowId,
+          room: data.room,
+          area: data.area,
+          conditionIn: data.conditionIn as PrismaConditionRating | undefined,
+          conditionOut: data.conditionOut as PrismaConditionRating | undefined,
+          notesIn: data.notesIn,
+          notesOut: data.notesOut,
+          photosIn: data.photosIn,
+          photosOut: data.photosOut,
+          damageDescription: data.damageDescription,
+          estimatedRepairCost: data.estimatedRepairCost,
+        },
+      });
 
-      conditionReports.set(report.id, report);
-      return reply.status(201).send(report);
+      return reply.status(201).send({
+        id: report.id,
+        workflowId: report.workflowId,
+        room: report.room,
+        area: report.area,
+        conditionIn: report.conditionIn,
+        conditionOut: report.conditionOut,
+        notesIn: report.notesIn,
+        notesOut: report.notesOut,
+        photosIn: report.photosIn,
+        photosOut: report.photosOut,
+        damageDescription: report.damageDescription,
+        estimatedRepairCost: report.estimatedRepairCost ? toNumber(report.estimatedRepairCost) : undefined,
+        createdAt: report.createdAt.toISOString(),
+        updatedAt: report.updatedAt.toISOString(),
+      });
     }
   );
 
@@ -654,9 +886,9 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/:workflowId/conditions/compare',
     async (request: FastifyRequest<{ Params: { workflowId: string } }>, reply) => {
-      const conditions = Array.from(conditionReports.values()).filter(
-        (c) => c.workflowId === request.params.workflowId
-      );
+      const conditions = await prisma.moveConditionReport.findMany({
+        where: { workflowId: request.params.workflowId },
+      });
 
       const comparison = conditions
         .filter((c) => c.conditionIn && c.conditionOut)
@@ -665,9 +897,9 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
           area: c.area,
           conditionIn: c.conditionIn,
           conditionOut: c.conditionOut,
-          ...compareConditions(c.conditionIn!, c.conditionOut!),
+          ...compareConditions(c.conditionIn as ConditionRating, c.conditionOut as ConditionRating),
           damageDescription: c.damageDescription,
-          estimatedRepairCost: c.estimatedRepairCost,
+          estimatedRepairCost: c.estimatedRepairCost ? toNumber(c.estimatedRepairCost) : undefined,
         }));
 
       const totalEstimatedCost = comparison
@@ -703,14 +935,30 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
     ) => {
       const data = KeyRecordSchema.parse(request.body);
 
-      const key: KeyRecord = {
-        id: `key_${Date.now()}`,
-        ...data,
-        createdAt: new Date().toISOString(),
-      };
+      const key = await prisma.moveKeyRecord.create({
+        data: {
+          propertyId: data.propertyId,
+          unitId: data.unitId,
+          keyType: data.keyType as PrismaMoveKeyType,
+          keyNumber: data.keyNumber,
+          quantity: data.quantity,
+          notes: data.notes,
+        },
+      });
 
-      keyRecords.set(key.id, key);
-      return reply.status(201).send(key);
+      return reply.status(201).send({
+        id: key.id,
+        propertyId: key.propertyId,
+        unitId: key.unitId,
+        keyType: key.keyType,
+        keyNumber: key.keyNumber,
+        quantity: key.quantity,
+        issuedTo: key.issuedTo,
+        issuedDate: key.issuedDate?.toISOString(),
+        returnedDate: key.returnedDate?.toISOString(),
+        notes: key.notes,
+        createdAt: key.createdAt.toISOString(),
+      });
     }
   );
 
@@ -723,17 +971,39 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(keyRecords.values());
+      const where: Prisma.MoveKeyRecordWhereInput = {};
 
       if (request.query.propertyId) {
-        results = results.filter((k) => k.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.unitId) {
-        results = results.filter((k) => k.unitId === request.query.unitId);
+        where.unitId = request.query.unitId;
       }
       if (request.query.available === 'true') {
-        results = results.filter((k) => !k.issuedTo || k.returnedDate);
+        where.OR = [
+          { issuedTo: null },
+          { returnedDate: { not: null } },
+        ];
       }
+
+      const keys = await prisma.moveKeyRecord.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const results = keys.map((k) => ({
+        id: k.id,
+        propertyId: k.propertyId,
+        unitId: k.unitId,
+        keyType: k.keyType,
+        keyNumber: k.keyNumber,
+        quantity: k.quantity,
+        issuedTo: k.issuedTo,
+        issuedDate: k.issuedDate?.toISOString(),
+        returnedDate: k.returnedDate?.toISOString(),
+        notes: k.notes,
+        createdAt: k.createdAt.toISOString(),
+      }));
 
       return reply.send({ keys: results });
     }
@@ -749,18 +1019,37 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const key = keyRecords.get(request.params.id);
+      const key = await prisma.moveKeyRecord.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!key) {
         return reply.status(404).send({ error: 'Key not found' });
       }
 
       const data = KeyIssueSchema.parse(request.body);
-      key.issuedTo = data.issuedTo;
-      key.issuedDate = new Date().toISOString();
-      key.returnedDate = undefined;
+      const updated = await prisma.moveKeyRecord.update({
+        where: { id: key.id },
+        data: {
+          issuedTo: data.issuedTo,
+          issuedDate: new Date(),
+          returnedDate: null,
+        },
+      });
 
-      keyRecords.set(key.id, key);
-      return reply.send(key);
+      return reply.send({
+        id: updated.id,
+        propertyId: updated.propertyId,
+        unitId: updated.unitId,
+        keyType: updated.keyType,
+        keyNumber: updated.keyNumber,
+        quantity: updated.quantity,
+        issuedTo: updated.issuedTo,
+        issuedDate: updated.issuedDate?.toISOString(),
+        returnedDate: updated.returnedDate?.toISOString(),
+        notes: updated.notes,
+        createdAt: updated.createdAt.toISOString(),
+      });
     }
   );
 
@@ -768,14 +1057,32 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/keys/:id/return',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const key = keyRecords.get(request.params.id);
+      const key = await prisma.moveKeyRecord.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!key) {
         return reply.status(404).send({ error: 'Key not found' });
       }
 
-      key.returnedDate = new Date().toISOString();
-      keyRecords.set(key.id, key);
-      return reply.send(key);
+      const updated = await prisma.moveKeyRecord.update({
+        where: { id: key.id },
+        data: { returnedDate: new Date() },
+      });
+
+      return reply.send({
+        id: updated.id,
+        propertyId: updated.propertyId,
+        unitId: updated.unitId,
+        keyType: updated.keyType,
+        keyNumber: updated.keyNumber,
+        quantity: updated.quantity,
+        issuedTo: updated.issuedTo,
+        issuedDate: updated.issuedDate?.toISOString(),
+        returnedDate: updated.returnedDate?.toISOString(),
+        notes: updated.notes,
+        createdAt: updated.createdAt.toISOString(),
+      });
     }
   );
 
@@ -791,20 +1098,32 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = DepositSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const deposit: DepositRecord = {
-        id: `dep_${Date.now()}`,
-        ...data,
-        status: 'held',
-        interestAccrued: 0,
+      const deposit = await prisma.moveDepositRecord.create({
+        data: {
+          leaseId: data.leaseId,
+          tenantId: data.tenantId,
+          amount: data.amount,
+          depositType: data.depositType as PrismaMoveDepositType,
+          status: 'held' as PrismaMoveDepositStatus,
+          heldInAccount: data.heldInAccount,
+          interestAccrued: 0,
+        },
+      });
+
+      return reply.status(201).send({
+        id: deposit.id,
+        leaseId: deposit.leaseId,
+        tenantId: deposit.tenantId,
+        amount: toNumber(deposit.amount),
+        depositType: deposit.depositType,
+        status: deposit.status,
+        heldInAccount: deposit.heldInAccount,
+        interestAccrued: toNumber(deposit.interestAccrued),
         deductions: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      depositRecords.set(deposit.id, deposit);
-      return reply.status(201).send(deposit);
+        createdAt: deposit.createdAt.toISOString(),
+        updatedAt: deposit.updatedAt.toISOString(),
+      });
     }
   );
 
@@ -812,19 +1131,46 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/deposits/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const deposit = depositRecords.get(request.params.id);
+      const deposit = await prisma.moveDepositRecord.findUnique({
+        where: { id: request.params.id },
+        include: { deductions: true },
+      });
+
       if (!deposit) {
         return reply.status(404).send({ error: 'Deposit not found' });
       }
 
-      const deductions = Array.from(depositDeductions.values()).filter(
-        (d) => d.depositId === deposit.id
+      const deductions = deposit.deductions.map((d) => ({
+        id: d.id,
+        depositId: d.depositId,
+        category: d.category,
+        description: d.description,
+        amount: toNumber(d.amount),
+        invoiceId: d.invoiceId,
+        photos: d.photos,
+        createdAt: d.createdAt.toISOString(),
+      }));
+
+      const refundCalc = calculateDepositRefund(
+        { amount: toNumber(deposit.amount), interestAccrued: toNumber(deposit.interestAccrued) },
+        deductions
       );
 
-      const refundCalc = calculateDepositRefund(deposit, deductions);
-
       return reply.send({
-        ...deposit,
+        id: deposit.id,
+        leaseId: deposit.leaseId,
+        tenantId: deposit.tenantId,
+        amount: toNumber(deposit.amount),
+        depositType: deposit.depositType,
+        status: deposit.status,
+        heldInAccount: deposit.heldInAccount,
+        interestAccrued: toNumber(deposit.interestAccrued),
+        refundAmount: deposit.refundAmount ? toNumber(deposit.refundAmount) : undefined,
+        refundDate: deposit.refundDate?.toISOString(),
+        refundMethod: deposit.refundMethod,
+        itemizationSentDate: deposit.itemizationSentDate?.toISOString(),
+        createdAt: deposit.createdAt.toISOString(),
+        updatedAt: deposit.updatedAt.toISOString(),
         deductions,
         calculation: refundCalc,
       });
@@ -840,17 +1186,39 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(depositRecords.values());
+      const where: Prisma.MoveDepositRecordWhereInput = {};
 
       if (request.query.leaseId) {
-        results = results.filter((d) => d.leaseId === request.query.leaseId);
+        where.leaseId = request.query.leaseId;
       }
       if (request.query.tenantId) {
-        results = results.filter((d) => d.tenantId === request.query.tenantId);
+        where.tenantId = request.query.tenantId;
       }
       if (request.query.status) {
-        results = results.filter((d) => d.status === request.query.status);
+        where.status = request.query.status as PrismaMoveDepositStatus;
       }
+
+      const deposits = await prisma.moveDepositRecord.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const results = deposits.map((d) => ({
+        id: d.id,
+        leaseId: d.leaseId,
+        tenantId: d.tenantId,
+        amount: toNumber(d.amount),
+        depositType: d.depositType,
+        status: d.status,
+        heldInAccount: d.heldInAccount,
+        interestAccrued: toNumber(d.interestAccrued),
+        refundAmount: d.refundAmount ? toNumber(d.refundAmount) : undefined,
+        refundDate: d.refundDate?.toISOString(),
+        refundMethod: d.refundMethod,
+        itemizationSentDate: d.itemizationSentDate?.toISOString(),
+        createdAt: d.createdAt.toISOString(),
+        updatedAt: d.updatedAt.toISOString(),
+      }));
 
       return reply.send({ deposits: results });
     }
@@ -866,7 +1234,10 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const deposit = depositRecords.get(request.params.id);
+      const deposit = await prisma.moveDepositRecord.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!deposit) {
         return reply.status(404).send({ error: 'Deposit not found' });
       }
@@ -876,17 +1247,27 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
         depositId: deposit.id,
       });
 
-      const deduction: DepositDeduction = {
-        id: `ded_${Date.now()}`,
-        ...data,
-        createdAt: new Date().toISOString(),
-      };
+      const deduction = await prisma.moveDepositDeduction.create({
+        data: {
+          depositId: deposit.id,
+          category: data.category,
+          description: data.description,
+          amount: data.amount,
+          invoiceId: data.invoiceId,
+          photos: data.photos,
+        },
+      });
 
-      depositDeductions.set(deduction.id, deduction);
-      deposit.updatedAt = new Date().toISOString();
-      depositRecords.set(deposit.id, deposit);
-
-      return reply.status(201).send(deduction);
+      return reply.status(201).send({
+        id: deduction.id,
+        depositId: deduction.depositId,
+        category: deduction.category,
+        description: deduction.description,
+        amount: toNumber(deduction.amount),
+        invoiceId: deduction.invoiceId,
+        photos: deduction.photos,
+        createdAt: deduction.createdAt.toISOString(),
+      });
     }
   );
 
@@ -894,16 +1275,25 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/deposits/:id/itemization',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const deposit = depositRecords.get(request.params.id);
+      const deposit = await prisma.moveDepositRecord.findUnique({
+        where: { id: request.params.id },
+        include: { deductions: true },
+      });
+
       if (!deposit) {
         return reply.status(404).send({ error: 'Deposit not found' });
       }
 
-      const deductions = Array.from(depositDeductions.values()).filter(
-        (d) => d.depositId === deposit.id
-      );
+      const deductions = deposit.deductions.map((d) => ({
+        category: d.category,
+        description: d.description,
+        amount: toNumber(d.amount),
+      }));
 
-      const itemization = generateDepositItemization(deposit, deductions);
+      const itemization = generateDepositItemization(
+        { amount: toNumber(deposit.amount), interestAccrued: toNumber(deposit.interestAccrued) },
+        deductions
+      );
 
       return reply.send(itemization);
     }
@@ -919,32 +1309,57 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const deposit = depositRecords.get(request.params.id);
+      const deposit = await prisma.moveDepositRecord.findUnique({
+        where: { id: request.params.id },
+        include: { deductions: true },
+      });
+
       if (!deposit) {
         return reply.status(404).send({ error: 'Deposit not found' });
       }
 
       const data = DepositRefundSchema.parse(request.body);
-      const deductions = Array.from(depositDeductions.values()).filter(
-        (d) => d.depositId === deposit.id
+      const deductions = deposit.deductions.map((d) => ({ amount: toNumber(d.amount) }));
+
+      const { refundAmount, totalDeductions } = calculateDepositRefund(
+        { amount: toNumber(deposit.amount), interestAccrued: toNumber(deposit.interestAccrued) },
+        deductions
       );
 
-      const { refundAmount, totalDeductions } = calculateDepositRefund(deposit, deductions);
-
-      deposit.refundAmount = refundAmount;
-      deposit.refundMethod = data.refundMethod;
-      deposit.refundDate = new Date().toISOString();
-      deposit.itemizationSentDate = new Date().toISOString();
-      deposit.status =
+      const status: PrismaMoveDepositStatus =
         refundAmount === 0
           ? 'forfeited'
           : totalDeductions > 0
             ? 'partial_refund'
             : 'full_refund';
-      deposit.updatedAt = new Date().toISOString();
 
-      depositRecords.set(deposit.id, deposit);
-      return reply.send(deposit);
+      const updated = await prisma.moveDepositRecord.update({
+        where: { id: deposit.id },
+        data: {
+          refundAmount,
+          refundMethod: data.refundMethod,
+          refundDate: new Date(),
+          itemizationSentDate: new Date(),
+          status,
+        },
+      });
+
+      return reply.send({
+        id: updated.id,
+        leaseId: updated.leaseId,
+        tenantId: updated.tenantId,
+        amount: toNumber(updated.amount),
+        depositType: updated.depositType,
+        status: updated.status,
+        heldInAccount: updated.heldInAccount,
+        interestAccrued: toNumber(updated.interestAccrued),
+        refundAmount: updated.refundAmount ? toNumber(updated.refundAmount) : undefined,
+        refundDate: updated.refundDate?.toISOString(),
+        refundMethod: updated.refundMethod,
+        itemizationSentDate: updated.itemizationSentDate?.toISOString(),
+        createdAt: updated.createdAt.toISOString(),
+        updatedAt: updated.updatedAt.toISOString(),
+      });
     }
   );
 
@@ -961,15 +1376,30 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
     ) => {
       const data = UtilityTransferSchema.parse(request.body);
 
-      const transfer: UtilityTransfer = {
-        id: `ut_${Date.now()}`,
-        ...data,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-      };
+      const transfer = await prisma.moveUtilityTransfer.create({
+        data: {
+          workflowId: data.workflowId,
+          utilityType: data.utilityType,
+          accountNumber: data.accountNumber,
+          provider: data.provider,
+          transferDate: new Date(data.transferDate),
+          status: 'pending' as PrismaUtilityTransferStatus,
+          notes: data.notes,
+        },
+      });
 
-      utilityTransfers.set(transfer.id, transfer);
-      return reply.status(201).send(transfer);
+      return reply.status(201).send({
+        id: transfer.id,
+        workflowId: transfer.workflowId,
+        utilityType: transfer.utilityType,
+        accountNumber: transfer.accountNumber,
+        provider: transfer.provider,
+        transferDate: transfer.transferDate.toISOString(),
+        status: transfer.status,
+        confirmationNumber: transfer.confirmationNumber,
+        notes: transfer.notes,
+        createdAt: transfer.createdAt.toISOString(),
+      });
     }
   );
 
@@ -983,30 +1413,35 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const transfer = utilityTransfers.get(request.params.id);
+      const transfer = await prisma.moveUtilityTransfer.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!transfer) {
         return reply.status(404).send({ error: 'Utility transfer not found' });
       }
 
-      transfer.status = request.body.status as UtilityTransfer['status'];
-      if (request.body.confirmationNumber) {
-        transfer.confirmationNumber = request.body.confirmationNumber;
-      }
+      const updated = await prisma.moveUtilityTransfer.update({
+        where: { id: transfer.id },
+        data: {
+          status: request.body.status as PrismaUtilityTransferStatus,
+          confirmationNumber: request.body.confirmationNumber,
+        },
+      });
 
-      utilityTransfers.set(transfer.id, transfer);
-      return reply.send(transfer);
+      return reply.send({
+        id: updated.id,
+        workflowId: updated.workflowId,
+        utilityType: updated.utilityType,
+        accountNumber: updated.accountNumber,
+        provider: updated.provider,
+        transferDate: updated.transferDate.toISOString(),
+        status: updated.status,
+        confirmationNumber: updated.confirmationNumber,
+        notes: updated.notes,
+        createdAt: updated.createdAt.toISOString(),
+      });
     }
   );
 }
 
-// Export for testing
-export {
-  workflows,
-  checklistTemplates,
-  checklistItems,
-  conditionReports,
-  keyRecords,
-  depositRecords,
-  depositDeductions,
-  utilityTransfers,
-};

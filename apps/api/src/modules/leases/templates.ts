@@ -1,5 +1,16 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import {
+  prisma,
+  Prisma,
+  type LeaseTemplateStatus as PrismaLeaseTemplateStatus,
+  type ClauseCategory as PrismaClauseCategory,
+  type ClauseRequirement as PrismaClauseRequirement,
+  type JurisdictionType as PrismaJurisdictionType,
+  type GeneratedLeaseStatus as PrismaGeneratedLeaseStatus,
+  type SignerType as PrismaSignerType,
+  type SignatureStatusEnum as PrismaSignatureStatus,
+} from '@realriches/database';
 
 // Types
 export type TemplateStatus = 'draft' | 'active' | 'archived';
@@ -124,11 +135,6 @@ export interface SignatureRequest {
   ipAddress: string | null;
 }
 
-// In-memory stores
-const templates = new Map<string, LeaseTemplate>();
-const clauses = new Map<string, Clause>();
-const generatedLeases = new Map<string, GeneratedLease>();
-
 // Schemas
 const createClauseSchema = z.object({
   name: z.string().min(1),
@@ -219,11 +225,7 @@ const generateLeaseSchema = z.object({
 });
 
 // Helper functions
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-}
-
-function interpolateVariables(content: string, variables: Record<string, string | number | boolean | Date>): string {
+export function interpolateVariables(content: string, variables: Record<string, string | number | boolean | Date>): string {
   let result = content;
 
   for (const [key, value] of Object.entries(variables)) {
@@ -233,7 +235,6 @@ function interpolateVariables(content: string, variables: Record<string, string 
     if (value instanceof Date) {
       displayValue = value.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     } else if (typeof value === 'number') {
-      // Check if it's likely a currency value
       if (key.toLowerCase().includes('amount') || key.toLowerCase().includes('rent') || key.toLowerCase().includes('deposit')) {
         displayValue = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
       } else {
@@ -251,7 +252,7 @@ function interpolateVariables(content: string, variables: Record<string, string 
   return result;
 }
 
-function evaluateCondition(condition: ClauseCondition, variables: Record<string, string | number | boolean | Date>): boolean {
+export function evaluateCondition(condition: ClauseCondition, variables: Record<string, string | number | boolean | Date>): boolean {
   const value = variables[condition.field];
   if (value === undefined) return false;
 
@@ -275,319 +276,153 @@ function evaluateCondition(condition: ClauseCondition, variables: Record<string,
   }
 }
 
-function shouldIncludeClause(templateClause: TemplateClause, variables: Record<string, string | number | boolean | Date>): boolean {
-  if (templateClause.conditions.length === 0) {
+export function shouldIncludeClause(conditions: ClauseCondition[], variables: Record<string, string | number | boolean | Date>): boolean {
+  if (conditions.length === 0) {
     return true;
   }
 
-  return templateClause.conditions.every((condition) => evaluateCondition(condition, variables));
+  return conditions.every((condition) => evaluateCondition(condition, variables));
 }
 
-// Initialize default clauses
-function initializeDefaultClauses(): void {
-  const defaultClauses: Omit<Clause, 'id' | 'createdAt' | 'updatedAt'>[] = [
-    {
-      name: 'parties',
-      title: 'Parties to the Agreement',
-      category: 'general',
-      content: 'This Residential Lease Agreement ("Agreement") is entered into as of {{lease_start_date}} by and between {{landlord_name}} ("Landlord") and {{tenant_names}} ("Tenant(s)") for the property located at {{property_address}} ("Premises").',
-      summary: 'Identifies the landlord, tenant(s), and property address',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'required',
-      variables: ['lease_start_date', 'landlord_name', 'tenant_names', 'property_address'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'lease_term',
-      title: 'Lease Term',
-      category: 'general',
-      content: 'The term of this Lease shall commence on {{lease_start_date}} and shall terminate on {{lease_end_date}}, unless sooner terminated or extended in accordance with the terms of this Agreement.',
-      summary: 'Specifies the start and end dates of the lease',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'required',
-      variables: ['lease_start_date', 'lease_end_date'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'rent_payment',
-      title: 'Rent Payment',
-      category: 'rent',
-      content: 'Tenant agrees to pay Landlord the sum of {{monthly_rent}} per month as rent for the Premises. Rent is due on the {{rent_due_day}} day of each month and shall be paid to Landlord at {{payment_address}} or by electronic payment as directed by Landlord.',
-      summary: 'Specifies monthly rent amount and payment terms',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'required',
-      variables: ['monthly_rent', 'rent_due_day', 'payment_address'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'late_fee',
-      title: 'Late Fee',
-      category: 'rent',
-      content: 'If rent is not received by the {{grace_period_days}} day of the month, Tenant shall pay a late fee of {{late_fee_amount}}. This late fee is in addition to the monthly rent and any other charges that may be due.',
-      summary: 'Defines late fee terms and grace period',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'optional',
-      variables: ['grace_period_days', 'late_fee_amount'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'security_deposit',
-      title: 'Security Deposit',
-      category: 'security_deposit',
-      content: 'Upon execution of this Agreement, Tenant shall deposit with Landlord the sum of {{security_deposit_amount}} as a security deposit. This deposit shall be held by Landlord as security for the faithful performance by Tenant of all terms, covenants, and conditions of this Lease.',
-      summary: 'Specifies security deposit amount and terms',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'required',
-      variables: ['security_deposit_amount'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'security_deposit_nyc',
-      title: 'Security Deposit (NYC)',
-      category: 'security_deposit',
-      content: 'Upon execution of this Agreement, Tenant shall deposit with Landlord the sum of {{security_deposit_amount}} as a security deposit, which shall not exceed one month\'s rent. Landlord shall deposit the security deposit in an interest-bearing account in a New York banking organization. The Landlord shall provide Tenant with written notice of the name and address of the banking organization where the deposit is being held.',
-      summary: 'NYC-compliant security deposit terms',
-      jurisdiction: 'NYC',
-      jurisdictionType: 'city',
-      requirement: 'required',
-      variables: ['security_deposit_amount'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: 'NY Gen. Oblig. Law § 7-103',
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'pet_policy',
-      title: 'Pet Policy',
-      category: 'pets',
-      content: 'Tenant {{pets_allowed}} keep pets on the Premises. {{pet_restrictions}}',
-      summary: 'Defines pet policy and restrictions',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'conditional',
-      variables: ['pets_allowed', 'pet_restrictions'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'pet_deposit',
-      title: 'Pet Deposit',
-      category: 'pets',
-      content: 'Tenant shall pay a non-refundable pet deposit of {{pet_deposit_amount}} and an additional monthly pet rent of {{pet_rent}} for each approved pet.',
-      summary: 'Specifies pet deposit and pet rent',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'conditional',
-      variables: ['pet_deposit_amount', 'pet_rent'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'maintenance_responsibility',
-      title: 'Maintenance and Repairs',
-      category: 'maintenance',
-      content: 'Landlord shall maintain the Premises in a habitable condition and shall be responsible for repairs to the structure, roof, plumbing, heating, electrical systems, and appliances provided by Landlord. Tenant shall be responsible for keeping the Premises clean and for repairs to damage caused by Tenant or Tenant\'s guests.',
-      summary: 'Defines maintenance responsibilities',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'required',
-      variables: [],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'utilities',
-      title: 'Utilities',
-      category: 'utilities',
-      content: 'Tenant shall be responsible for payment of the following utilities: {{tenant_utilities}}. Landlord shall be responsible for payment of the following utilities: {{landlord_utilities}}.',
-      summary: 'Specifies utility payment responsibilities',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'required',
-      variables: ['tenant_utilities', 'landlord_utilities'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'early_termination',
-      title: 'Early Termination',
-      category: 'termination',
-      content: 'Tenant may terminate this Lease early by providing {{early_termination_notice}} days written notice and paying an early termination fee of {{early_termination_fee}}. This fee is in addition to all rent due through the termination date.',
-      summary: 'Defines early termination terms and fees',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'optional',
-      variables: ['early_termination_notice', 'early_termination_fee'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'lead_paint_disclosure',
-      title: 'Lead-Based Paint Disclosure',
-      category: 'disclosure',
-      content: 'Housing built before 1978 may contain lead-based paint. Lead from paint, paint chips, and dust can pose health hazards if not managed properly. Landlord has provided Tenant with the EPA pamphlet "Protect Your Family From Lead in Your Home" and has disclosed any known lead-based paint and/or lead-based paint hazards in the Premises.',
-      summary: 'Required disclosure for pre-1978 housing',
-      jurisdiction: null,
-      jurisdictionType: 'federal',
-      requirement: 'conditional',
-      variables: [],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: '42 U.S.C. 4852d',
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'mold_disclosure',
-      title: 'Mold Disclosure',
-      category: 'disclosure',
-      content: 'Landlord has no knowledge of mold or mildew contamination in the Premises. Tenant agrees to maintain the Premises in a manner that prevents the occurrence of mold or mildew, including adequate ventilation and prompt reporting of any water leaks or moisture issues.',
-      summary: 'Mold disclosure and prevention responsibilities',
-      jurisdiction: null,
-      jurisdictionType: null,
-      requirement: 'optional',
-      variables: [],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: null,
-      version: 1,
-      isActive: true,
-    },
-    {
-      name: 'rent_stabilization_rider',
-      title: 'Rent Stabilization Rider',
-      category: 'compliance',
-      content: 'This apartment is subject to the Rent Stabilization Law and Code. The legal regulated rent for this apartment is {{legal_rent}}. The tenant has the right to receive a copy of the apartment\'s rental history and to challenge the rent if it appears to be incorrect.',
-      summary: 'Required rider for rent-stabilized apartments',
-      jurisdiction: 'NYC',
-      jurisdictionType: 'city',
-      requirement: 'conditional',
-      variables: ['legal_rent'],
-      dependencies: [],
-      incompatibleWith: [],
-      effectiveDate: null,
-      expiryDate: null,
-      legalReference: 'NYC Rent Stabilization Code',
-      version: 1,
-      isActive: true,
-    },
-  ];
+// Default clauses data
+const defaultClausesData = [
+  {
+    name: 'parties',
+    title: 'Parties to the Agreement',
+    category: 'general' as ClauseCategory,
+    content: 'This Residential Lease Agreement ("Agreement") is entered into as of {{lease_start_date}} by and between {{landlord_name}} ("Landlord") and {{tenant_names}} ("Tenant(s)") for the property located at {{property_address}} ("Premises").',
+    summary: 'Identifies the landlord, tenant(s), and property address',
+    requirement: 'required' as ClauseRequirement,
+    variables: ['lease_start_date', 'landlord_name', 'tenant_names', 'property_address'],
+  },
+  {
+    name: 'lease_term',
+    title: 'Lease Term',
+    category: 'general' as ClauseCategory,
+    content: 'The term of this Lease shall commence on {{lease_start_date}} and shall terminate on {{lease_end_date}}, unless sooner terminated or extended in accordance with the terms of this Agreement.',
+    summary: 'Specifies the start and end dates of the lease',
+    requirement: 'required' as ClauseRequirement,
+    variables: ['lease_start_date', 'lease_end_date'],
+  },
+  {
+    name: 'rent_payment',
+    title: 'Rent Payment',
+    category: 'rent' as ClauseCategory,
+    content: 'Tenant agrees to pay Landlord the sum of {{monthly_rent}} per month as rent for the Premises. Rent is due on the {{rent_due_day}} day of each month and shall be paid to Landlord at {{payment_address}} or by electronic payment as directed by Landlord.',
+    summary: 'Specifies monthly rent amount and payment terms',
+    requirement: 'required' as ClauseRequirement,
+    variables: ['monthly_rent', 'rent_due_day', 'payment_address'],
+  },
+  {
+    name: 'late_fee',
+    title: 'Late Fee',
+    category: 'rent' as ClauseCategory,
+    content: 'If rent is not received by the {{grace_period_days}} day of the month, Tenant shall pay a late fee of {{late_fee_amount}}. This late fee is in addition to the monthly rent and any other charges that may be due.',
+    summary: 'Defines late fee terms and grace period',
+    requirement: 'optional' as ClauseRequirement,
+    variables: ['grace_period_days', 'late_fee_amount'],
+  },
+  {
+    name: 'security_deposit',
+    title: 'Security Deposit',
+    category: 'security_deposit' as ClauseCategory,
+    content: 'Upon execution of this Agreement, Tenant shall deposit with Landlord the sum of {{security_deposit_amount}} as a security deposit. This deposit shall be held by Landlord as security for the faithful performance by Tenant of all terms, covenants, and conditions of this Lease.',
+    summary: 'Specifies security deposit amount and terms',
+    requirement: 'required' as ClauseRequirement,
+    variables: ['security_deposit_amount'],
+  },
+  {
+    name: 'maintenance_responsibility',
+    title: 'Maintenance and Repairs',
+    category: 'maintenance' as ClauseCategory,
+    content: 'Landlord shall maintain the Premises in a habitable condition and shall be responsible for repairs to the structure, roof, plumbing, heating, electrical systems, and appliances provided by Landlord. Tenant shall be responsible for keeping the Premises clean and for repairs to damage caused by Tenant or Tenant\'s guests.',
+    summary: 'Defines maintenance responsibilities',
+    requirement: 'required' as ClauseRequirement,
+    variables: [],
+  },
+  {
+    name: 'utilities',
+    title: 'Utilities',
+    category: 'utilities' as ClauseCategory,
+    content: 'Tenant shall be responsible for payment of the following utilities: {{tenant_utilities}}. Landlord shall be responsible for payment of the following utilities: {{landlord_utilities}}.',
+    summary: 'Specifies utility payment responsibilities',
+    requirement: 'required' as ClauseRequirement,
+    variables: ['tenant_utilities', 'landlord_utilities'],
+  },
+  {
+    name: 'pet_policy',
+    title: 'Pet Policy',
+    category: 'pets' as ClauseCategory,
+    content: 'Tenant {{pets_allowed}} keep pets on the Premises. {{pet_restrictions}}',
+    summary: 'Defines pet policy and restrictions',
+    requirement: 'conditional' as ClauseRequirement,
+    variables: ['pets_allowed', 'pet_restrictions'],
+  },
+];
 
-  const now = new Date();
-  for (const clauseData of defaultClauses) {
-    const clause: Clause = {
-      id: generateId(),
-      ...clauseData,
-      createdAt: now,
-      updatedAt: now,
-    };
-    clauses.set(clause.id, clause);
+// Initialize default clauses if not present
+async function initializeDefaultClauses(): Promise<void> {
+  const existingCount = await prisma.leaseClause.count();
+  if (existingCount > 0) return;
+
+  for (const clauseData of defaultClausesData) {
+    await prisma.leaseClause.create({
+      data: {
+        name: clauseData.name,
+        title: clauseData.title,
+        category: clauseData.category as PrismaClauseCategory,
+        content: clauseData.content,
+        summary: clauseData.summary,
+        requirement: clauseData.requirement as PrismaClauseRequirement,
+        variables: clauseData.variables,
+        dependencies: [],
+        incompatibleWith: [],
+        version: 1,
+        isActive: true,
+      },
+    });
   }
 }
 
-initializeDefaultClauses();
-
 // Route handlers
 export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
+  // Initialize default clauses on startup
+  await initializeDefaultClauses();
+
   // Clause routes
   app.post('/clauses', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createClauseSchema.parse(request.body);
-    const now = new Date();
 
-    const clause: Clause = {
-      id: generateId(),
-      name: body.name,
-      title: body.title,
-      category: body.category,
-      content: body.content,
-      summary: body.summary || null,
-      jurisdiction: body.jurisdiction || null,
-      jurisdictionType: body.jurisdictionType || null,
-      requirement: body.requirement,
-      variables: body.variables || [],
-      dependencies: body.dependencies || [],
-      incompatibleWith: body.incompatibleWith || [],
-      effectiveDate: body.effectiveDate ? new Date(body.effectiveDate) : null,
-      expiryDate: body.expiryDate ? new Date(body.expiryDate) : null,
-      legalReference: body.legalReference || null,
-      version: 1,
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    clauses.set(clause.id, clause);
+    const clause = await prisma.leaseClause.create({
+      data: {
+        name: body.name,
+        title: body.title,
+        category: body.category as PrismaClauseCategory,
+        content: body.content,
+        summary: body.summary,
+        jurisdiction: body.jurisdiction,
+        jurisdictionType: body.jurisdictionType as PrismaJurisdictionType | undefined,
+        requirement: body.requirement as PrismaClauseRequirement,
+        variables: body.variables || [],
+        dependencies: body.dependencies || [],
+        incompatibleWith: body.incompatibleWith || [],
+        effectiveDate: body.effectiveDate ? new Date(body.effectiveDate) : undefined,
+        expiryDate: body.expiryDate ? new Date(body.expiryDate) : undefined,
+        legalReference: body.legalReference,
+        version: 1,
+        isActive: true,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: clause,
+      data: {
+        ...clause,
+        createdAt: clause.createdAt.toISOString(),
+        updatedAt: clause.updatedAt.toISOString(),
+        effectiveDate: clause.effectiveDate?.toISOString(),
+        expiryDate: clause.expiryDate?.toISOString(),
+      },
     });
   });
 
@@ -600,38 +435,46 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       activeOnly?: string;
     };
 
-    let results = Array.from(clauses.values());
+    const where: Prisma.LeaseClauseWhereInput = {};
 
     if (query.category) {
-      results = results.filter((c) => c.category === query.category);
+      where.category = query.category as PrismaClauseCategory;
     }
     if (query.jurisdiction) {
-      results = results.filter((c) => c.jurisdiction === query.jurisdiction || c.jurisdiction === null);
+      where.OR = [
+        { jurisdiction: query.jurisdiction },
+        { jurisdiction: null },
+      ];
     }
     if (query.requirement) {
-      results = results.filter((c) => c.requirement === query.requirement);
+      where.requirement = query.requirement as PrismaClauseRequirement;
     }
     if (query.search) {
       const search = query.search.toLowerCase();
-      results = results.filter(
-        (c) =>
-          c.name.toLowerCase().includes(search) ||
-          c.title.toLowerCase().includes(search) ||
-          c.content.toLowerCase().includes(search)
-      );
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { title: { contains: search, mode: 'insensitive' } },
+        { content: { contains: search, mode: 'insensitive' } },
+      ];
     }
     if (query.activeOnly !== 'false') {
-      results = results.filter((c) => c.isActive);
+      where.isActive = true;
     }
+
+    const results = await prisma.leaseClause.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
 
     // Group by category
     const grouped = results.reduce((acc, clause) => {
-      if (!acc[clause.category]) {
-        acc[clause.category] = [];
+      const cat = clause.category as ClauseCategory;
+      if (!acc[cat]) {
+        acc[cat] = [];
       }
-      acc[clause.category].push(clause);
+      acc[cat].push(clause);
       return acc;
-    }, {} as Record<ClauseCategory, Clause[]>);
+    }, {} as Record<ClauseCategory, typeof results>);
 
     return reply.send({
       success: true,
@@ -643,7 +486,10 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/clauses/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const clause = clauses.get(id);
+
+    const clause = await prisma.leaseClause.findUnique({
+      where: { id },
+    });
 
     if (!clause) {
       return reply.status(404).send({
@@ -661,7 +507,10 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/clauses/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = updateClauseSchema.parse(request.body);
-    const clause = clauses.get(id);
+
+    const clause = await prisma.leaseClause.findUnique({
+      where: { id },
+    });
 
     if (!clause) {
       return reply.status(404).send({
@@ -670,14 +519,24 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const updated: Clause = {
-      ...clause,
-      ...body,
+    const updateData: Prisma.LeaseClauseUpdateInput = {
       version: clause.version + 1,
-      updatedAt: new Date(),
     };
 
-    clauses.set(id, updated);
+    if (body.name) updateData.name = body.name;
+    if (body.title) updateData.title = body.title;
+    if (body.category) updateData.category = body.category as PrismaClauseCategory;
+    if (body.content) updateData.content = body.content;
+    if (body.summary !== undefined) updateData.summary = body.summary;
+    if (body.requirement) updateData.requirement = body.requirement as PrismaClauseRequirement;
+    if (body.variables) updateData.variables = body.variables;
+    if (body.legalReference !== undefined) updateData.legalReference = body.legalReference;
+    if (body.isActive !== undefined) updateData.isActive = body.isActive;
+
+    const updated = await prisma.leaseClause.update({
+      where: { id },
+      data: updateData,
+    });
 
     return reply.send({
       success: true,
@@ -688,62 +547,52 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
   // Template routes
   app.post('/', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createTemplateSchema.parse(request.body);
-    const now = new Date();
 
-    const templateClauses: TemplateClause[] = [];
-    if (body.clauseIds) {
-      body.clauseIds.forEach((clauseId, index) => {
-        const clause = clauses.get(clauseId);
-        if (clause) {
-          templateClauses.push({
-            id: generateId(),
-            templateId: '',
-            clauseId,
-            order: index,
-            isRequired: clause.requirement === 'required',
-            customContent: null,
-            conditions: [],
-          });
-        }
+    const template = await prisma.leaseTemplate.create({
+      data: {
+        name: body.name,
+        description: body.description,
+        propertyType: body.propertyType,
+        jurisdiction: body.jurisdiction,
+        jurisdictionType: body.jurisdictionType as PrismaJurisdictionType,
+        status: 'draft' as PrismaLeaseTemplateStatus,
+        version: 1,
+        variables: (body.variables || []) as unknown as Prisma.JsonValue,
+        metadata: {
+          estimatedPages: body.metadata?.estimatedPages || 5,
+          requiredSignatures: body.metadata?.requiredSignatures || 2,
+          notarizationRequired: body.metadata?.notarizationRequired || false,
+          witnessRequired: body.metadata?.witnessRequired || false,
+          lastLegalReview: null,
+          complianceNotes: body.metadata?.complianceNotes || [],
+        } as unknown as Prisma.JsonValue,
+        createdById: body.createdById,
+      },
+    });
+
+    // Add clauses if provided
+    if (body.clauseIds && body.clauseIds.length > 0) {
+      const clauseData = body.clauseIds.map((clauseId, index) => ({
+        templateId: template.id,
+        clauseId,
+        order: index,
+        isRequired: false,
+        conditions: [] as unknown as Prisma.JsonValue,
+      }));
+
+      await prisma.leaseTemplateClause.createMany({
+        data: clauseData,
       });
     }
 
-    const template: LeaseTemplate = {
-      id: generateId(),
-      name: body.name,
-      description: body.description || null,
-      propertyType: body.propertyType,
-      jurisdiction: body.jurisdiction,
-      jurisdictionType: body.jurisdictionType,
-      status: 'draft',
-      version: 1,
-      parentVersionId: null,
-      clauses: templateClauses,
-      variables: body.variables || [],
-      metadata: {
-        estimatedPages: body.metadata?.estimatedPages || 5,
-        requiredSignatures: body.metadata?.requiredSignatures || 2,
-        notarizationRequired: body.metadata?.notarizationRequired || false,
-        witnessRequired: body.metadata?.witnessRequired || false,
-        lastLegalReview: null,
-        complianceNotes: body.metadata?.complianceNotes || [],
-      },
-      createdById: body.createdById,
-      createdAt: now,
-      updatedAt: now,
-      publishedAt: null,
-    };
-
-    // Update template IDs on clauses
-    template.clauses.forEach((c) => {
-      c.templateId = template.id;
+    const templateWithClauses = await prisma.leaseTemplate.findUnique({
+      where: { id: template.id },
+      include: { templateClauses: true },
     });
-
-    templates.set(template.id, template);
 
     return reply.status(201).send({
       success: true,
-      data: template,
+      data: templateWithClauses,
     });
   });
 
@@ -754,19 +603,23 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       status?: TemplateStatus;
     };
 
-    let results = Array.from(templates.values());
+    const where: Prisma.LeaseTemplateWhereInput = {};
 
     if (query.jurisdiction) {
-      results = results.filter((t) => t.jurisdiction === query.jurisdiction);
+      where.jurisdiction = query.jurisdiction;
     }
     if (query.propertyType) {
-      results = results.filter((t) => t.propertyType === query.propertyType);
+      where.propertyType = query.propertyType;
     }
     if (query.status) {
-      results = results.filter((t) => t.status === query.status);
+      where.status = query.status as PrismaLeaseTemplateStatus;
     }
 
-    results.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+    const results = await prisma.leaseTemplate.findMany({
+      where,
+      include: { templateClauses: true },
+      orderBy: { updatedAt: 'desc' },
+    });
 
     return reply.send({
       success: true,
@@ -777,7 +630,16 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const template = templates.get(id);
+
+    const template = await prisma.leaseTemplate.findUnique({
+      where: { id },
+      include: {
+        templateClauses: {
+          include: { clause: true },
+          orderBy: { order: 'asc' },
+        },
+      },
+    });
 
     if (!template) {
       return reply.status(404).send({
@@ -786,28 +648,19 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    // Enrich with full clause data
-    const enrichedClauses = template.clauses.map((tc) => {
-      const clause = clauses.get(tc.clauseId);
-      return {
-        ...tc,
-        clause,
-      };
-    });
-
     return reply.send({
       success: true,
-      data: {
-        ...template,
-        clauses: enrichedClauses,
-      },
+      data: template,
     });
   });
 
   app.patch('/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = updateTemplateSchema.parse(request.body);
-    const template = templates.get(id);
+
+    const template = await prisma.leaseTemplate.findUnique({
+      where: { id },
+    });
 
     if (!template) {
       return reply.status(404).send({
@@ -816,17 +669,20 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const updated: LeaseTemplate = {
-      ...template,
-      ...body,
-      updatedAt: new Date(),
-    };
-
-    if (body.status === 'active' && template.status !== 'active') {
-      updated.publishedAt = new Date();
+    const updateData: Prisma.LeaseTemplateUpdateInput = {};
+    if (body.name) updateData.name = body.name;
+    if (body.description !== undefined) updateData.description = body.description;
+    if (body.status) {
+      updateData.status = body.status as PrismaLeaseTemplateStatus;
+      if (body.status === 'active' && template.status !== 'active') {
+        updateData.publishedAt = new Date();
+      }
     }
 
-    templates.set(id, updated);
+    const updated = await prisma.leaseTemplate.update({
+      where: { id },
+      data: updateData,
+    });
 
     return reply.send({
       success: true,
@@ -837,7 +693,11 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
   app.post('/:id/clauses', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = addClauseToTemplateSchema.parse(request.body);
-    const template = templates.get(id);
+
+    const template = await prisma.leaseTemplate.findUnique({
+      where: { id },
+      include: { templateClauses: true },
+    });
 
     if (!template) {
       return reply.status(404).send({
@@ -846,7 +706,10 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const clause = clauses.get(body.clauseId);
+    const clause = await prisma.leaseClause.findUnique({
+      where: { id: body.clauseId },
+    });
+
     if (!clause) {
       return reply.status(404).send({
         success: false,
@@ -855,10 +718,12 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Check for incompatibilities
-    const existingClauseIds = template.clauses.map((c) => c.clauseId);
+    const existingClauseIds = template.templateClauses.map((c) => c.clauseId);
     for (const existingId of existingClauseIds) {
       if (clause.incompatibleWith.includes(existingId)) {
-        const incompatibleClause = clauses.get(existingId);
+        const incompatibleClause = await prisma.leaseClause.findUnique({
+          where: { id: existingId },
+        });
         return reply.status(400).send({
           success: false,
           error: `Clause "${clause.name}" is incompatible with existing clause "${incompatibleClause?.name}"`,
@@ -866,20 +731,16 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    const templateClause: TemplateClause = {
-      id: generateId(),
-      templateId: id,
-      clauseId: body.clauseId,
-      order: body.order ?? template.clauses.length,
-      isRequired: body.isRequired,
-      customContent: body.customContent || null,
-      conditions: body.conditions || [],
-    };
-
-    template.clauses.push(templateClause);
-    template.clauses.sort((a, b) => a.order - b.order);
-    template.updatedAt = new Date();
-    templates.set(id, template);
+    const templateClause = await prisma.leaseTemplateClause.create({
+      data: {
+        templateId: id,
+        clauseId: body.clauseId,
+        order: body.order ?? template.templateClauses.length,
+        isRequired: body.isRequired,
+        customContent: body.customContent,
+        conditions: (body.conditions || []) as unknown as Prisma.JsonValue,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
@@ -889,7 +750,10 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete('/:id/clauses/:clauseId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id, clauseId } = request.params as { id: string; clauseId: string };
-    const template = templates.get(id);
+
+    const template = await prisma.leaseTemplate.findUnique({
+      where: { id },
+    });
 
     if (!template) {
       return reply.status(404).send({
@@ -898,17 +762,20 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const clauseIndex = template.clauses.findIndex((c) => c.clauseId === clauseId);
-    if (clauseIndex === -1) {
+    const templateClause = await prisma.leaseTemplateClause.findFirst({
+      where: { templateId: id, clauseId },
+    });
+
+    if (!templateClause) {
       return reply.status(404).send({
         success: false,
         error: 'Clause not found in template',
       });
     }
 
-    template.clauses.splice(clauseIndex, 1);
-    template.updatedAt = new Date();
-    templates.set(id, template);
+    await prisma.leaseTemplateClause.delete({
+      where: { id: templateClause.id },
+    });
 
     return reply.send({
       success: true,
@@ -918,7 +785,11 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/:id/publish', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const template = templates.get(id);
+
+    const template = await prisma.leaseTemplate.findUnique({
+      where: { id },
+      include: { templateClauses: true },
+    });
 
     if (!template) {
       return reply.status(404).send({
@@ -928,9 +799,12 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Validate required clauses are present
-    const requiredClauses = Array.from(clauses.values()).filter((c) => c.requirement === 'required');
+    const requiredClauses = await prisma.leaseClause.findMany({
+      where: { requirement: 'required', isActive: true },
+    });
+
     const missingRequired = requiredClauses.filter(
-      (rc) => !template.clauses.some((tc) => tc.clauseId === rc.id)
+      (rc) => !template.templateClauses.some((tc) => tc.clauseId === rc.id)
     );
 
     if (missingRequired.length > 0) {
@@ -941,21 +815,28 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    template.status = 'active';
-    template.publishedAt = new Date();
-    template.updatedAt = new Date();
-    templates.set(id, template);
+    const updated = await prisma.leaseTemplate.update({
+      where: { id },
+      data: {
+        status: 'active',
+        publishedAt: new Date(),
+      },
+    });
 
     return reply.send({
       success: true,
-      data: template,
+      data: updated,
     });
   });
 
   app.post('/:id/clone', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { name: string; createdById: string };
-    const template = templates.get(id);
+
+    const template = await prisma.leaseTemplate.findUnique({
+      where: { id },
+      include: { templateClauses: true },
+    });
 
     if (!template) {
       return reply.status(404).send({
@@ -964,41 +845,60 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const now = new Date();
-    const cloned: LeaseTemplate = {
-      ...template,
-      id: generateId(),
-      name: body.name || `${template.name} (Copy)`,
-      status: 'draft',
-      version: 1,
-      parentVersionId: id,
-      clauses: template.clauses.map((c) => ({
-        ...c,
-        id: generateId(),
-        templateId: '',
-      })),
-      createdById: body.createdById,
-      createdAt: now,
-      updatedAt: now,
-      publishedAt: null,
-    };
-
-    cloned.clauses.forEach((c) => {
-      c.templateId = cloned.id;
+    const cloned = await prisma.leaseTemplate.create({
+      data: {
+        name: body.name || `${template.name} (Copy)`,
+        description: template.description,
+        propertyType: template.propertyType,
+        jurisdiction: template.jurisdiction,
+        jurisdictionType: template.jurisdictionType,
+        status: 'draft',
+        version: 1,
+        parentVersionId: id,
+        variables: template.variables,
+        metadata: template.metadata,
+        createdById: body.createdById,
+      },
     });
 
-    templates.set(cloned.id, cloned);
+    // Clone clauses
+    if (template.templateClauses.length > 0) {
+      await prisma.leaseTemplateClause.createMany({
+        data: template.templateClauses.map((c) => ({
+          templateId: cloned.id,
+          clauseId: c.clauseId,
+          order: c.order,
+          isRequired: c.isRequired,
+          customContent: c.customContent,
+          conditions: c.conditions,
+        })),
+      });
+    }
+
+    const clonedWithClauses = await prisma.leaseTemplate.findUnique({
+      where: { id: cloned.id },
+      include: { templateClauses: true },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: cloned,
+      data: clonedWithClauses,
     });
   });
 
   // Generate lease from template
   app.post('/generate', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = generateLeaseSchema.parse(request.body);
-    const template = templates.get(body.templateId);
+
+    const template = await prisma.leaseTemplate.findUnique({
+      where: { id: body.templateId },
+      include: {
+        templateClauses: {
+          include: { clause: true },
+          orderBy: { order: 'asc' },
+        },
+      },
+    });
 
     if (!template) {
       return reply.status(404).send({
@@ -1014,8 +914,10 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
+    const templateVariables = (template.variables || []) as TemplateVariable[];
+
     // Validate required variables
-    const missingVars = template.variables
+    const missingVars = templateVariables
       .filter((v) => v.required && body.variables[v.name] === undefined)
       .map((v) => v.name);
 
@@ -1028,7 +930,7 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
 
     // Build variables with defaults
     const variables: Record<string, string | number | boolean | Date> = {};
-    for (const templateVar of template.variables) {
+    for (const templateVar of templateVariables) {
       if (body.variables[templateVar.name] !== undefined) {
         variables[templateVar.name] = body.variables[templateVar.name];
       } else if (templateVar.defaultValue !== null) {
@@ -1039,12 +941,13 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
     // Generate clause content
     const generatedClauses: Array<{ clauseId: string; title: string; content: string; order: number }> = [];
 
-    for (const templateClause of template.clauses) {
-      if (!shouldIncludeClause(templateClause, variables)) {
+    for (const templateClause of template.templateClauses) {
+      const conditions = (templateClause.conditions || []) as ClauseCondition[];
+      if (!shouldIncludeClause(conditions, variables)) {
         continue;
       }
 
-      const clause = clauses.get(templateClause.clauseId);
+      const clause = templateClause.clause;
       if (!clause) continue;
 
       const content = templateClause.customContent || clause.content;
@@ -1065,36 +968,39 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       .map((c, index) => `${index + 1}. ${c.title}\n\n${c.content}`)
       .join('\n\n');
 
-    const now = new Date();
-    const generated: GeneratedLease = {
-      id: generateId(),
-      templateId: template.id,
-      templateVersion: template.version,
-      propertyId: body.propertyId,
-      unitId: body.unitId || null,
-      landlordId: body.landlordId,
-      tenantIds: body.tenantIds,
-      variables,
-      content: fullContent,
-      clauses: generatedClauses,
-      status: 'draft',
-      signatureRequests: [],
-      generatedAt: now,
-      expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
-    };
-
-    generatedLeases.set(generated.id, generated);
+    const generated = await prisma.generatedLease.create({
+      data: {
+        templateId: template.id,
+        templateVersion: template.version,
+        propertyId: body.propertyId,
+        unitId: body.unitId,
+        landlordId: body.landlordId,
+        tenantIds: body.tenantIds,
+        variables: variables as unknown as Prisma.JsonValue,
+        content: fullContent,
+        clauses: generatedClauses as unknown as Prisma.JsonValue,
+        status: 'draft' as PrismaGeneratedLeaseStatus,
+        expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: generated,
+      data: {
+        ...generated,
+        signatureRequests: [],
+      },
     });
   });
 
   // Get generated lease
   app.get('/generated/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const lease = generatedLeases.get(id);
+
+    const lease = await prisma.generatedLease.findUnique({
+      where: { id },
+      include: { signatureRequests: true },
+    });
 
     if (!lease) {
       return reply.status(404).send({
@@ -1117,19 +1023,23 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       status?: string;
     };
 
-    let results = Array.from(generatedLeases.values());
+    const where: Prisma.GeneratedLeaseWhereInput = {};
 
     if (query.propertyId) {
-      results = results.filter((l) => l.propertyId === query.propertyId);
+      where.propertyId = query.propertyId;
     }
     if (query.templateId) {
-      results = results.filter((l) => l.templateId === query.templateId);
+      where.templateId = query.templateId;
     }
     if (query.status) {
-      results = results.filter((l) => l.status === query.status);
+      where.status = query.status as PrismaGeneratedLeaseStatus;
     }
 
-    results.sort((a, b) => b.generatedAt.getTime() - a.generatedAt.getTime());
+    const results = await prisma.generatedLease.findMany({
+      where,
+      include: { signatureRequests: true },
+      orderBy: { generatedAt: 'desc' },
+    });
 
     return reply.send({
       success: true,
@@ -1142,7 +1052,10 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
   app.post('/clauses/:id/preview', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { variables: Record<string, string | number | boolean> };
-    const clause = clauses.get(id);
+
+    const clause = await prisma.leaseClause.findUnique({
+      where: { id },
+    });
 
     if (!clause) {
       return reply.status(404).send({
@@ -1165,6 +1078,3 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 }
-
-// Export for testing
-export { templates, clauses, generatedLeases, interpolateVariables, evaluateCondition, shouldIncludeClause };

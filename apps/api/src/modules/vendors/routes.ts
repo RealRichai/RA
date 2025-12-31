@@ -1,5 +1,10 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import {
+  prisma,
+  Prisma,
+  type VendorInvoiceStatus as PrismaVendorInvoiceStatus,
+} from '@realriches/database';
 
 // Types
 export type VendorStatus = 'active' | 'inactive' | 'suspended' | 'pending_approval';
@@ -8,105 +13,12 @@ export type WorkOrderStatus = 'pending' | 'assigned' | 'accepted' | 'in_progress
 export type WorkOrderPriority = 'low' | 'medium' | 'high' | 'emergency';
 export type InvoiceStatus = 'draft' | 'submitted' | 'approved' | 'paid' | 'disputed' | 'cancelled';
 
-export interface Vendor {
-  id: string;
-  name: string;
-  companyName: string | null;
-  email: string;
-  phone: string;
-  address: string | null;
-  categories: VendorCategory[];
-  status: VendorStatus;
-  licenseNumber: string | null;
-  licenseExpiry: Date | null;
-  insuranceProvider: string | null;
-  insuranceExpiry: Date | null;
-  w9OnFile: boolean;
-  hourlyRate: number | null;
-  emergencyRate: number | null;
-  notes: string | null;
-  rating: number;
-  totalJobs: number;
-  completedJobs: number;
-  averageResponseTime: number | null;
-  preferredProperties: string[];
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface WorkOrder {
-  id: string;
-  propertyId: string;
-  unitId: string | null;
-  vendorId: string | null;
-  maintenanceRequestId: string | null;
-  title: string;
-  description: string;
-  category: VendorCategory;
-  priority: WorkOrderPriority;
-  status: WorkOrderStatus;
-  scheduledDate: Date | null;
-  startedAt: Date | null;
-  completedAt: Date | null;
-  estimatedCost: number | null;
-  actualCost: number | null;
-  laborHours: number | null;
-  materialsCost: number | null;
-  notes: string | null;
-  photos: string[];
-  tenantNotified: boolean;
-  tenantAvailability: string | null;
-  accessInstructions: string | null;
-  createdById: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface VendorInvoice {
-  id: string;
-  vendorId: string;
-  workOrderId: string;
-  invoiceNumber: string;
-  amount: number;
-  laborAmount: number;
-  materialsAmount: number;
-  taxAmount: number;
-  description: string;
-  lineItems: InvoiceLineItem[];
-  status: InvoiceStatus;
-  dueDate: Date;
-  paidDate: Date | null;
-  paymentMethod: string | null;
-  paymentReference: string | null;
-  attachments: string[];
-  notes: string | null;
-  submittedAt: Date | null;
-  approvedAt: Date | null;
-  approvedById: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 export interface InvoiceLineItem {
   description: string;
   quantity: number;
   unitPrice: number;
   total: number;
   type: 'labor' | 'materials' | 'other';
-}
-
-export interface VendorRating {
-  id: string;
-  vendorId: string;
-  workOrderId: string;
-  rating: number;
-  qualityScore: number;
-  timelinessScore: number;
-  communicationScore: number;
-  valueScore: number;
-  comment: string | null;
-  ratedById: string;
-  createdAt: Date;
 }
 
 export interface VendorPerformance {
@@ -122,11 +34,14 @@ export interface VendorPerformance {
   disputeRate: number;
 }
 
-// In-memory stores
-const vendors = new Map<string, Vendor>();
-const workOrders = new Map<string, WorkOrder>();
-const invoices = new Map<string, VendorInvoice>();
-const ratings = new Map<string, VendorRating>();
+// Helper: convert Decimal to number
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
 
 // Schemas
 const createVendorSchema = z.object({
@@ -221,47 +136,48 @@ const rateVendorSchema = z.object({
 });
 
 // Helper functions
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-}
-
-function updateVendorStats(vendorId: string): void {
-  const vendor = vendors.get(vendorId);
+async function updateVendorStats(vendorId: string): Promise<void> {
+  const vendor = await prisma.vendor.findUnique({ where: { id: vendorId } });
   if (!vendor) return;
 
-  const vendorRatings = Array.from(ratings.values()).filter((r) => r.vendorId === vendorId);
-  const vendorWorkOrders = Array.from(workOrders.values()).filter((w) => w.vendorId === vendorId);
+  const vendorRatings = await prisma.vendorRating.findMany({
+    where: { vendorId },
+  });
 
-  vendor.totalJobs = vendorWorkOrders.length;
-  vendor.completedJobs = vendorWorkOrders.filter((w) => w.status === 'completed').length;
+  const vendorWorkOrders = await prisma.workOrder.findMany({
+    where: { vendorId },
+  });
 
+  const totalJobs = vendorWorkOrders.length;
+  const completedJobs = vendorWorkOrders.filter((w) => w.status === 'completed').length;
+
+  let averageRating: number | null = null;
   if (vendorRatings.length > 0) {
-    vendor.rating = vendorRatings.reduce((sum, r) => sum + r.rating, 0) / vendorRatings.length;
-    vendor.rating = Math.round(vendor.rating * 10) / 10;
+    averageRating = vendorRatings.reduce((sum, r) => sum + r.rating, 0) / vendorRatings.length;
+    averageRating = Math.round(averageRating * 10) / 10;
   }
 
-  // Calculate average response time (hours from creation to accepted)
-  const acceptedOrders = vendorWorkOrders.filter((w) => w.startedAt);
-  if (acceptedOrders.length > 0) {
-    const totalResponseTime = acceptedOrders.reduce((sum, w) => {
-      const responseTime = (w.startedAt!.getTime() - w.createdAt.getTime()) / (1000 * 60 * 60);
-      return sum + responseTime;
-    }, 0);
-    vendor.averageResponseTime = Math.round(totalResponseTime / acceptedOrders.length);
-  }
-
-  vendor.updatedAt = new Date();
-  vendors.set(vendorId, vendor);
+  await prisma.vendor.update({
+    where: { id: vendorId },
+    data: {
+      totalJobs,
+      completedJobs,
+      averageRating,
+      reviewCount: vendorRatings.length,
+    },
+  });
 }
 
-function findBestVendor(category: VendorCategory, propertyId: string, priority: WorkOrderPriority): Vendor | null {
-  const eligibleVendors = Array.from(vendors.values()).filter((v) => {
-    if (v.status !== 'active') return false;
-    if (!v.categories.includes(category)) return false;
-    // Check license/insurance expiry
-    if (v.licenseExpiry && v.licenseExpiry < new Date()) return false;
-    if (v.insuranceExpiry && v.insuranceExpiry < new Date()) return false;
-    return true;
+async function findBestVendor(category: VendorCategory, propertyId: string, priority: WorkOrderPriority): Promise<{ id: string } | null> {
+  const eligibleVendors = await prisma.vendor.findMany({
+    where: {
+      status: 'active',
+      categories: { has: category },
+      OR: [
+        { licenseExpiry: null },
+        { licenseExpiry: { gt: new Date() } },
+      ],
+    },
   });
 
   if (eligibleVendors.length === 0) return null;
@@ -271,24 +187,19 @@ function findBestVendor(category: VendorCategory, propertyId: string, priority: 
     let score = 0;
 
     // Rating weight
-    score += v.rating * 20;
+    score += (v.averageRating || 0) * 20;
 
     // Completion rate weight
     const completionRate = v.totalJobs > 0 ? v.completedJobs / v.totalJobs : 0.5;
     score += completionRate * 15;
 
-    // Response time weight (lower is better)
-    if (v.averageResponseTime) {
-      score += Math.max(0, 10 - v.averageResponseTime / 2);
-    }
-
-    // Preferred property bonus
-    if (v.preferredProperties.includes(propertyId)) {
+    // Preferred vendor bonus
+    if (v.preferredVendor) {
       score += 15;
     }
 
     // Emergency availability bonus
-    if (priority === 'emergency' && v.emergencyRate) {
+    if (priority === 'emergency' && v.emergencyRateAmount) {
       score += 10;
     }
 
@@ -300,51 +211,73 @@ function findBestVendor(category: VendorCategory, propertyId: string, priority: 
   return scoredVendors[0]?.vendor || null;
 }
 
+// Map internal category to Prisma MaintenanceCategory
+function mapToMaintenanceCategory(category: VendorCategory): string {
+  const mapping: Record<VendorCategory, string> = {
+    plumbing: 'plumbing',
+    electrical: 'electrical',
+    hvac: 'hvac',
+    general_maintenance: 'other',
+    landscaping: 'exterior',
+    cleaning: 'cleaning',
+    painting: 'other',
+    roofing: 'exterior',
+    appliance_repair: 'appliance',
+    pest_control: 'pest_control',
+    locksmith: 'locks_keys',
+    other: 'other',
+  };
+  return mapping[category];
+}
+
 // Route handlers
 export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   // Create vendor
   app.post('/', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createVendorSchema.parse(request.body);
-    const now = new Date();
 
-    const vendor: Vendor = {
-      id: generateId(),
-      name: body.name,
-      companyName: body.companyName || null,
-      email: body.email,
-      phone: body.phone,
-      address: body.address || null,
-      categories: body.categories,
-      status: 'pending_approval',
-      licenseNumber: body.licenseNumber || null,
-      licenseExpiry: body.licenseExpiry ? new Date(body.licenseExpiry) : null,
-      insuranceProvider: body.insuranceProvider || null,
-      insuranceExpiry: body.insuranceExpiry ? new Date(body.insuranceExpiry) : null,
-      w9OnFile: false,
-      hourlyRate: body.hourlyRate || null,
-      emergencyRate: body.emergencyRate || null,
-      notes: body.notes || null,
-      rating: 0,
-      totalJobs: 0,
-      completedJobs: 0,
-      averageResponseTime: null,
-      preferredProperties: body.preferredProperties || [],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    vendors.set(vendor.id, vendor);
+    const vendor = await prisma.vendor.create({
+      data: {
+        companyName: body.companyName || body.name,
+        contactName: body.name,
+        email: body.email,
+        phone: body.phone,
+        street1: body.address || null,
+        categories: body.categories,
+        services: body.categories,
+        serviceAreas: [],
+        status: 'pending_approval',
+        licenseNumber: body.licenseNumber || null,
+        licenseExpiry: body.licenseExpiry ? new Date(body.licenseExpiry) : null,
+        isInsured: !!body.insuranceProvider,
+        insuranceExpiry: body.insuranceExpiry ? new Date(body.insuranceExpiry) : null,
+        w9OnFile: false,
+        hourlyRateAmount: body.hourlyRate ? Math.round(body.hourlyRate * 100) : null,
+        emergencyRateAmount: body.emergencyRate ? Math.round(body.emergencyRate * 100) : null,
+        notes: body.notes || null,
+        totalJobs: 0,
+        completedJobs: 0,
+        metadata: body.preferredProperties ? { preferredProperties: body.preferredProperties } : null,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: vendor,
+      data: {
+        ...vendor,
+        hourlyRate: vendor.hourlyRateAmount ? vendor.hourlyRateAmount / 100 : null,
+        emergencyRate: vendor.emergencyRateAmount ? vendor.emergencyRateAmount / 100 : null,
+      },
     });
   });
 
   // Get vendor by ID
   app.get('/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const vendor = vendors.get(id);
+
+    const vendor = await prisma.vendor.findUnique({
+      where: { id },
+    });
 
     if (!vendor) {
       return reply.status(404).send({
@@ -355,7 +288,11 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({
       success: true,
-      data: vendor,
+      data: {
+        ...vendor,
+        hourlyRate: vendor.hourlyRateAmount ? vendor.hourlyRateAmount / 100 : null,
+        emergencyRate: vendor.emergencyRateAmount ? vendor.emergencyRateAmount / 100 : null,
+      },
     });
   });
 
@@ -368,33 +305,37 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       search?: string;
     };
 
-    let results = Array.from(vendors.values());
+    const where: Record<string, unknown> = {};
 
     if (query.category) {
-      results = results.filter((v) => v.categories.includes(query.category!));
+      where.categories = { has: query.category };
     }
     if (query.status) {
-      results = results.filter((v) => v.status === query.status);
+      where.status = query.status;
     }
     if (query.minRating) {
-      const minRating = parseFloat(query.minRating);
-      results = results.filter((v) => v.rating >= minRating);
+      where.averageRating = { gte: parseFloat(query.minRating) };
     }
     if (query.search) {
-      const search = query.search.toLowerCase();
-      results = results.filter(
-        (v) =>
-          v.name.toLowerCase().includes(search) ||
-          v.companyName?.toLowerCase().includes(search) ||
-          v.email.toLowerCase().includes(search)
-      );
+      where.OR = [
+        { contactName: { contains: query.search, mode: 'insensitive' } },
+        { companyName: { contains: query.search, mode: 'insensitive' } },
+        { email: { contains: query.search, mode: 'insensitive' } },
+      ];
     }
 
-    results.sort((a, b) => b.rating - a.rating);
+    const results = await prisma.vendor.findMany({
+      where,
+      orderBy: { averageRating: 'desc' },
+    });
 
     return reply.send({
       success: true,
-      data: results,
+      data: results.map((v) => ({
+        ...v,
+        hourlyRate: v.hourlyRateAmount ? v.hourlyRateAmount / 100 : null,
+        emergencyRate: v.emergencyRateAmount ? v.emergencyRateAmount / 100 : null,
+      })),
       total: results.length,
     });
   });
@@ -403,7 +344,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = updateVendorSchema.parse(request.body);
-    const vendor = vendors.get(id);
+
+    const vendor = await prisma.vendor.findUnique({
+      where: { id },
+    });
 
     if (!vendor) {
       return reply.status(404).send({
@@ -412,26 +356,45 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const updated: Vendor = {
-      ...vendor,
-      ...body,
-      licenseExpiry: body.licenseExpiry ? new Date(body.licenseExpiry) : vendor.licenseExpiry,
-      insuranceExpiry: body.insuranceExpiry ? new Date(body.insuranceExpiry) : vendor.insuranceExpiry,
-      updatedAt: new Date(),
-    };
-
-    vendors.set(id, updated);
+    const updated = await prisma.vendor.update({
+      where: { id },
+      data: {
+        contactName: body.name,
+        companyName: body.companyName,
+        email: body.email,
+        phone: body.phone,
+        street1: body.address,
+        categories: body.categories,
+        services: body.categories,
+        status: body.status,
+        licenseNumber: body.licenseNumber,
+        licenseExpiry: body.licenseExpiry ? new Date(body.licenseExpiry) : undefined,
+        isInsured: body.insuranceProvider ? true : undefined,
+        insuranceExpiry: body.insuranceExpiry ? new Date(body.insuranceExpiry) : undefined,
+        w9OnFile: body.w9OnFile,
+        hourlyRateAmount: body.hourlyRate ? Math.round(body.hourlyRate * 100) : undefined,
+        emergencyRateAmount: body.emergencyRate ? Math.round(body.emergencyRate * 100) : undefined,
+        notes: body.notes,
+      },
+    });
 
     return reply.send({
       success: true,
-      data: updated,
+      data: {
+        ...updated,
+        hourlyRate: updated.hourlyRateAmount ? updated.hourlyRateAmount / 100 : null,
+        emergencyRate: updated.emergencyRateAmount ? updated.emergencyRateAmount / 100 : null,
+      },
     });
   });
 
   // Approve vendor
   app.post('/:id/approve', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const vendor = vendors.get(id);
+
+    const vendor = await prisma.vendor.findUnique({
+      where: { id },
+    });
 
     if (!vendor) {
       return reply.status(404).send({
@@ -447,61 +410,56 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    vendor.status = 'active';
-    vendor.updatedAt = new Date();
-    vendors.set(id, vendor);
+    const updated = await prisma.vendor.update({
+      where: { id },
+      data: { status: 'active' },
+    });
 
     return reply.send({
       success: true,
-      data: vendor,
+      data: updated,
     });
   });
 
   // Create work order
   app.post('/work-orders', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createWorkOrderSchema.parse(request.body);
-    const now = new Date();
 
-    const workOrder: WorkOrder = {
-      id: generateId(),
-      propertyId: body.propertyId,
-      unitId: body.unitId || null,
-      vendorId: body.vendorId || null,
-      maintenanceRequestId: body.maintenanceRequestId || null,
-      title: body.title,
-      description: body.description,
-      category: body.category,
-      priority: body.priority,
-      status: body.vendorId ? 'assigned' : 'pending',
-      scheduledDate: body.scheduledDate ? new Date(body.scheduledDate) : null,
-      startedAt: null,
-      completedAt: null,
-      estimatedCost: body.estimatedCost || null,
-      actualCost: null,
-      laborHours: null,
-      materialsCost: null,
-      notes: null,
-      photos: [],
-      tenantNotified: false,
-      tenantAvailability: body.tenantAvailability || null,
-      accessInstructions: body.accessInstructions || null,
-      createdById: body.createdById,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    workOrders.set(workOrder.id, workOrder);
+    const workOrder = await prisma.workOrder.create({
+      data: {
+        orderNumber: `WO-${Date.now()}`,
+        propertyId: body.propertyId,
+        unitId: body.unitId || null,
+        vendorId: body.vendorId || null,
+        title: body.title,
+        description: body.description,
+        category: mapToMaintenanceCategory(body.category) as 'plumbing' | 'electrical' | 'hvac' | 'appliance' | 'structural' | 'exterior' | 'pest_control' | 'locks_keys' | 'cleaning' | 'safety' | 'other',
+        priority: body.priority as 'low' | 'medium' | 'high' | 'emergency',
+        status: body.vendorId ? 'assigned' : 'submitted',
+        scheduledDate: body.scheduledDate ? new Date(body.scheduledDate) : null,
+        estimatedCostAmount: body.estimatedCost ? Math.round(body.estimatedCost * 100) : null,
+        accessInstructions: body.accessInstructions || null,
+        reportedBy: body.createdById,
+        preferredSchedule: body.tenantAvailability ? [body.tenantAvailability] : [],
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: workOrder,
+      data: {
+        ...workOrder,
+        estimatedCost: workOrder.estimatedCostAmount ? workOrder.estimatedCostAmount / 100 : null,
+      },
     });
   });
 
   // Get work order by ID
   app.get('/work-orders/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const workOrder = workOrders.get(id);
+
+    const workOrder = await prisma.workOrder.findUnique({
+      where: { id },
+    });
 
     if (!workOrder) {
       return reply.status(404).send({
@@ -512,7 +470,11 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({
       success: true,
-      data: workOrder,
+      data: {
+        ...workOrder,
+        estimatedCost: workOrder.estimatedCostAmount ? workOrder.estimatedCostAmount / 100 : null,
+        actualCost: workOrder.actualCostAmount ? workOrder.actualCostAmount / 100 : null,
+      },
     });
   });
 
@@ -526,29 +488,26 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       category?: VendorCategory;
     };
 
-    let results = Array.from(workOrders.values());
+    const where: Record<string, unknown> = {};
 
-    if (query.vendorId) {
-      results = results.filter((w) => w.vendorId === query.vendorId);
-    }
-    if (query.propertyId) {
-      results = results.filter((w) => w.propertyId === query.propertyId);
-    }
-    if (query.status) {
-      results = results.filter((w) => w.status === query.status);
-    }
-    if (query.priority) {
-      results = results.filter((w) => w.priority === query.priority);
-    }
-    if (query.category) {
-      results = results.filter((w) => w.category === query.category);
-    }
+    if (query.vendorId) where.vendorId = query.vendorId;
+    if (query.propertyId) where.propertyId = query.propertyId;
+    if (query.status) where.status = query.status;
+    if (query.priority) where.priority = query.priority;
+    if (query.category) where.category = mapToMaintenanceCategory(query.category);
 
-    results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const results = await prisma.workOrder.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
 
     return reply.send({
       success: true,
-      data: results,
+      data: results.map((w) => ({
+        ...w,
+        estimatedCost: w.estimatedCostAmount ? w.estimatedCostAmount / 100 : null,
+        actualCost: w.actualCostAmount ? w.actualCostAmount / 100 : null,
+      })),
       total: results.length,
     });
   });
@@ -557,7 +516,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/work-orders/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = updateWorkOrderSchema.parse(request.body);
-    const workOrder = workOrders.get(id);
+
+    const workOrder = await prisma.workOrder.findUnique({
+      where: { id },
+    });
 
     if (!workOrder) {
       return reply.status(404).send({
@@ -566,22 +528,34 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const updated: WorkOrder = {
-      ...workOrder,
-      ...body,
-      scheduledDate: body.scheduledDate ? new Date(body.scheduledDate) : workOrder.scheduledDate,
-      updatedAt: new Date(),
-    };
+    const updateData: Record<string, unknown> = {};
 
-    if (body.vendorId && body.vendorId !== workOrder.vendorId) {
-      updated.status = 'assigned';
+    if (body.vendorId) {
+      updateData.vendorId = body.vendorId;
+      if (body.vendorId !== workOrder.vendorId) {
+        updateData.status = 'assigned';
+      }
     }
+    if (body.title) updateData.title = body.title;
+    if (body.description) updateData.description = body.description;
+    if (body.priority) updateData.priority = body.priority;
+    if (body.scheduledDate) updateData.scheduledDate = new Date(body.scheduledDate);
+    if (body.estimatedCost !== undefined) updateData.estimatedCostAmount = Math.round(body.estimatedCost * 100);
+    if (body.notes) updateData.resolutionNotes = body.notes;
+    if (body.accessInstructions) updateData.accessInstructions = body.accessInstructions;
 
-    workOrders.set(id, updated);
+    const updated = await prisma.workOrder.update({
+      where: { id },
+      data: updateData,
+    });
 
     return reply.send({
       success: true,
-      data: updated,
+      data: {
+        ...updated,
+        estimatedCost: updated.estimatedCostAmount ? updated.estimatedCostAmount / 100 : null,
+        actualCost: updated.actualCostAmount ? updated.actualCostAmount / 100 : null,
+      },
     });
   });
 
@@ -589,7 +563,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   app.post('/work-orders/:id/assign', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { vendorId?: string; autoAssign?: boolean };
-    const workOrder = workOrders.get(id);
+
+    const workOrder = await prisma.workOrder.findUnique({
+      where: { id },
+    });
 
     if (!workOrder) {
       return reply.status(404).send({
@@ -601,7 +578,11 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
     let vendorId = body.vendorId;
 
     if (body.autoAssign) {
-      const bestVendor = findBestVendor(workOrder.category, workOrder.propertyId, workOrder.priority);
+      const bestVendor = await findBestVendor(
+        workOrder.category as VendorCategory,
+        workOrder.propertyId,
+        workOrder.priority as WorkOrderPriority
+      );
       if (!bestVendor) {
         return reply.status(400).send({
           success: false,
@@ -618,7 +599,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const vendor = vendors.get(vendorId);
+    const vendor = await prisma.vendor.findUnique({
+      where: { id: vendorId },
+    });
+
     if (!vendor) {
       return reply.status(404).send({
         success: false,
@@ -626,19 +610,22 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    workOrder.vendorId = vendorId;
-    workOrder.status = 'assigned';
-    workOrder.updatedAt = new Date();
-    workOrders.set(id, workOrder);
+    const updated = await prisma.workOrder.update({
+      where: { id },
+      data: {
+        vendorId,
+        status: 'assigned',
+      },
+    });
 
     return reply.send({
       success: true,
-      data: workOrder,
+      data: updated,
       assignedVendor: {
         id: vendor.id,
-        name: vendor.name,
+        name: vendor.contactName,
         companyName: vendor.companyName,
-        rating: vendor.rating,
+        rating: vendor.averageRating,
       },
     });
   });
@@ -646,7 +633,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   // Vendor accepts work order
   app.post('/work-orders/:id/accept', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const workOrder = workOrders.get(id);
+
+    const workOrder = await prisma.workOrder.findUnique({
+      where: { id },
+    });
 
     if (!workOrder) {
       return reply.status(404).send({
@@ -662,20 +652,24 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    workOrder.status = 'accepted';
-    workOrder.updatedAt = new Date();
-    workOrders.set(id, workOrder);
+    const updated = await prisma.workOrder.update({
+      where: { id },
+      data: { status: 'accepted' },
+    });
 
     return reply.send({
       success: true,
-      data: workOrder,
+      data: updated,
     });
   });
 
   // Start work order
   app.post('/work-orders/:id/start', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const workOrder = workOrders.get(id);
+
+    const workOrder = await prisma.workOrder.findUnique({
+      where: { id },
+    });
 
     if (!workOrder) {
       return reply.status(404).send({
@@ -691,14 +685,17 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    workOrder.status = 'in_progress';
-    workOrder.startedAt = new Date();
-    workOrder.updatedAt = new Date();
-    workOrders.set(id, workOrder);
+    const updated = await prisma.workOrder.update({
+      where: { id },
+      data: {
+        status: 'in_progress',
+        actualStartTime: new Date(),
+      },
+    });
 
     return reply.send({
       success: true,
-      data: workOrder,
+      data: updated,
     });
   });
 
@@ -711,7 +708,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       notes?: string;
       photos?: string[];
     };
-    const workOrder = workOrders.get(id);
+
+    const workOrder = await prisma.workOrder.findUnique({
+      where: { id },
+    });
 
     if (!workOrder) {
       return reply.status(404).send({
@@ -727,33 +727,42 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    workOrder.status = 'completed';
-    workOrder.completedAt = new Date();
-    workOrder.laborHours = body.laborHours || null;
-    workOrder.materialsCost = body.materialsCost || null;
-    workOrder.notes = body.notes || workOrder.notes;
-    workOrder.photos = body.photos || workOrder.photos;
-    workOrder.updatedAt = new Date();
-
     // Calculate actual cost
+    let actualCostAmount: number | null = null;
     if (workOrder.vendorId) {
-      const vendor = vendors.get(workOrder.vendorId);
-      if (vendor && vendor.hourlyRate && workOrder.laborHours) {
-        const laborCost = vendor.hourlyRate * workOrder.laborHours;
-        workOrder.actualCost = laborCost + (workOrder.materialsCost || 0);
+      const vendor = await prisma.vendor.findUnique({
+        where: { id: workOrder.vendorId },
+      });
+      if (vendor && vendor.hourlyRateAmount && body.laborHours) {
+        const laborCost = (vendor.hourlyRateAmount / 100) * body.laborHours;
+        actualCostAmount = Math.round((laborCost + (body.materialsCost || 0)) * 100);
       }
     }
 
-    workOrders.set(id, workOrder);
+    const updated = await prisma.workOrder.update({
+      where: { id },
+      data: {
+        status: 'completed',
+        completedAt: new Date(),
+        actualEndTime: new Date(),
+        laborHours: body.laborHours || null,
+        resolutionNotes: body.notes || null,
+        photos: body.photos || [],
+        actualCostAmount,
+      },
+    });
 
     // Update vendor stats
     if (workOrder.vendorId) {
-      updateVendorStats(workOrder.vendorId);
+      await updateVendorStats(workOrder.vendorId);
     }
 
     return reply.send({
       success: true,
-      data: workOrder,
+      data: {
+        ...updated,
+        actualCost: updated.actualCostAmount ? updated.actualCostAmount / 100 : null,
+      },
     });
   });
 
@@ -761,7 +770,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   app.post('/:id/invoices', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = submitInvoiceSchema.parse(request.body);
-    const vendor = vendors.get(id);
+
+    const vendor = await prisma.vendor.findUnique({
+      where: { id },
+    });
 
     if (!vendor) {
       return reply.status(404).send({
@@ -770,7 +782,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const workOrder = workOrders.get(body.workOrderId);
+    const workOrder = await prisma.workOrder.findUnique({
+      where: { id: body.workOrderId },
+    });
+
     if (!workOrder) {
       return reply.status(404).send({
         success: false,
@@ -785,7 +800,6 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const now = new Date();
     const lineItems: InvoiceLineItem[] = body.lineItems.map((item) => ({
       description: item.description,
       quantity: item.quantity,
@@ -800,36 +814,34 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
     const taxAmount = subtotal * (body.taxRate / 100);
     const totalAmount = subtotal + taxAmount;
 
-    const invoice: VendorInvoice = {
-      id: generateId(),
-      vendorId: id,
-      workOrderId: body.workOrderId,
-      invoiceNumber: body.invoiceNumber,
-      amount: totalAmount,
-      laborAmount,
-      materialsAmount,
-      taxAmount,
-      description: body.description,
-      lineItems,
-      status: 'submitted',
-      dueDate: new Date(body.dueDate),
-      paidDate: null,
-      paymentMethod: null,
-      paymentReference: null,
-      attachments: body.attachments || [],
-      notes: body.notes || null,
-      submittedAt: now,
-      approvedAt: null,
-      approvedById: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    invoices.set(invoice.id, invoice);
+    const invoice = await prisma.vendorInvoice.create({
+      data: {
+        vendorId: id,
+        workOrderId: body.workOrderId,
+        invoiceNumber: body.invoiceNumber,
+        amount: totalAmount,
+        laborAmount,
+        materialsAmount,
+        taxAmount,
+        description: body.description,
+        lineItems: lineItems as unknown as Prisma.JsonValue,
+        status: 'submitted',
+        dueDate: new Date(body.dueDate),
+        attachments: body.attachments || [],
+        notes: body.notes || null,
+        submittedAt: new Date(),
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: invoice,
+      data: {
+        ...invoice,
+        amount: toNumber(invoice.amount),
+        laborAmount: toNumber(invoice.laborAmount),
+        materialsAmount: toNumber(invoice.materialsAmount),
+        taxAmount: toNumber(invoice.taxAmount),
+      },
     });
   });
 
@@ -838,17 +850,23 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const query = request.query as { status?: InvoiceStatus };
 
-    let results = Array.from(invoices.values()).filter((i) => i.vendorId === id);
+    const where: Record<string, unknown> = { vendorId: id };
+    if (query.status) where.status = query.status;
 
-    if (query.status) {
-      results = results.filter((i) => i.status === query.status);
-    }
-
-    results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const results = await prisma.vendorInvoice.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
 
     return reply.send({
       success: true,
-      data: results,
+      data: results.map((i) => ({
+        ...i,
+        amount: toNumber(i.amount),
+        laborAmount: toNumber(i.laborAmount),
+        materialsAmount: toNumber(i.materialsAmount),
+        taxAmount: toNumber(i.taxAmount),
+      })),
       total: results.length,
     });
   });
@@ -857,7 +875,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   app.post('/invoices/:invoiceId/approve', async (request: FastifyRequest, reply: FastifyReply) => {
     const { invoiceId } = request.params as { invoiceId: string };
     const body = request.body as { approvedById: string };
-    const invoice = invoices.get(invoiceId);
+
+    const invoice = await prisma.vendorInvoice.findUnique({
+      where: { id: invoiceId },
+    });
 
     if (!invoice) {
       return reply.status(404).send({
@@ -873,15 +894,24 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    invoice.status = 'approved';
-    invoice.approvedAt = new Date();
-    invoice.approvedById = body.approvedById;
-    invoice.updatedAt = new Date();
-    invoices.set(invoiceId, invoice);
+    const updated = await prisma.vendorInvoice.update({
+      where: { id: invoiceId },
+      data: {
+        status: 'approved',
+        approvedAt: new Date(),
+        approvedById: body.approvedById,
+      },
+    });
 
     return reply.send({
       success: true,
-      data: invoice,
+      data: {
+        ...updated,
+        amount: toNumber(updated.amount),
+        laborAmount: toNumber(updated.laborAmount),
+        materialsAmount: toNumber(updated.materialsAmount),
+        taxAmount: toNumber(updated.taxAmount),
+      },
     });
   });
 
@@ -889,7 +919,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   app.post('/invoices/:invoiceId/pay', async (request: FastifyRequest, reply: FastifyReply) => {
     const { invoiceId } = request.params as { invoiceId: string };
     const body = request.body as { paymentMethod: string; paymentReference: string };
-    const invoice = invoices.get(invoiceId);
+
+    const invoice = await prisma.vendorInvoice.findUnique({
+      where: { id: invoiceId },
+    });
 
     if (!invoice) {
       return reply.status(404).send({
@@ -905,16 +938,25 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    invoice.status = 'paid';
-    invoice.paidDate = new Date();
-    invoice.paymentMethod = body.paymentMethod;
-    invoice.paymentReference = body.paymentReference;
-    invoice.updatedAt = new Date();
-    invoices.set(invoiceId, invoice);
+    const updated = await prisma.vendorInvoice.update({
+      where: { id: invoiceId },
+      data: {
+        status: 'paid',
+        paidDate: new Date(),
+        paymentMethod: body.paymentMethod,
+        paymentReference: body.paymentReference,
+      },
+    });
 
     return reply.send({
       success: true,
-      data: invoice,
+      data: {
+        ...updated,
+        amount: toNumber(updated.amount),
+        laborAmount: toNumber(updated.laborAmount),
+        materialsAmount: toNumber(updated.materialsAmount),
+        taxAmount: toNumber(updated.taxAmount),
+      },
     });
   });
 
@@ -922,7 +964,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   app.post('/:id/ratings', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = rateVendorSchema.parse(request.body);
-    const vendor = vendors.get(id);
+
+    const vendor = await prisma.vendor.findUnique({
+      where: { id },
+    });
 
     if (!vendor) {
       return reply.status(404).send({
@@ -931,7 +976,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const workOrder = workOrders.get(body.workOrderId);
+    const workOrder = await prisma.workOrder.findUnique({
+      where: { id: body.workOrderId },
+    });
+
     if (!workOrder || workOrder.vendorId !== id) {
       return reply.status(400).send({
         success: false,
@@ -940,9 +988,14 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Check if already rated
-    const existingRating = Array.from(ratings.values()).find(
-      (r) => r.vendorId === id && r.workOrderId === body.workOrderId
-    );
+    const existingRating = await prisma.vendorRating.findUnique({
+      where: {
+        vendorId_workOrderId: {
+          vendorId: id,
+          workOrderId: body.workOrderId,
+        },
+      },
+    });
 
     if (existingRating) {
       return reply.status(400).send({
@@ -951,22 +1004,21 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const rating: VendorRating = {
-      id: generateId(),
-      vendorId: id,
-      workOrderId: body.workOrderId,
-      rating: body.rating,
-      qualityScore: body.qualityScore,
-      timelinessScore: body.timelinessScore,
-      communicationScore: body.communicationScore,
-      valueScore: body.valueScore,
-      comment: body.comment || null,
-      ratedById: body.ratedById,
-      createdAt: new Date(),
-    };
+    const rating = await prisma.vendorRating.create({
+      data: {
+        vendorId: id,
+        workOrderId: body.workOrderId,
+        rating: body.rating,
+        qualityScore: body.qualityScore,
+        timelinessScore: body.timelinessScore,
+        communicationScore: body.communicationScore,
+        valueScore: body.valueScore,
+        comment: body.comment || null,
+        ratedById: body.ratedById,
+      },
+    });
 
-    ratings.set(rating.id, rating);
-    updateVendorStats(id);
+    await updateVendorStats(id);
 
     return reply.status(201).send({
       success: true,
@@ -978,8 +1030,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   app.get('/:id/ratings', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
 
-    const vendorRatings = Array.from(ratings.values()).filter((r) => r.vendorId === id);
-    vendorRatings.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const vendorRatings = await prisma.vendorRating.findMany({
+      where: { vendorId: id },
+      orderBy: { createdAt: 'desc' },
+    });
 
     return reply.send({
       success: true,
@@ -991,7 +1045,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
   // Get vendor performance
   app.get('/:id/performance', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const vendor = vendors.get(id);
+
+    const vendor = await prisma.vendor.findUnique({
+      where: { id },
+    });
 
     if (!vendor) {
       return reply.status(404).send({
@@ -1000,33 +1057,36 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const vendorWorkOrders = Array.from(workOrders.values()).filter((w) => w.vendorId === id);
-    const vendorInvoices = Array.from(invoices.values()).filter((i) => i.vendorId === id);
+    const vendorWorkOrders = await prisma.workOrder.findMany({
+      where: { vendorId: id },
+    });
+
+    const vendorInvoices = await prisma.vendorInvoice.findMany({
+      where: { vendorId: id, status: 'paid' },
+    });
 
     const completedOrders = vendorWorkOrders.filter((w) => w.status === 'completed');
-    const acceptedOrders = vendorWorkOrders.filter((w) => w.status !== 'pending' && w.status !== 'cancelled');
+    const acceptedOrders = vendorWorkOrders.filter((w) => w.status !== 'submitted' && w.status !== 'cancelled');
     const disputedOrders = vendorWorkOrders.filter((w) => w.status === 'disputed');
 
     // Calculate average completion time in hours
     const completionTimes = completedOrders
-      .filter((w) => w.startedAt && w.completedAt)
-      .map((w) => (w.completedAt!.getTime() - w.startedAt!.getTime()) / (1000 * 60 * 60));
+      .filter((w) => w.actualStartTime && w.completedAt)
+      .map((w) => (w.completedAt!.getTime() - w.actualStartTime!.getTime()) / (1000 * 60 * 60));
 
     const avgCompletionTime = completionTimes.length > 0
       ? completionTimes.reduce((sum, t) => sum + t, 0) / completionTimes.length
       : 0;
 
-    const totalBilled = vendorInvoices
-      .filter((i) => i.status === 'paid')
-      .reduce((sum, i) => sum + i.amount, 0);
+    const totalBilled = vendorInvoices.reduce((sum, i) => sum + toNumber(i.amount), 0);
 
     const performance: VendorPerformance = {
       vendorId: id,
-      vendorName: vendor.name,
+      vendorName: vendor.contactName,
       totalWorkOrders: vendorWorkOrders.length,
       completedWorkOrders: completedOrders.length,
       averageCompletionTime: Math.round(avgCompletionTime * 10) / 10,
-      averageRating: vendor.rating,
+      averageRating: vendor.averageRating || 0,
       totalBilled,
       onTimeRate: completedOrders.length > 0
         ? (completedOrders.filter((w) => w.scheduledDate && w.completedAt! <= w.scheduledDate).length / completedOrders.length) * 100
@@ -1050,25 +1110,32 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
     const query = request.query as { category?: VendorCategory; limit?: string };
     const limit = parseInt(query.limit || '10', 10);
 
-    let activeVendors = Array.from(vendors.values()).filter((v) => v.status === 'active');
+    const where: Record<string, unknown> = {
+      status: 'active',
+      totalJobs: { gt: 0 },
+    };
 
     if (query.category) {
-      activeVendors = activeVendors.filter((v) => v.categories.includes(query.category!));
+      where.categories = { has: query.category };
     }
 
-    const leaderboard = activeVendors
-      .filter((v) => v.totalJobs > 0)
-      .map((v) => ({
-        vendorId: v.id,
-        vendorName: v.name,
-        companyName: v.companyName,
-        rating: v.rating,
-        completedJobs: v.completedJobs,
-        completionRate: v.totalJobs > 0 ? (v.completedJobs / v.totalJobs) * 100 : 0,
-        averageResponseTime: v.averageResponseTime,
-      }))
-      .sort((a, b) => b.rating - a.rating || b.completedJobs - a.completedJobs)
-      .slice(0, limit);
+    const activeVendors = await prisma.vendor.findMany({
+      where,
+      orderBy: [
+        { averageRating: 'desc' },
+        { completedJobs: 'desc' },
+      ],
+      take: limit,
+    });
+
+    const leaderboard = activeVendors.map((v) => ({
+      vendorId: v.id,
+      vendorName: v.contactName,
+      companyName: v.companyName,
+      rating: v.averageRating || 0,
+      completedJobs: v.completedJobs,
+      completionRate: v.totalJobs > 0 ? (v.completedJobs / v.totalJobs) * 100 : 0,
+    }));
 
     return reply.send({
       success: true,
@@ -1076,6 +1143,3 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 }
-
-// Export for testing
-export { vendors, workOrders, invoices, ratings, findBestVendor, updateVendorStats };

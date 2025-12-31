@@ -1,5 +1,17 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import {
+  prisma,
+  Prisma,
+  type MessageChannel as PrismaMessageChannel,
+  type MessageStatus as PrismaMessageStatus,
+  type MessageDirection as PrismaMessageDirection,
+  type ThreadStatus as PrismaThreadStatus,
+  type ThreadPriority as PrismaThreadPriority,
+  type ParticipantType as PrismaParticipantType,
+  type TemplateCategory as PrismaTemplateCategory,
+  type BroadcastStatus as PrismaBroadcastStatus,
+} from '@realriches/database';
 
 // Types
 export type MessageChannel = 'email' | 'sms' | 'in_app' | 'portal';
@@ -8,23 +20,6 @@ export type MessageDirection = 'inbound' | 'outbound';
 export type ParticipantType = 'tenant' | 'owner' | 'vendor' | 'prospect' | 'staff';
 export type ThreadStatus = 'open' | 'pending' | 'resolved' | 'archived';
 export type TemplateCategory = 'lease' | 'maintenance' | 'payment' | 'notice' | 'marketing' | 'general';
-
-export interface MessageThread {
-  id: string;
-  propertyId: string | null;
-  unitId: string | null;
-  subject: string;
-  participants: ThreadParticipant[];
-  status: ThreadStatus;
-  priority: 'low' | 'normal' | 'high' | 'urgent';
-  labels: string[];
-  assignedTo: string | null;
-  lastMessageAt: Date;
-  messageCount: number;
-  unreadCount: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
 
 export interface ThreadParticipant {
   id: string;
@@ -35,81 +30,12 @@ export interface ThreadParticipant {
   userId: string | null;
 }
 
-export interface Message {
-  id: string;
-  threadId: string;
-  senderId: string;
-  senderType: ParticipantType;
-  senderName: string;
-  direction: MessageDirection;
-  channel: MessageChannel;
-  subject: string | null;
-  body: string;
-  htmlBody: string | null;
-  attachments: Attachment[];
-  status: MessageStatus;
-  sentAt: Date | null;
-  deliveredAt: Date | null;
-  readAt: Date | null;
-  failureReason: string | null;
-  metadata: Record<string, unknown>;
-  createdAt: Date;
-}
-
 export interface Attachment {
   id: string;
   filename: string;
   mimeType: string;
   size: number;
   url: string;
-}
-
-export interface SMSMessage {
-  id: string;
-  to: string;
-  from: string;
-  body: string;
-  status: MessageStatus;
-  direction: MessageDirection;
-  provider: 'twilio' | 'mock';
-  providerMessageId: string | null;
-  segments: number;
-  sentAt: Date | null;
-  deliveredAt: Date | null;
-  failureReason: string | null;
-  cost: number | null;
-  createdAt: Date;
-}
-
-export interface MessageTemplate {
-  id: string;
-  name: string;
-  category: TemplateCategory;
-  channel: MessageChannel;
-  subject: string | null;
-  body: string;
-  htmlBody: string | null;
-  variables: string[];
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface BroadcastMessage {
-  id: string;
-  name: string;
-  templateId: string | null;
-  channel: MessageChannel;
-  subject: string | null;
-  body: string;
-  recipients: BroadcastRecipient[];
-  filters: BroadcastFilter;
-  status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'cancelled';
-  scheduledAt: Date | null;
-  sentAt: Date | null;
-  stats: BroadcastStats;
-  createdById: string;
-  createdAt: Date;
 }
 
 export interface BroadcastRecipient {
@@ -178,13 +104,6 @@ const mockSMSProvider: SMSProvider = {
   },
 };
 
-// In-memory stores
-const threads = new Map<string, MessageThread>();
-const messages = new Map<string, Message>();
-const smsMessages = new Map<string, SMSMessage>();
-const templates = new Map<string, MessageTemplate>();
-const broadcasts = new Map<string, BroadcastMessage>();
-
 // Schemas
 const createThreadSchema = z.object({
   propertyId: z.string().uuid().optional(),
@@ -251,7 +170,7 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function extractVariables(template: string): string[] {
+export function extractVariables(template: string): string[] {
   const regex = /\{\{(\w+)\}\}/g;
   const variables: string[] = [];
   let match;
@@ -263,7 +182,7 @@ function extractVariables(template: string): string[] {
   return variables;
 }
 
-function interpolateTemplate(template: string, variables: Record<string, string>): string {
+export function interpolateTemplate(template: string, variables: Record<string, string>): string {
   let result = template;
   for (const [key, value] of Object.entries(variables)) {
     result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
@@ -271,82 +190,88 @@ function interpolateTemplate(template: string, variables: Record<string, string>
   return result;
 }
 
-function truncatePreview(text: string, maxLength: number = 100): string {
+export function truncatePreview(text: string, maxLength: number = 100): string {
   if (text.length <= maxLength) return text;
   return text.substring(0, maxLength - 3) + '...';
 }
 
-// Initialize default templates
-function initializeDefaultTemplates(): void {
-  const defaultTemplates: Omit<MessageTemplate, 'id' | 'createdAt' | 'updatedAt'>[] = [
-    {
-      name: 'Rent Reminder',
-      category: 'payment',
-      channel: 'email',
-      subject: 'Rent Reminder - Payment Due {{due_date}}',
-      body: 'Dear {{tenant_name}},\n\nThis is a friendly reminder that your rent payment of {{amount}} is due on {{due_date}}.\n\nPlease log in to your portal to make a payment.\n\nThank you,\n{{property_name}}',
-      htmlBody: null,
-      variables: ['tenant_name', 'amount', 'due_date', 'property_name'],
-      isActive: true,
-    },
-    {
-      name: 'Rent Reminder SMS',
-      category: 'payment',
-      channel: 'sms',
-      subject: null,
-      body: 'Hi {{tenant_name}}, your rent of {{amount}} is due on {{due_date}}. Pay online at {{portal_url}}',
-      htmlBody: null,
-      variables: ['tenant_name', 'amount', 'due_date', 'portal_url'],
-      isActive: true,
-    },
-    {
-      name: 'Maintenance Scheduled',
-      category: 'maintenance',
-      channel: 'email',
-      subject: 'Maintenance Visit Scheduled - {{date}}',
-      body: 'Dear {{tenant_name}},\n\nA maintenance visit has been scheduled for {{date}} between {{time_window}}.\n\nWork to be performed: {{description}}\n\nPlease ensure access to the unit.\n\nThank you,\n{{property_name}}',
-      htmlBody: null,
-      variables: ['tenant_name', 'date', 'time_window', 'description', 'property_name'],
-      isActive: true,
-    },
-    {
-      name: 'Lease Expiration Notice',
-      category: 'lease',
-      channel: 'email',
-      subject: 'Your Lease is Expiring on {{expiration_date}}',
-      body: 'Dear {{tenant_name}},\n\nYour lease at {{property_address}} will expire on {{expiration_date}}.\n\nPlease contact us to discuss renewal options.\n\nThank you,\n{{property_name}}',
-      htmlBody: null,
-      variables: ['tenant_name', 'property_address', 'expiration_date', 'property_name'],
-      isActive: true,
-    },
-    {
-      name: 'Payment Confirmation',
-      category: 'payment',
-      channel: 'email',
-      subject: 'Payment Received - Thank You',
-      body: 'Dear {{tenant_name}},\n\nWe have received your payment of {{amount}} on {{payment_date}}.\n\nTransaction ID: {{transaction_id}}\n\nThank you,\n{{property_name}}',
-      htmlBody: null,
-      variables: ['tenant_name', 'amount', 'payment_date', 'transaction_id', 'property_name'],
-      isActive: true,
-    },
-  ];
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
 
-  const now = new Date();
-  for (const template of defaultTemplates) {
-    const t: MessageTemplate = {
-      id: generateId(),
-      ...template,
-      createdAt: now,
-      updatedAt: now,
-    };
-    templates.set(t.id, t);
+// Default templates data
+const defaultTemplatesData = [
+  {
+    name: 'Rent Reminder',
+    category: 'payment' as TemplateCategory,
+    channel: 'email' as MessageChannel,
+    subject: 'Rent Reminder - Payment Due {{due_date}}',
+    body: 'Dear {{tenant_name}},\n\nThis is a friendly reminder that your rent payment of {{amount}} is due on {{due_date}}.\n\nPlease log in to your portal to make a payment.\n\nThank you,\n{{property_name}}',
+    variables: ['tenant_name', 'amount', 'due_date', 'property_name'],
+  },
+  {
+    name: 'Rent Reminder SMS',
+    category: 'payment' as TemplateCategory,
+    channel: 'sms' as MessageChannel,
+    subject: null,
+    body: 'Hi {{tenant_name}}, your rent of {{amount}} is due on {{due_date}}. Pay online at {{portal_url}}',
+    variables: ['tenant_name', 'amount', 'due_date', 'portal_url'],
+  },
+  {
+    name: 'Maintenance Scheduled',
+    category: 'maintenance' as TemplateCategory,
+    channel: 'email' as MessageChannel,
+    subject: 'Maintenance Visit Scheduled - {{date}}',
+    body: 'Dear {{tenant_name}},\n\nA maintenance visit has been scheduled for {{date}} between {{time_window}}.\n\nWork to be performed: {{description}}\n\nPlease ensure access to the unit.\n\nThank you,\n{{property_name}}',
+    variables: ['tenant_name', 'date', 'time_window', 'description', 'property_name'],
+  },
+  {
+    name: 'Lease Expiration Notice',
+    category: 'lease' as TemplateCategory,
+    channel: 'email' as MessageChannel,
+    subject: 'Your Lease is Expiring on {{expiration_date}}',
+    body: 'Dear {{tenant_name}},\n\nYour lease at {{property_address}} will expire on {{expiration_date}}.\n\nPlease contact us to discuss renewal options.\n\nThank you,\n{{property_name}}',
+    variables: ['tenant_name', 'property_address', 'expiration_date', 'property_name'],
+  },
+  {
+    name: 'Payment Confirmation',
+    category: 'payment' as TemplateCategory,
+    channel: 'email' as MessageChannel,
+    subject: 'Payment Received - Thank You',
+    body: 'Dear {{tenant_name}},\n\nWe have received your payment of {{amount}} on {{payment_date}}.\n\nTransaction ID: {{transaction_id}}\n\nThank you,\n{{property_name}}',
+    variables: ['tenant_name', 'amount', 'payment_date', 'transaction_id', 'property_name'],
+  },
+];
+
+// Initialize default templates
+async function initializeDefaultTemplates(): Promise<void> {
+  const existingCount = await prisma.messageTemplate.count();
+  if (existingCount > 0) return;
+
+  for (const template of defaultTemplatesData) {
+    await prisma.messageTemplate.create({
+      data: {
+        name: template.name,
+        category: template.category as PrismaTemplateCategory,
+        channel: template.channel as PrismaMessageChannel,
+        subject: template.subject,
+        body: template.body,
+        variables: template.variables,
+        isActive: true,
+      },
+    });
   }
 }
 
-initializeDefaultTemplates();
-
 // Route handlers
 export async function communicationRoutes(app: FastifyInstance): Promise<void> {
+  // Initialize default templates on startup
+  await initializeDefaultTemplates();
+
   // Unified inbox
   app.get('/inbox', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = request.query as {
@@ -361,39 +286,48 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
     const limit = parseInt(query.limit || '50', 10);
     const offset = parseInt(query.offset || '0', 10);
 
-    // Combine threads and SMS into unified inbox
     const inboxItems: UnifiedInboxItem[] = [];
 
-    // Add thread items
-    for (const thread of threads.values()) {
-      if (query.propertyId && thread.propertyId !== query.propertyId) continue;
-      if (query.status && thread.status !== query.status) continue;
-      if (query.unreadOnly === 'true' && thread.unreadCount === 0) continue;
+    // Build thread query
+    const threadWhere: Prisma.MessageThreadWhereInput = {};
+    if (query.propertyId) threadWhere.propertyId = query.propertyId;
+    if (query.status) threadWhere.status = query.status as PrismaThreadStatus;
+    if (query.unreadOnly === 'true') threadWhere.unreadCount = { gt: 0 };
 
-      const threadMessages = Array.from(messages.values())
-        .filter((m) => m.threadId === thread.id)
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const threads = await prisma.messageThread.findMany({
+      where: threadWhere,
+      include: {
+        messages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: { lastMessageAt: 'desc' },
+    });
 
-      const lastMessage = threadMessages[0];
+    for (const thread of threads) {
+      const lastMessage = thread.messages[0];
       if (!lastMessage) continue;
 
       if (query.channel && lastMessage.channel !== query.channel) continue;
+
+      const participants = (thread.participants || []) as ThreadParticipant[];
 
       inboxItems.push({
         id: thread.id,
         type: 'thread',
         threadId: thread.id,
         smsId: null,
-        channel: lastMessage.channel,
-        direction: lastMessage.direction,
+        channel: lastMessage.channel as MessageChannel,
+        direction: lastMessage.direction as MessageDirection,
         from: {
           name: lastMessage.senderName,
-          email: thread.participants.find((p) => p.name === lastMessage.senderName)?.email || null,
-          phone: thread.participants.find((p) => p.name === lastMessage.senderName)?.phone || null,
+          email: participants.find((p) => p.name === lastMessage.senderName)?.email || null,
+          phone: participants.find((p) => p.name === lastMessage.senderName)?.phone || null,
         },
         subject: thread.subject,
         preview: truncatePreview(lastMessage.body),
-        status: lastMessage.status,
+        status: lastMessage.status as MessageStatus,
         isRead: thread.unreadCount === 0,
         timestamp: lastMessage.createdAt,
         propertyId: thread.propertyId,
@@ -402,35 +336,34 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Add standalone SMS items
-    for (const sms of smsMessages.values()) {
-      if (query.channel && query.channel !== 'sms') continue;
-
-      // Check if SMS is part of a thread
-      const isInThread = Array.from(messages.values()).some(
-        (m) => m.channel === 'sms' && m.body === sms.body
-      );
-      if (isInThread) continue;
-
-      inboxItems.push({
-        id: sms.id,
-        type: 'sms',
-        threadId: null,
-        smsId: sms.id,
-        channel: 'sms',
-        direction: sms.direction,
-        from: {
-          name: sms.direction === 'inbound' ? sms.from : 'System',
-          email: null,
-          phone: sms.direction === 'inbound' ? sms.from : sms.to,
-        },
-        subject: null,
-        preview: truncatePreview(sms.body),
-        status: sms.status,
-        isRead: sms.status === 'read',
-        timestamp: sms.createdAt,
-        propertyId: null,
-        propertyName: null,
+    if (!query.channel || query.channel === 'sms') {
+      const smsMessages = await prisma.sMSMessage.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 100,
       });
+
+      for (const sms of smsMessages) {
+        inboxItems.push({
+          id: sms.id,
+          type: 'sms',
+          threadId: null,
+          smsId: sms.id,
+          channel: 'sms',
+          direction: sms.direction as MessageDirection,
+          from: {
+            name: sms.direction === 'inbound' ? sms.fromNumber : 'System',
+            email: null,
+            phone: sms.direction === 'inbound' ? sms.fromNumber : sms.toNumber,
+          },
+          subject: null,
+          preview: truncatePreview(sms.body),
+          status: sms.status as MessageStatus,
+          isRead: sms.status === 'read',
+          timestamp: sms.createdAt,
+          propertyId: null,
+          propertyName: null,
+        });
+      }
     }
 
     // Sort by timestamp
@@ -461,35 +394,42 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
       userId: p.userId || null,
     }));
 
-    const thread: MessageThread = {
-      id: generateId(),
-      propertyId: body.propertyId || null,
-      unitId: body.unitId || null,
-      subject: body.subject,
-      participants,
-      status: 'open',
-      priority: body.priority,
-      labels: body.labels || [],
-      assignedTo: null,
-      lastMessageAt: now,
-      messageCount: 0,
-      unreadCount: 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    threads.set(thread.id, thread);
+    const thread = await prisma.messageThread.create({
+      data: {
+        propertyId: body.propertyId,
+        unitId: body.unitId,
+        subject: body.subject,
+        participants: participants as unknown as Prisma.JsonValue,
+        status: 'open' as PrismaThreadStatus,
+        priority: body.priority as PrismaThreadPriority,
+        labels: body.labels || [],
+        lastMessageAt: now,
+        messageCount: 0,
+        unreadCount: 0,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: thread,
+      data: {
+        ...thread,
+        participants,
+      },
     });
   });
 
   // Get thread by ID
   app.get('/threads/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const thread = threads.get(id);
+
+    const thread = await prisma.messageThread.findUnique({
+      where: { id },
+      include: {
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
 
     if (!thread) {
       return reply.status(404).send({
@@ -498,15 +438,12 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const threadMessages = Array.from(messages.values())
-      .filter((m) => m.threadId === id)
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-
     return reply.send({
       success: true,
       data: {
         ...thread,
-        messages: threadMessages,
+        participants: thread.participants as ThreadParticipant[],
+        messages: thread.messages,
       },
     });
   });
@@ -520,22 +457,21 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
       priority?: string;
     };
 
-    let results = Array.from(threads.values());
+    const where: Prisma.MessageThreadWhereInput = {};
+    if (query.propertyId) where.propertyId = query.propertyId;
+    if (query.status) where.status = query.status as PrismaThreadStatus;
+    if (query.assignedTo) where.assignedTo = query.assignedTo;
+    if (query.priority) where.priority = query.priority as PrismaThreadPriority;
 
-    if (query.propertyId) {
-      results = results.filter((t) => t.propertyId === query.propertyId);
-    }
-    if (query.status) {
-      results = results.filter((t) => t.status === query.status);
-    }
-    if (query.assignedTo) {
-      results = results.filter((t) => t.assignedTo === query.assignedTo);
-    }
-    if (query.priority) {
-      results = results.filter((t) => t.priority === query.priority);
-    }
+    const threads = await prisma.messageThread.findMany({
+      where,
+      orderBy: { lastMessageAt: 'desc' },
+    });
 
-    results.sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
+    const results = threads.map((t) => ({
+      ...t,
+      participants: t.participants as ThreadParticipant[],
+    }));
 
     return reply.send({
       success: true,
@@ -553,7 +489,10 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
       priority?: string;
       labels?: string[];
     };
-    const thread = threads.get(id);
+
+    const thread = await prisma.messageThread.findUnique({
+      where: { id },
+    });
 
     if (!thread) {
       return reply.status(404).send({
@@ -562,24 +501,33 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    if (body.status) thread.status = body.status;
-    if (body.assignedTo !== undefined) thread.assignedTo = body.assignedTo;
-    if (body.priority) thread.priority = body.priority as MessageThread['priority'];
-    if (body.labels) thread.labels = body.labels;
-    thread.updatedAt = new Date();
+    const updateData: Prisma.MessageThreadUpdateInput = {};
+    if (body.status) updateData.status = body.status as PrismaThreadStatus;
+    if (body.assignedTo !== undefined) updateData.assignedTo = body.assignedTo;
+    if (body.priority) updateData.priority = body.priority as PrismaThreadPriority;
+    if (body.labels) updateData.labels = body.labels;
 
-    threads.set(id, thread);
+    const updated = await prisma.messageThread.update({
+      where: { id },
+      data: updateData,
+    });
 
     return reply.send({
       success: true,
-      data: thread,
+      data: {
+        ...updated,
+        participants: updated.participants as ThreadParticipant[],
+      },
     });
   });
 
   // Send message in thread
   app.post('/messages', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = sendMessageSchema.parse(request.body);
-    const thread = threads.get(body.threadId);
+
+    const thread = await prisma.messageThread.findUnique({
+      where: { id: body.threadId },
+    });
 
     if (!thread) {
       return reply.status(404).send({
@@ -590,66 +538,66 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
 
     const now = new Date();
 
-    const message: Message = {
+    const attachments = (body.attachments || []).map((a) => ({
       id: generateId(),
-      threadId: body.threadId,
-      senderId: 'current-user',
-      senderType: 'staff',
-      senderName: 'Property Manager',
-      direction: 'outbound',
-      channel: body.channel,
-      subject: thread.subject,
-      body: body.body,
-      htmlBody: body.htmlBody || null,
-      attachments: (body.attachments || []).map((a) => ({
-        id: generateId(),
-        ...a,
-      })),
-      status: 'sent',
-      sentAt: now,
-      deliveredAt: null,
-      readAt: null,
-      failureReason: null,
-      metadata: {},
-      createdAt: now,
-    };
+      ...a,
+    }));
 
-    messages.set(message.id, message);
+    const message = await prisma.message.create({
+      data: {
+        threadId: body.threadId,
+        senderId: 'current-user',
+        senderType: 'staff' as PrismaParticipantType,
+        senderName: 'Property Manager',
+        direction: 'outbound' as PrismaMessageDirection,
+        channel: body.channel as PrismaMessageChannel,
+        subject: thread.subject,
+        body: body.body,
+        htmlBody: body.htmlBody,
+        attachments: attachments as unknown as Prisma.JsonValue,
+        status: 'sent' as PrismaMessageStatus,
+        sentAt: now,
+      },
+    });
 
     // Update thread
-    thread.lastMessageAt = now;
-    thread.messageCount += 1;
-    thread.updatedAt = now;
-    threads.set(body.threadId, thread);
+    await prisma.messageThread.update({
+      where: { id: body.threadId },
+      data: {
+        lastMessageAt: now,
+        messageCount: { increment: 1 },
+      },
+    });
 
     // If SMS, also create SMS record
     if (body.channel === 'sms') {
-      const recipient = thread.participants.find((p) => p.phone);
+      const participants = (thread.participants || []) as ThreadParticipant[];
+      const recipient = participants.find((p) => p.phone);
       if (recipient?.phone) {
         const smsResult = await mockSMSProvider.send(recipient.phone, body.body);
-        const sms: SMSMessage = {
-          id: generateId(),
-          to: recipient.phone,
-          from: '+15551234567',
-          body: body.body,
-          status: 'sent',
-          direction: 'outbound',
-          provider: 'mock',
-          providerMessageId: smsResult.messageId,
-          segments: smsResult.segments,
-          sentAt: now,
-          deliveredAt: null,
-          failureReason: null,
-          cost: smsResult.segments * 0.0075,
-          createdAt: now,
-        };
-        smsMessages.set(sms.id, sms);
+        await prisma.sMSMessage.create({
+          data: {
+            toNumber: recipient.phone,
+            fromNumber: '+15551234567',
+            body: body.body,
+            status: 'sent' as PrismaMessageStatus,
+            direction: 'outbound' as PrismaMessageDirection,
+            provider: 'mock',
+            providerMessageId: smsResult.messageId,
+            segments: smsResult.segments,
+            sentAt: now,
+            cost: smsResult.segments * 0.0075,
+          },
+        });
       }
     }
 
     return reply.status(201).send({
       success: true,
-      data: message,
+      data: {
+        ...message,
+        attachments,
+      },
     });
   });
 
@@ -660,60 +608,60 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
 
     const smsResult = await mockSMSProvider.send(body.to, body.body, body.from);
 
-    const sms: SMSMessage = {
-      id: generateId(),
-      to: body.to,
-      from: body.from || '+15551234567',
-      body: body.body,
-      status: 'sent',
-      direction: 'outbound',
-      provider: 'mock',
-      providerMessageId: smsResult.messageId,
-      segments: smsResult.segments,
-      sentAt: now,
-      deliveredAt: null,
-      failureReason: null,
-      cost: smsResult.segments * 0.0075,
-      createdAt: now,
-    };
-
-    smsMessages.set(sms.id, sms);
+    const sms = await prisma.sMSMessage.create({
+      data: {
+        toNumber: body.to,
+        fromNumber: body.from || '+15551234567',
+        body: body.body,
+        status: 'sent' as PrismaMessageStatus,
+        direction: 'outbound' as PrismaMessageDirection,
+        provider: 'mock',
+        providerMessageId: smsResult.messageId,
+        segments: smsResult.segments,
+        sentAt: now,
+        cost: smsResult.segments * 0.0075,
+      },
+    });
 
     // If threadId provided, also add as message
     if (body.threadId) {
-      const thread = threads.get(body.threadId);
-      if (thread) {
-        const message: Message = {
-          id: generateId(),
-          threadId: body.threadId,
-          senderId: 'current-user',
-          senderType: 'staff',
-          senderName: 'Property Manager',
-          direction: 'outbound',
-          channel: 'sms',
-          subject: null,
-          body: body.body,
-          htmlBody: null,
-          attachments: [],
-          status: 'sent',
-          sentAt: now,
-          deliveredAt: null,
-          readAt: null,
-          failureReason: null,
-          metadata: { smsId: sms.id },
-          createdAt: now,
-        };
-        messages.set(message.id, message);
+      const thread = await prisma.messageThread.findUnique({
+        where: { id: body.threadId },
+      });
 
-        thread.lastMessageAt = now;
-        thread.messageCount += 1;
-        threads.set(body.threadId, thread);
+      if (thread) {
+        await prisma.message.create({
+          data: {
+            threadId: body.threadId,
+            senderId: 'current-user',
+            senderType: 'staff' as PrismaParticipantType,
+            senderName: 'Property Manager',
+            direction: 'outbound' as PrismaMessageDirection,
+            channel: 'sms' as PrismaMessageChannel,
+            body: body.body,
+            attachments: [],
+            status: 'sent' as PrismaMessageStatus,
+            sentAt: now,
+            metadata: { smsId: sms.id } as unknown as Prisma.JsonValue,
+          },
+        });
+
+        await prisma.messageThread.update({
+          where: { id: body.threadId },
+          data: {
+            lastMessageAt: now,
+            messageCount: { increment: 1 },
+          },
+        });
       }
     }
 
     return reply.status(201).send({
       success: true,
-      data: sms,
+      data: {
+        ...sms,
+        cost: sms.cost ? toNumber(sms.cost) : null,
+      },
     });
   });
 
@@ -725,24 +673,32 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
       phone?: string;
     };
 
-    let results = Array.from(smsMessages.values());
-
-    if (query.direction) {
-      results = results.filter((s) => s.direction === query.direction);
-    }
-    if (query.status) {
-      results = results.filter((s) => s.status === query.status);
-    }
+    const where: Prisma.SMSMessageWhereInput = {};
+    if (query.direction) where.direction = query.direction as PrismaMessageDirection;
+    if (query.status) where.status = query.status as PrismaMessageStatus;
     if (query.phone) {
-      results = results.filter((s) => s.to === query.phone || s.from === query.phone);
+      where.OR = [
+        { toNumber: query.phone },
+        { fromNumber: query.phone },
+      ];
     }
 
-    results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const results = await prisma.sMSMessage.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const mapped = results.map((s) => ({
+      ...s,
+      to: s.toNumber,
+      from: s.fromNumber,
+      cost: s.cost ? toNumber(s.cost) : null,
+    }));
 
     return reply.send({
       success: true,
-      data: results,
-      total: results.length,
+      data: mapped,
+      total: mapped.length,
     });
   });
 
@@ -750,14 +706,14 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
   app.get('/templates', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = request.query as { category?: TemplateCategory; channel?: MessageChannel };
 
-    let results = Array.from(templates.values());
+    const where: Prisma.MessageTemplateWhereInput = {};
+    if (query.category) where.category = query.category as PrismaTemplateCategory;
+    if (query.channel) where.channel = query.channel as PrismaMessageChannel;
 
-    if (query.category) {
-      results = results.filter((t) => t.category === query.category);
-    }
-    if (query.channel) {
-      results = results.filter((t) => t.channel === query.channel);
-    }
+    const results = await prisma.messageTemplate.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
 
     return reply.send({
       success: true,
@@ -767,23 +723,21 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/templates', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createTemplateSchema.parse(request.body);
-    const now = new Date();
 
-    const template: MessageTemplate = {
-      id: generateId(),
-      name: body.name,
-      category: body.category,
-      channel: body.channel,
-      subject: body.subject || null,
-      body: body.body,
-      htmlBody: body.htmlBody || null,
-      variables: extractVariables(body.body + (body.subject || '')),
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const variables = extractVariables(body.body + (body.subject || ''));
 
-    templates.set(template.id, template);
+    const template = await prisma.messageTemplate.create({
+      data: {
+        name: body.name,
+        category: body.category as PrismaTemplateCategory,
+        channel: body.channel as PrismaMessageChannel,
+        subject: body.subject,
+        body: body.body,
+        htmlBody: body.htmlBody,
+        variables,
+        isActive: true,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
@@ -793,7 +747,10 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/templates/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const template = templates.get(id);
+
+    const template = await prisma.messageTemplate.findUnique({
+      where: { id },
+    });
 
     if (!template) {
       return reply.status(404).send({
@@ -812,7 +769,10 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
   app.post('/templates/:id/preview', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { variables: Record<string, string> };
-    const template = templates.get(id);
+
+    const template = await prisma.messageTemplate.findUnique({
+      where: { id },
+    });
 
     if (!template) {
       return reply.status(404).send({
@@ -839,7 +799,6 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
   // Broadcast routes
   app.post('/broadcasts', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createBroadcastSchema.parse(request.body);
-    const now = new Date();
 
     // Mock recipients based on filters
     const recipients: BroadcastRecipient[] = [
@@ -848,51 +807,66 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
       { id: generateId(), type: 'tenant', name: 'Bob Wilson', email: 'bob@example.com', phone: '+15555555555', status: 'queued', sentAt: null, error: null },
     ];
 
-    const broadcast: BroadcastMessage = {
-      id: generateId(),
-      name: body.name,
-      templateId: body.templateId || null,
-      channel: body.channel,
-      subject: body.subject || null,
-      body: body.body,
-      recipients,
-      filters: body.filters || {},
-      status: body.scheduledAt ? 'scheduled' : 'draft',
-      scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : null,
-      sentAt: null,
-      stats: {
-        totalRecipients: recipients.length,
-        sent: 0,
-        delivered: 0,
-        failed: 0,
-        opened: 0,
-        clicked: 0,
-      },
-      createdById: body.createdById,
-      createdAt: now,
+    const stats: BroadcastStats = {
+      totalRecipients: recipients.length,
+      sent: 0,
+      delivered: 0,
+      failed: 0,
+      opened: 0,
+      clicked: 0,
     };
 
-    broadcasts.set(broadcast.id, broadcast);
+    const broadcast = await prisma.broadcastMessage.create({
+      data: {
+        name: body.name,
+        templateId: body.templateId,
+        channel: body.channel as PrismaMessageChannel,
+        subject: body.subject,
+        body: body.body,
+        recipients: recipients as unknown as Prisma.JsonValue,
+        filters: (body.filters || {}) as unknown as Prisma.JsonValue,
+        status: body.scheduledAt ? 'scheduled' : 'draft' as PrismaBroadcastStatus,
+        scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : null,
+        stats: stats as unknown as Prisma.JsonValue,
+        createdById: body.createdById,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: broadcast,
+      data: {
+        ...broadcast,
+        recipients,
+        filters: body.filters || {},
+        stats,
+      },
     });
   });
 
   app.get('/broadcasts', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const results = Array.from(broadcasts.values());
-    results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const results = await prisma.broadcastMessage.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const mapped = results.map((b) => ({
+      ...b,
+      recipients: b.recipients as BroadcastRecipient[],
+      filters: b.filters as BroadcastFilter,
+      stats: b.stats as BroadcastStats,
+    }));
 
     return reply.send({
       success: true,
-      data: results,
+      data: mapped,
     });
   });
 
   app.get('/broadcasts/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const broadcast = broadcasts.get(id);
+
+    const broadcast = await prisma.broadcastMessage.findUnique({
+      where: { id },
+    });
 
     if (!broadcast) {
       return reply.status(404).send({
@@ -903,14 +877,22 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({
       success: true,
-      data: broadcast,
+      data: {
+        ...broadcast,
+        recipients: broadcast.recipients as BroadcastRecipient[],
+        filters: broadcast.filters as BroadcastFilter,
+        stats: broadcast.stats as BroadcastStats,
+      },
     });
   });
 
   // Send broadcast
   app.post('/broadcasts/:id/send', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const broadcast = broadcasts.get(id);
+
+    const broadcast = await prisma.broadcastMessage.findUnique({
+      where: { id },
+    });
 
     if (!broadcast) {
       return reply.status(404).send({
@@ -927,38 +909,53 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const now = new Date();
-    broadcast.status = 'sending';
+    const recipients = (broadcast.recipients || []) as BroadcastRecipient[];
+    const stats = (broadcast.stats || {}) as BroadcastStats;
 
     // Simulate sending to recipients
-    for (const recipient of broadcast.recipients) {
+    for (const recipient of recipients) {
       try {
         if (broadcast.channel === 'sms' && recipient.phone) {
           await mockSMSProvider.send(recipient.phone, broadcast.body);
         }
         recipient.status = 'sent';
         recipient.sentAt = now;
-        broadcast.stats.sent++;
+        stats.sent++;
       } catch {
         recipient.status = 'failed';
         recipient.error = 'Send failed';
-        broadcast.stats.failed++;
+        stats.failed++;
       }
     }
 
-    broadcast.status = 'sent';
-    broadcast.sentAt = now;
-    broadcasts.set(id, broadcast);
+    const updated = await prisma.broadcastMessage.update({
+      where: { id },
+      data: {
+        status: 'sent' as PrismaBroadcastStatus,
+        sentAt: now,
+        recipients: recipients as unknown as Prisma.JsonValue,
+        stats: stats as unknown as Prisma.JsonValue,
+      },
+    });
 
     return reply.send({
       success: true,
-      data: broadcast,
+      data: {
+        ...updated,
+        recipients,
+        filters: updated.filters as BroadcastFilter,
+        stats,
+      },
     });
   });
 
   // Mark messages as read
   app.post('/threads/:id/read', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const thread = threads.get(id);
+
+    const thread = await prisma.messageThread.findUnique({
+      where: { id },
+    });
 
     if (!thread) {
       return reply.status(404).send({
@@ -968,19 +965,24 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const now = new Date();
-    const threadMessages = Array.from(messages.values()).filter((m) => m.threadId === id);
 
-    for (const message of threadMessages) {
-      if (!message.readAt) {
-        message.readAt = now;
-        message.status = 'read';
-        messages.set(message.id, message);
-      }
-    }
+    await prisma.message.updateMany({
+      where: {
+        threadId: id,
+        readAt: null,
+      },
+      data: {
+        readAt: now,
+        status: 'read',
+      },
+    });
 
-    thread.unreadCount = 0;
-    thread.updatedAt = now;
-    threads.set(id, thread);
+    await prisma.messageThread.update({
+      where: { id },
+      data: {
+        unreadCount: 0,
+      },
+    });
 
     return reply.send({
       success: true,
@@ -988,15 +990,3 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 }
-
-// Export for testing
-export {
-  threads,
-  messages,
-  smsMessages,
-  templates,
-  broadcasts,
-  extractVariables,
-  interpolateTemplate,
-  truncatePreview,
-};

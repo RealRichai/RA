@@ -1,158 +1,13 @@
 import { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-type UnitSize = 'locker' | '5x5' | '5x10' | '10x10' | '10x15' | '10x20' | '10x30';
-type UnitType = 'standard' | 'climate_controlled' | 'drive_up' | 'indoor' | 'outdoor';
-type UnitStatus = 'available' | 'rented' | 'reserved' | 'maintenance' | 'cleaning';
-type RentalStatus = 'active' | 'past_due' | 'terminated' | 'pending';
-type AccessType = 'key' | 'keypad' | 'card' | 'biometric';
-type PaymentFrequency = 'monthly' | 'quarterly' | 'annual';
-
-export interface StorageUnit {
-  id: string;
-  propertyId: string;
-  unitNumber: string;
-  size: UnitSize;
-  type: UnitType;
-  status: UnitStatus;
-  floor: number;
-  building?: string;
-  dimensions: {
-    width: number;
-    depth: number;
-    height: number;
-  };
-  squareFeet: number;
-  cubicFeet: number;
-  monthlyRate: number;
-  features: string[];
-  accessType: AccessType;
-  hasElectricity: boolean;
-  insuranceRequired: boolean;
-  minimumInsuranceCoverage?: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface StorageRental {
-  id: string;
-  unitId: string;
-  propertyId: string;
-  tenantId: string;
-  status: RentalStatus;
-  startDate: string;
-  endDate?: string;
-  monthlyRate: number;
-  paymentFrequency: PaymentFrequency;
-  nextPaymentDate: string;
-  autopayEnabled: boolean;
-  securityDeposit: number;
-  insurancePolicy?: string;
-  insuranceCoverage?: number;
-  accessCode?: string;
-  accessCardNumber?: string;
-  moveInDate: string;
-  moveOutDate?: string;
-  terminationReason?: string;
-  balance: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface StoragePayment {
-  id: string;
-  rentalId: string;
-  amount: number;
-  type: 'rent' | 'deposit' | 'late_fee' | 'insurance' | 'refund';
-  status: 'pending' | 'completed' | 'failed' | 'refunded';
-  paymentMethod: string;
-  transactionId?: string;
-  dueDate: string;
-  paidDate?: string;
-  notes?: string;
-  createdAt: string;
-}
-
-export interface StorageAccessLog {
-  id: string;
-  unitId: string;
-  rentalId?: string;
-  accessType: 'entry' | 'exit' | 'failed_attempt';
-  method: AccessType | 'override' | 'staff';
-  accessedBy: string;
-  accessedAt: string;
-  ipAddress?: string;
-  deviceId?: string;
-  notes?: string;
-}
-
-export interface StorageWaitlist {
-  id: string;
-  propertyId: string;
-  tenantId: string;
-  preferredSizes: UnitSize[];
-  preferredType?: UnitType;
-  maxMonthlyRate?: number;
-  priority: number;
-  status: 'waiting' | 'offered' | 'accepted' | 'declined' | 'expired';
-  offeredUnitId?: string;
-  offerExpiresAt?: string;
-  notes?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface StoragePromotion {
-  id: string;
-  propertyId: string;
-  name: string;
-  description: string;
-  discountType: 'percentage' | 'fixed' | 'free_months';
-  discountValue: number;
-  applicableSizes: UnitSize[];
-  applicableTypes: UnitType[];
-  startDate: string;
-  endDate: string;
-  maxUses?: number;
-  currentUses: number;
-  promoCode?: string;
-  isActive: boolean;
-  createdAt: string;
-}
-
-export interface LienAuction {
-  id: string;
-  rentalId: string;
-  unitId: string;
-  status: 'pending' | 'scheduled' | 'completed' | 'cancelled';
-  totalOwed: number;
-  noticeDate: string;
-  auctionDate?: string;
-  auctionLocation?: string;
-  winningBid?: number;
-  winnerId?: string;
-  proceeds?: number;
-  fees?: number;
-  surplus?: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// ============================================================================
-// IN-MEMORY STORES
-// ============================================================================
-
-export const storageUnits = new Map<string, StorageUnit>();
-export const storageRentals = new Map<string, StorageRental>();
-export const storagePayments = new Map<string, StoragePayment>();
-export const storageAccessLogs = new Map<string, StorageAccessLog>();
-export const storageWaitlists = new Map<string, StorageWaitlist>();
-export const storagePromotions = new Map<string, StoragePromotion>();
-export const lienAuctions = new Map<string, LienAuction>();
+import {
+  prisma,
+  type StorageUnitStatus,
+  type StorageRentalStatus,
+  type StoragePaymentType,
+  type StoragePaymentStatus,
+  type LienAuctionStatus,
+} from '@realriches/database';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -174,8 +29,8 @@ export function calculateCubicFeet(width: number, depth: number, height: number)
   return width * depth * height;
 }
 
-export function getUnitPricing(size: UnitSize, type: UnitType): number {
-  const basePrices: Record<UnitSize, number> = {
+export function getUnitPricing(size: string, type: string): number {
+  const basePrices: Record<string, number> = {
     locker: 25,
     '5x5': 50,
     '5x10': 75,
@@ -185,7 +40,7 @@ export function getUnitPricing(size: UnitSize, type: UnitType): number {
     '10x30': 300,
   };
 
-  const typeMultipliers: Record<UnitType, number> = {
+  const typeMultipliers: Record<string, number> = {
     standard: 1.0,
     climate_controlled: 1.4,
     drive_up: 1.2,
@@ -193,68 +48,34 @@ export function getUnitPricing(size: UnitSize, type: UnitType): number {
     outdoor: 0.8,
   };
 
-  return Math.round(basePrices[size] * typeMultipliers[type]);
+  return Math.round((basePrices[size] || 100) * (typeMultipliers[type] || 1.0));
 }
 
-export function getAvailableUnits(
+export async function getAvailableUnits(
   propertyId: string,
-  size?: UnitSize,
-  type?: UnitType
-): StorageUnit[] {
-  return Array.from(storageUnits.values()).filter((unit) => {
-    if (unit.propertyId !== propertyId) return false;
-    if (unit.status !== 'available') return false;
-    if (size && unit.size !== size) return false;
-    if (type && unit.type !== type) return false;
-    return true;
+  size?: string,
+  type?: string
+) {
+  return prisma.storageUnit.findMany({
+    where: {
+      propertyId,
+      status: 'available',
+      ...(size ? { size } : {}),
+      ...(type ? { type } : {}),
+    },
   });
 }
 
-export function calculateRentalBalance(rentalId: string): number {
-  const payments = Array.from(storagePayments.values()).filter(
-    (p) => p.rentalId === rentalId
-  );
-
-  const totalCharges = payments
-    .filter((p) => p.type !== 'refund' && p.status !== 'refunded')
-    .reduce((sum, p) => sum + p.amount, 0);
-
-  const totalPaid = payments
-    .filter((p) => p.status === 'completed' && p.type !== 'refund')
-    .reduce((sum, p) => sum + p.amount, 0);
-
-  const totalRefunds = payments
-    .filter((p) => p.type === 'refund' && p.status === 'completed')
-    .reduce((sum, p) => sum + p.amount, 0);
-
-  return totalCharges - totalPaid + totalRefunds;
-}
-
-export function isRentalPastDue(rental: StorageRental): boolean {
-  const today = new Date();
-  const nextPayment = new Date(rental.nextPaymentDate);
-  return nextPayment < today && rental.balance > 0;
-}
-
-export function getOccupancyStats(propertyId: string): {
-  total: number;
-  available: number;
-  rented: number;
-  reserved: number;
-  maintenance: number;
-  occupancyRate: number;
-  bySize: Record<string, { total: number; rented: number }>;
-  byType: Record<string, { total: number; rented: number }>;
-} {
-  const units = Array.from(storageUnits.values()).filter(
-    (u) => u.propertyId === propertyId
-  );
+export async function getOccupancyStats(propertyId: string) {
+  const units = await prisma.storageUnit.findMany({
+    where: { propertyId },
+  });
 
   const total = units.length;
   const available = units.filter((u) => u.status === 'available').length;
-  const rented = units.filter((u) => u.status === 'rented').length;
+  const rented = units.filter((u) => u.status === 'assigned').length;
   const reserved = units.filter((u) => u.status === 'reserved').length;
-  const maintenance = units.filter((u) => u.status === 'maintenance' || u.status === 'cleaning').length;
+  const maintenance = units.filter((u) => u.status === 'maintenance').length;
 
   const bySize: Record<string, { total: number; rented: number }> = {};
   const byType: Record<string, { total: number; rented: number }> = {};
@@ -264,13 +85,13 @@ export function getOccupancyStats(propertyId: string): {
       bySize[unit.size] = { total: 0, rented: 0 };
     }
     bySize[unit.size].total++;
-    if (unit.status === 'rented') bySize[unit.size].rented++;
+    if (unit.status === 'assigned') bySize[unit.size].rented++;
 
     if (!byType[unit.type]) {
       byType[unit.type] = { total: 0, rented: 0 };
     }
     byType[unit.type].total++;
-    if (unit.status === 'rented') byType[unit.type].rented++;
+    if (unit.status === 'assigned') byType[unit.type].rented++;
   });
 
   return {
@@ -285,34 +106,31 @@ export function getOccupancyStats(propertyId: string): {
   };
 }
 
-export function calculateRevenue(
+export async function calculateRevenue(
   propertyId: string,
   startDate?: string,
   endDate?: string
-): {
-  totalRevenue: number;
-  rentRevenue: number;
-  depositRevenue: number;
-  lateFeeRevenue: number;
-  insuranceRevenue: number;
-  refunds: number;
-  netRevenue: number;
-} {
-  const rentals = Array.from(storageRentals.values()).filter(
-    (r) => r.propertyId === propertyId
-  );
-  const rentalIds = new Set(rentals.map((r) => r.id));
+) {
+  const rentals = await prisma.storageRental.findMany({
+    where: { propertyId },
+    select: { id: true },
+  });
+  const rentalIds = rentals.map((r) => r.id);
 
-  let payments = Array.from(storagePayments.values()).filter(
-    (p) => rentalIds.has(p.rentalId) && p.status === 'completed'
-  );
+  const whereClause: Record<string, unknown> = {
+    rentalId: { in: rentalIds },
+    status: 'completed' as StoragePaymentStatus,
+  };
 
-  if (startDate) {
-    payments = payments.filter((p) => p.paidDate && p.paidDate >= startDate);
+  if (startDate || endDate) {
+    whereClause.paidDate = {};
+    if (startDate) (whereClause.paidDate as Record<string, Date>).gte = new Date(startDate);
+    if (endDate) (whereClause.paidDate as Record<string, Date>).lte = new Date(endDate);
   }
-  if (endDate) {
-    payments = payments.filter((p) => p.paidDate && p.paidDate <= endDate);
-  }
+
+  const payments = await prisma.storagePayment.findMany({
+    where: whereClause,
+  });
 
   const rentRevenue = payments
     .filter((p) => p.type === 'rent')
@@ -344,44 +162,12 @@ export function calculateRevenue(
   };
 }
 
-export function applyPromotion(
-  unit: StorageUnit,
-  promotion: StoragePromotion
-): { discountedRate: number; savingsAmount: number } {
-  if (!promotion.applicableSizes.includes(unit.size)) {
-    return { discountedRate: unit.monthlyRate, savingsAmount: 0 };
-  }
-  if (!promotion.applicableTypes.includes(unit.type)) {
-    return { discountedRate: unit.monthlyRate, savingsAmount: 0 };
-  }
-
-  let discountedRate = unit.monthlyRate;
-  let savingsAmount = 0;
-
-  switch (promotion.discountType) {
-    case 'percentage':
-      savingsAmount = Math.round(unit.monthlyRate * (promotion.discountValue / 100));
-      discountedRate = unit.monthlyRate - savingsAmount;
-      break;
-    case 'fixed':
-      savingsAmount = Math.min(promotion.discountValue, unit.monthlyRate);
-      discountedRate = unit.monthlyRate - savingsAmount;
-      break;
-    case 'free_months':
-      savingsAmount = unit.monthlyRate * promotion.discountValue;
-      discountedRate = unit.monthlyRate; // Rate stays same, but first X months free
-      break;
-  }
-
-  return { discountedRate, savingsAmount };
-}
-
 // ============================================================================
 // SCHEMAS
 // ============================================================================
 
 const UnitSchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   unitNumber: z.string(),
   size: z.enum(['locker', '5x5', '5x10', '10x10', '10x15', '10x20', '10x30']),
   type: z.enum(['standard', 'climate_controlled', 'drive_up', 'indoor', 'outdoor']),
@@ -401,9 +187,9 @@ const UnitSchema = z.object({
 });
 
 const RentalSchema = z.object({
-  unitId: z.string(),
-  propertyId: z.string(),
-  tenantId: z.string(),
+  unitId: z.string().uuid(),
+  propertyId: z.string().uuid(),
+  tenantId: z.string().uuid(),
   startDate: z.string(),
   monthlyRate: z.number().positive(),
   paymentFrequency: z.enum(['monthly', 'quarterly', 'annual']).default('monthly'),
@@ -414,7 +200,7 @@ const RentalSchema = z.object({
 });
 
 const PaymentSchema = z.object({
-  rentalId: z.string(),
+  rentalId: z.string().uuid(),
   amount: z.number().positive(),
   type: z.enum(['rent', 'deposit', 'late_fee', 'insurance', 'refund']),
   paymentMethod: z.string(),
@@ -424,8 +210,8 @@ const PaymentSchema = z.object({
 });
 
 const WaitlistSchema = z.object({
-  propertyId: z.string(),
-  tenantId: z.string(),
+  propertyId: z.string().uuid(),
+  tenantId: z.string().uuid(),
   preferredSizes: z.array(z.enum(['locker', '5x5', '5x10', '10x10', '10x15', '10x20', '10x30'])),
   preferredType: z.enum(['standard', 'climate_controlled', 'drive_up', 'indoor', 'outdoor']).optional(),
   maxMonthlyRate: z.number().positive().optional(),
@@ -433,7 +219,7 @@ const WaitlistSchema = z.object({
 });
 
 const PromotionSchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   name: z.string(),
   description: z.string(),
   discountType: z.enum(['percentage', 'fixed', 'free_months']),
@@ -447,7 +233,7 @@ const PromotionSchema = z.object({
 });
 
 const LienSchema = z.object({
-  rentalId: z.string(),
+  rentalId: z.string().uuid(),
   totalOwed: z.number().positive(),
   auctionDate: z.string().optional(),
   auctionLocation: z.string().optional(),
@@ -470,19 +256,28 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = UnitSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const unit: StorageUnit = {
-        id: `stu_${Date.now()}`,
-        ...data,
-        status: 'available',
-        squareFeet: calculateSquareFeet(data.dimensions.width, data.dimensions.depth),
-        cubicFeet: calculateCubicFeet(data.dimensions.width, data.dimensions.depth, data.dimensions.height),
-        createdAt: now,
-        updatedAt: now,
-      };
+      const unit = await prisma.storageUnit.create({
+        data: {
+          propertyId: data.propertyId,
+          unitNumber: data.unitNumber,
+          size: data.size,
+          type: data.type,
+          floor: data.floor,
+          building: data.building,
+          dimensions: data.dimensions,
+          squareFeet: calculateSquareFeet(data.dimensions.width, data.dimensions.depth),
+          cubicFeet: calculateCubicFeet(data.dimensions.width, data.dimensions.depth, data.dimensions.height),
+          monthlyRate: data.monthlyRate,
+          status: 'available',
+          features: data.features,
+          accessType: data.accessType,
+          hasElectricity: data.hasElectricity,
+          insuranceRequired: data.insuranceRequired,
+          minimumInsuranceCoverage: data.minimumInsuranceCoverage,
+        },
+      });
 
-      storageUnits.set(unit.id, unit);
       return reply.status(201).send(unit);
     }
   );
@@ -494,37 +289,33 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       request: FastifyRequest<{
         Querystring: {
           propertyId?: string;
-          status?: UnitStatus;
-          size?: UnitSize;
-          type?: UnitType;
+          status?: string;
+          size?: string;
+          type?: string;
           minRate?: string;
           maxRate?: string;
         };
       }>,
       reply
     ) => {
-      let units = Array.from(storageUnits.values());
+      const { propertyId, status, size, type, minRate, maxRate } = request.query;
 
-      if (request.query.propertyId) {
-        units = units.filter((u) => u.propertyId === request.query.propertyId);
-      }
-      if (request.query.status) {
-        units = units.filter((u) => u.status === request.query.status);
-      }
-      if (request.query.size) {
-        units = units.filter((u) => u.size === request.query.size);
-      }
-      if (request.query.type) {
-        units = units.filter((u) => u.type === request.query.type);
-      }
-      if (request.query.minRate) {
-        const minRate = parseFloat(request.query.minRate);
-        units = units.filter((u) => u.monthlyRate >= minRate);
-      }
-      if (request.query.maxRate) {
-        const maxRate = parseFloat(request.query.maxRate);
-        units = units.filter((u) => u.monthlyRate <= maxRate);
-      }
+      const units = await prisma.storageUnit.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(status ? { status: status as StorageUnitStatus } : {}),
+          ...(size ? { size } : {}),
+          ...(type ? { type } : {}),
+          ...(minRate || maxRate
+            ? {
+                monthlyRate: {
+                  ...(minRate ? { gte: parseFloat(minRate) } : {}),
+                  ...(maxRate ? { lte: parseFloat(maxRate) } : {}),
+                },
+              }
+            : {}),
+        },
+      });
 
       return reply.send(units);
     }
@@ -534,7 +325,10 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/units/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const unit = storageUnits.get(request.params.id);
+      const unit = await prisma.storageUnit.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!unit) {
         return reply.status(404).send({ error: 'Storage unit not found' });
       }
@@ -548,34 +342,34 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
     async (
       request: FastifyRequest<{
         Params: { id: string };
-        Body: Partial<z.infer<typeof UnitSchema>> & { status?: UnitStatus };
+        Body: Partial<z.infer<typeof UnitSchema>> & { status?: string };
       }>,
       reply
     ) => {
-      const unit = storageUnits.get(request.params.id);
+      const unit = await prisma.storageUnit.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!unit) {
         return reply.status(404).send({ error: 'Storage unit not found' });
       }
 
-      const updated: StorageUnit = {
-        ...unit,
-        ...request.body,
-        updatedAt: new Date().toISOString(),
-      };
+      const updateData: Record<string, unknown> = { ...request.body };
 
       if (request.body.dimensions) {
-        updated.squareFeet = calculateSquareFeet(
-          request.body.dimensions.width || unit.dimensions.width,
-          request.body.dimensions.depth || unit.dimensions.depth
-        );
-        updated.cubicFeet = calculateCubicFeet(
-          request.body.dimensions.width || unit.dimensions.width,
-          request.body.dimensions.depth || unit.dimensions.depth,
-          request.body.dimensions.height || unit.dimensions.height
-        );
+        const dims = unit.dimensions as { width: number; depth: number; height: number } | null;
+        const width = request.body.dimensions.width || dims?.width || 0;
+        const depth = request.body.dimensions.depth || dims?.depth || 0;
+        const height = request.body.dimensions.height || dims?.height || 0;
+        updateData.squareFeet = calculateSquareFeet(width, depth);
+        updateData.cubicFeet = calculateCubicFeet(width, depth, height);
       }
 
-      storageUnits.set(unit.id, updated);
+      const updated = await prisma.storageUnit.update({
+        where: { id: request.params.id },
+        data: updateData,
+      });
+
       return reply.send(updated);
     }
   );
@@ -587,7 +381,7 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       request: FastifyRequest<{ Querystring: { propertyId: string } }>,
       reply
     ) => {
-      const stats = getOccupancyStats(request.query.propertyId);
+      const stats = await getOccupancyStats(request.query.propertyId);
       return reply.send(stats);
     }
   );
@@ -604,9 +398,11 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = RentalSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const unit = storageUnits.get(data.unitId);
+      const unit = await prisma.storageUnit.findUnique({
+        where: { id: data.unitId },
+      });
+
       if (!unit) {
         return reply.status(404).send({ error: 'Storage unit not found' });
       }
@@ -626,24 +422,34 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      const rental: StorageRental = {
-        id: `str_${Date.now()}`,
-        ...data,
-        status: 'active',
-        nextPaymentDate: data.startDate,
-        accessCode: unit.accessType === 'keypad' ? generateAccessCode() : undefined,
-        moveInDate: data.startDate,
-        balance: 0,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const startDate = new Date(data.startDate);
+
+      const rental = await prisma.storageRental.create({
+        data: {
+          unitId: data.unitId,
+          propertyId: data.propertyId,
+          tenantId: data.tenantId,
+          status: 'active',
+          startDate,
+          monthlyRate: data.monthlyRate,
+          paymentFrequency: data.paymentFrequency,
+          nextPaymentDate: startDate,
+          autopayEnabled: data.autopayEnabled,
+          securityDeposit: data.securityDeposit,
+          insurancePolicy: data.insurancePolicy,
+          insuranceCoverage: data.insuranceCoverage,
+          accessCode: unit.accessType === 'keypad' ? generateAccessCode() : null,
+          moveInDate: startDate,
+          balance: 0,
+        },
+      });
 
       // Update unit status
-      unit.status = 'rented';
-      unit.updatedAt = now;
-      storageUnits.set(unit.id, unit);
+      await prisma.storageUnit.update({
+        where: { id: data.unitId },
+        data: { status: 'assigned' },
+      });
 
-      storageRentals.set(rental.id, rental);
       return reply.status(201).send(rental);
     }
   );
@@ -656,25 +462,27 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
         Querystring: {
           propertyId?: string;
           tenantId?: string;
-          status?: RentalStatus;
+          status?: string;
           pastDue?: string;
         };
       }>,
       reply
     ) => {
-      let rentals = Array.from(storageRentals.values());
+      const { propertyId, tenantId, status, pastDue } = request.query;
 
-      if (request.query.propertyId) {
-        rentals = rentals.filter((r) => r.propertyId === request.query.propertyId);
-      }
-      if (request.query.tenantId) {
-        rentals = rentals.filter((r) => r.tenantId === request.query.tenantId);
-      }
-      if (request.query.status) {
-        rentals = rentals.filter((r) => r.status === request.query.status);
-      }
-      if (request.query.pastDue === 'true') {
-        rentals = rentals.filter((r) => isRentalPastDue(r));
+      let rentals = await prisma.storageRental.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(tenantId ? { tenantId } : {}),
+          ...(status ? { status: status as StorageRentalStatus } : {}),
+        },
+      });
+
+      if (pastDue === 'true') {
+        const today = new Date();
+        rentals = rentals.filter(
+          (r) => r.nextPaymentDate < today && r.balance > 0
+        );
       }
 
       return reply.send(rentals);
@@ -685,7 +493,10 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/rentals/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const rental = storageRentals.get(request.params.id);
+      const rental = await prisma.storageRental.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!rental) {
         return reply.status(404).send({ error: 'Rental not found' });
       }
@@ -703,29 +514,33 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const rental = storageRentals.get(request.params.id);
+      const rental = await prisma.storageRental.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!rental) {
         return reply.status(404).send({ error: 'Rental not found' });
       }
 
-      const now = new Date().toISOString();
+      const moveOutDate = new Date(request.body.moveOutDate);
 
-      rental.status = 'terminated';
-      rental.endDate = request.body.moveOutDate;
-      rental.moveOutDate = request.body.moveOutDate;
-      rental.terminationReason = request.body.reason;
-      rental.updatedAt = now;
+      const updated = await prisma.storageRental.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'terminated',
+          endDate: moveOutDate,
+          moveOutDate,
+          terminationReason: request.body.reason,
+        },
+      });
 
-      // Free up unit
-      const unit = storageUnits.get(rental.unitId);
-      if (unit) {
-        unit.status = 'cleaning';
-        unit.updatedAt = now;
-        storageUnits.set(unit.id, unit);
-      }
+      // Free up unit (set to maintenance for cleaning)
+      await prisma.storageUnit.update({
+        where: { id: rental.unitId },
+        data: { status: 'maintenance' },
+      });
 
-      storageRentals.set(rental.id, rental);
-      return reply.send(rental);
+      return reply.send(updated);
     }
   );
 
@@ -741,29 +556,40 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = PaymentSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const rental = storageRentals.get(data.rentalId);
+      const rental = await prisma.storageRental.findUnique({
+        where: { id: data.rentalId },
+      });
+
       if (!rental) {
         return reply.status(404).send({ error: 'Rental not found' });
       }
 
-      const payment: StoragePayment = {
-        id: `stp_${Date.now()}`,
-        ...data,
-        status: 'completed',
-        paidDate: now,
-        createdAt: now,
-      };
+      const now = new Date();
 
-      // Update rental balance
+      const payment = await prisma.storagePayment.create({
+        data: {
+          rentalId: data.rentalId,
+          amount: data.amount,
+          type: data.type as StoragePaymentType,
+          status: 'completed',
+          paymentMethod: data.paymentMethod,
+          transactionId: data.transactionId,
+          dueDate: new Date(data.dueDate),
+          paidDate: now,
+          notes: data.notes,
+        },
+      });
+
+      // Update rental balance and next payment date
+      let newBalance = rental.balance;
       if (data.type !== 'refund') {
-        rental.balance = Math.max(0, rental.balance - data.amount);
+        newBalance = Math.max(0, rental.balance - data.amount);
       } else {
-        rental.balance += data.amount;
+        newBalance = rental.balance + data.amount;
       }
 
-      // Update next payment date if rent payment
+      let nextPaymentDate = rental.nextPaymentDate;
       if (data.type === 'rent') {
         const nextDate = new Date(rental.nextPaymentDate);
         switch (rental.paymentFrequency) {
@@ -777,12 +603,13 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
             nextDate.setFullYear(nextDate.getFullYear() + 1);
             break;
         }
-        rental.nextPaymentDate = nextDate.toISOString().split('T')[0];
+        nextPaymentDate = nextDate;
       }
 
-      rental.updatedAt = now;
-      storageRentals.set(rental.id, rental);
-      storagePayments.set(payment.id, payment);
+      await prisma.storageRental.update({
+        where: { id: data.rentalId },
+        data: { balance: newBalance, nextPaymentDate },
+      });
 
       return reply.status(201).send(payment);
     }
@@ -797,20 +624,22 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let payments = Array.from(storagePayments.values());
+      const { rentalId, type, startDate, endDate } = request.query;
 
-      if (request.query.rentalId) {
-        payments = payments.filter((p) => p.rentalId === request.query.rentalId);
-      }
-      if (request.query.type) {
-        payments = payments.filter((p) => p.type === request.query.type);
-      }
-      if (request.query.startDate) {
-        payments = payments.filter((p) => p.paidDate && p.paidDate >= request.query.startDate!);
-      }
-      if (request.query.endDate) {
-        payments = payments.filter((p) => p.paidDate && p.paidDate <= request.query.endDate!);
-      }
+      const payments = await prisma.storagePayment.findMany({
+        where: {
+          ...(rentalId ? { rentalId } : {}),
+          ...(type ? { type: type as StoragePaymentType } : {}),
+          ...(startDate || endDate
+            ? {
+                paidDate: {
+                  ...(startDate ? { gte: new Date(startDate) } : {}),
+                  ...(endDate ? { lte: new Date(endDate) } : {}),
+                },
+              }
+            : {}),
+        },
+      });
 
       return reply.send(payments);
     }
@@ -825,7 +654,7 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const revenue = calculateRevenue(
+      const revenue = await calculateRevenue(
         request.query.propertyId,
         request.query.startDate,
         request.query.endDate
@@ -847,7 +676,7 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
           unitId: string;
           rentalId?: string;
           accessType: 'entry' | 'exit' | 'failed_attempt';
-          method: AccessType | 'override' | 'staff';
+          method: string;
           accessedBy: string;
           ipAddress?: string;
           deviceId?: string;
@@ -856,15 +685,20 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const now = new Date().toISOString();
+      const log = await prisma.storageAccessLog.create({
+        data: {
+          unitId: request.body.unitId,
+          rentalId: request.body.rentalId,
+          accessType: request.body.accessType,
+          method: request.body.method,
+          accessedBy: request.body.accessedBy,
+          accessedAt: new Date(),
+          ipAddress: request.body.ipAddress,
+          deviceId: request.body.deviceId,
+          notes: request.body.notes,
+        },
+      });
 
-      const log: StorageAccessLog = {
-        id: `sal_${Date.now()}`,
-        ...request.body,
-        accessedAt: now,
-      };
-
-      storageAccessLogs.set(log.id, log);
       return reply.status(201).send(log);
     }
   );
@@ -884,25 +718,26 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let logs = Array.from(storageAccessLogs.values());
+      const { unitId, rentalId, accessType, startDate, endDate } = request.query;
 
-      if (request.query.unitId) {
-        logs = logs.filter((l) => l.unitId === request.query.unitId);
-      }
-      if (request.query.rentalId) {
-        logs = logs.filter((l) => l.rentalId === request.query.rentalId);
-      }
-      if (request.query.accessType) {
-        logs = logs.filter((l) => l.accessType === request.query.accessType);
-      }
-      if (request.query.startDate) {
-        logs = logs.filter((l) => l.accessedAt >= request.query.startDate!);
-      }
-      if (request.query.endDate) {
-        logs = logs.filter((l) => l.accessedAt <= request.query.endDate!);
-      }
+      const logs = await prisma.storageAccessLog.findMany({
+        where: {
+          ...(unitId ? { unitId } : {}),
+          ...(rentalId ? { rentalId } : {}),
+          ...(accessType ? { accessType } : {}),
+          ...(startDate || endDate
+            ? {
+                accessedAt: {
+                  ...(startDate ? { gte: new Date(startDate) } : {}),
+                  ...(endDate ? { lte: new Date(endDate) } : {}),
+                },
+              }
+            : {}),
+        },
+        orderBy: { accessedAt: 'desc' },
+      });
 
-      return reply.send(logs.sort((a, b) => b.accessedAt.localeCompare(a.accessedAt)));
+      return reply.send(logs);
     }
   );
 
@@ -918,24 +753,25 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = WaitlistSchema.parse(request.body);
-      const now = new Date().toISOString();
 
       // Calculate priority based on position
-      const existingEntries = Array.from(storageWaitlists.values()).filter(
-        (w) => w.propertyId === data.propertyId && w.status === 'waiting'
-      );
-      const priority = existingEntries.length + 1;
+      const existingCount = await prisma.storageWaitlist.count({
+        where: { propertyId: data.propertyId, status: 'waiting' },
+      });
 
-      const entry: StorageWaitlist = {
-        id: `swl_${Date.now()}`,
-        ...data,
-        priority,
-        status: 'waiting',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const entry = await prisma.storageWaitlist.create({
+        data: {
+          propertyId: data.propertyId,
+          tenantId: data.tenantId,
+          preferredSizes: data.preferredSizes,
+          preferredType: data.preferredType,
+          maxMonthlyRate: data.maxMonthlyRate,
+          notes: data.notes,
+          priority: existingCount + 1,
+          status: 'waiting',
+        },
+      });
 
-      storageWaitlists.set(entry.id, entry);
       return reply.status(201).send(entry);
     }
   );
@@ -949,19 +785,18 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let entries = Array.from(storageWaitlists.values());
+      const { propertyId, tenantId, status } = request.query;
 
-      if (request.query.propertyId) {
-        entries = entries.filter((e) => e.propertyId === request.query.propertyId);
-      }
-      if (request.query.tenantId) {
-        entries = entries.filter((e) => e.tenantId === request.query.tenantId);
-      }
-      if (request.query.status) {
-        entries = entries.filter((e) => e.status === request.query.status);
-      }
+      const entries = await prisma.storageWaitlist.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(tenantId ? { tenantId } : {}),
+          ...(status ? { status } : {}),
+        },
+        orderBy: { priority: 'asc' },
+      });
 
-      return reply.send(entries.sort((a, b) => a.priority - b.priority));
+      return reply.send(entries);
     }
   );
 
@@ -975,31 +810,41 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const entry = storageWaitlists.get(request.params.id);
+      const entry = await prisma.storageWaitlist.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!entry) {
         return reply.status(404).send({ error: 'Waitlist entry not found' });
       }
 
-      const unit = storageUnits.get(request.body.unitId);
+      const unit = await prisma.storageUnit.findUnique({
+        where: { id: request.body.unitId },
+      });
+
       if (!unit) {
         return reply.status(404).send({ error: 'Unit not found' });
       }
 
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + (request.body.expiresInHours || 48) * 60 * 60 * 1000);
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + (request.body.expiresInHours || 48));
 
-      entry.status = 'offered';
-      entry.offeredUnitId = request.body.unitId;
-      entry.offerExpiresAt = expiresAt.toISOString();
-      entry.updatedAt = now.toISOString();
+      const updated = await prisma.storageWaitlist.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'offered',
+          offeredUnitId: request.body.unitId,
+          offerExpiresAt: expiresAt,
+        },
+      });
 
       // Reserve unit
-      unit.status = 'reserved';
-      unit.updatedAt = now.toISOString();
-      storageUnits.set(unit.id, unit);
+      await prisma.storageUnit.update({
+        where: { id: request.body.unitId },
+        data: { status: 'reserved' },
+      });
 
-      storageWaitlists.set(entry.id, entry);
-      return reply.send(entry);
+      return reply.send(updated);
     }
   );
 
@@ -1015,17 +860,25 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = PromotionSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const promotion: StoragePromotion = {
-        id: `spr_${Date.now()}`,
-        ...data,
-        currentUses: 0,
-        isActive: true,
-        createdAt: now,
-      };
+      const promotion = await prisma.storagePromotion.create({
+        data: {
+          propertyId: data.propertyId,
+          name: data.name,
+          description: data.description,
+          discountType: data.discountType,
+          discountValue: data.discountValue,
+          applicableSizes: data.applicableSizes,
+          applicableTypes: data.applicableTypes,
+          startDate: new Date(data.startDate),
+          endDate: new Date(data.endDate),
+          maxUses: data.maxUses,
+          promoCode: data.promoCode,
+          currentUses: 0,
+          isActive: true,
+        },
+      });
 
-      storagePromotions.set(promotion.id, promotion);
       return reply.status(201).send(promotion);
     }
   );
@@ -1039,17 +892,21 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let promotions = Array.from(storagePromotions.values());
+      const { propertyId, active } = request.query;
+      const now = new Date();
 
-      if (request.query.propertyId) {
-        promotions = promotions.filter((p) => p.propertyId === request.query.propertyId);
-      }
-      if (request.query.active === 'true') {
-        const now = new Date().toISOString();
-        promotions = promotions.filter(
-          (p) => p.isActive && p.startDate <= now && p.endDate >= now
-        );
-      }
+      const promotions = await prisma.storagePromotion.findMany({
+        where: {
+          ...(propertyId ? { propertyId } : {}),
+          ...(active === 'true'
+            ? {
+                isActive: true,
+                startDate: { lte: now },
+                endDate: { gte: now },
+              }
+            : {}),
+        },
+      });
 
       return reply.send(promotions);
     }
@@ -1065,12 +922,18 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const promotion = storagePromotions.get(request.params.id);
+      const promotion = await prisma.storagePromotion.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!promotion) {
         return reply.status(404).send({ error: 'Promotion not found' });
       }
 
-      const unit = storageUnits.get(request.body.unitId);
+      const unit = await prisma.storageUnit.findUnique({
+        where: { id: request.body.unitId },
+      });
+
       if (!unit) {
         return reply.status(404).send({ error: 'Unit not found' });
       }
@@ -1079,7 +942,7 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(400).send({ error: 'Promotion is not active' });
       }
 
-      const now = new Date().toISOString();
+      const now = new Date();
       if (promotion.startDate > now || promotion.endDate < now) {
         return reply.status(400).send({ error: 'Promotion is not valid at this time' });
       }
@@ -1088,20 +951,42 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(400).send({ error: 'Promotion has reached maximum uses' });
       }
 
-      const result = applyPromotion(unit, promotion);
+      // Check applicability
+      if (!promotion.applicableSizes.includes(unit.size)) {
+        return reply.status(400).send({ error: 'Promotion not applicable to this unit size' });
+      }
+      if (!promotion.applicableTypes.includes(unit.type)) {
+        return reply.status(400).send({ error: 'Promotion not applicable to this unit type' });
+      }
 
-      if (result.savingsAmount === 0) {
-        return reply.status(400).send({ error: 'Promotion not applicable to this unit' });
+      // Calculate discount
+      let discountedRate = unit.monthlyRate;
+      let savingsAmount = 0;
+
+      switch (promotion.discountType) {
+        case 'percentage':
+          savingsAmount = Math.round(unit.monthlyRate * (promotion.discountValue / 100));
+          discountedRate = unit.monthlyRate - savingsAmount;
+          break;
+        case 'fixed':
+          savingsAmount = Math.min(promotion.discountValue, unit.monthlyRate);
+          discountedRate = unit.monthlyRate - savingsAmount;
+          break;
+        case 'free_months':
+          savingsAmount = unit.monthlyRate * promotion.discountValue;
+          break;
       }
 
       // Increment usage
-      promotion.currentUses++;
-      storagePromotions.set(promotion.id, promotion);
+      await prisma.storagePromotion.update({
+        where: { id: request.params.id },
+        data: { currentUses: promotion.currentUses + 1 },
+      });
 
       return reply.send({
         originalRate: unit.monthlyRate,
-        discountedRate: result.discountedRate,
-        savingsAmount: result.savingsAmount,
+        discountedRate,
+        savingsAmount,
         promotionApplied: promotion.name,
       });
     }
@@ -1119,27 +1004,27 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = LienSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const rental = storageRentals.get(data.rentalId);
+      const rental = await prisma.storageRental.findUnique({
+        where: { id: data.rentalId },
+      });
+
       if (!rental) {
         return reply.status(404).send({ error: 'Rental not found' });
       }
 
-      const lien: LienAuction = {
-        id: `sla_${Date.now()}`,
-        rentalId: data.rentalId,
-        unitId: rental.unitId,
-        status: 'pending',
-        totalOwed: data.totalOwed,
-        noticeDate: now,
-        auctionDate: data.auctionDate,
-        auctionLocation: data.auctionLocation,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const lien = await prisma.lienAuction.create({
+        data: {
+          rentalId: data.rentalId,
+          unitId: rental.unitId,
+          status: 'pending',
+          totalOwed: data.totalOwed,
+          noticeDate: new Date(),
+          auctionDate: data.auctionDate ? new Date(data.auctionDate) : null,
+          auctionLocation: data.auctionLocation,
+        },
+      });
 
-      lienAuctions.set(lien.id, lien);
       return reply.status(201).send(lien);
     }
   );
@@ -1153,14 +1038,14 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let liens = Array.from(lienAuctions.values());
+      const { status, rentalId } = request.query;
 
-      if (request.query.status) {
-        liens = liens.filter((l) => l.status === request.query.status);
-      }
-      if (request.query.rentalId) {
-        liens = liens.filter((l) => l.rentalId === request.query.rentalId);
-      }
+      const liens = await prisma.lienAuction.findMany({
+        where: {
+          ...(status ? { status: status as LienAuctionStatus } : {}),
+          ...(rentalId ? { rentalId } : {}),
+        },
+      });
 
       return reply.send(liens);
     }
@@ -1176,43 +1061,46 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const lien = lienAuctions.get(request.params.id);
+      const lien = await prisma.lienAuction.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!lien) {
         return reply.status(404).send({ error: 'Lien not found' });
       }
 
-      const now = new Date().toISOString();
       const fees = request.body.fees || 0;
       const proceeds = request.body.winningBid - fees;
       const surplus = proceeds > lien.totalOwed ? proceeds - lien.totalOwed : 0;
 
-      lien.status = 'completed';
-      lien.winningBid = request.body.winningBid;
-      lien.winnerId = request.body.winnerId;
-      lien.proceeds = proceeds;
-      lien.fees = fees;
-      lien.surplus = surplus;
-      lien.updatedAt = now;
+      const updated = await prisma.lienAuction.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'completed',
+          winningBid: request.body.winningBid,
+          winnerId: request.body.winnerId,
+          proceeds,
+          fees,
+          surplus,
+        },
+      });
 
       // Terminate rental
-      const rental = storageRentals.get(lien.rentalId);
-      if (rental) {
-        rental.status = 'terminated';
-        rental.terminationReason = 'Lien auction';
-        rental.updatedAt = now;
-        storageRentals.set(rental.id, rental);
-      }
+      await prisma.storageRental.update({
+        where: { id: lien.rentalId },
+        data: {
+          status: 'terminated',
+          terminationReason: 'Lien auction',
+        },
+      });
 
       // Free up unit
-      const unit = storageUnits.get(lien.unitId);
-      if (unit) {
-        unit.status = 'cleaning';
-        unit.updatedAt = now;
-        storageUnits.set(unit.id, unit);
-      }
+      await prisma.storageUnit.update({
+        where: { id: lien.unitId },
+        data: { status: 'maintenance' },
+      });
 
-      lienAuctions.set(lien.id, lien);
-      return reply.send(lien);
+      return reply.send(updated);
     }
   );
 };

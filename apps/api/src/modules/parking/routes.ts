@@ -1,177 +1,13 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-
-// ============================================================================
-// Types
-// ============================================================================
-
-export type SpaceType = 'standard' | 'compact' | 'handicap' | 'ev_charging' | 'motorcycle' | 'oversized';
-export type SpaceStatus = 'available' | 'assigned' | 'reserved' | 'maintenance' | 'visitor';
-export type PermitStatus = 'active' | 'expired' | 'suspended' | 'cancelled';
-export type ViolationType =
-  | 'no_permit'
-  | 'wrong_space'
-  | 'expired_permit'
-  | 'blocking'
-  | 'fire_lane'
-  | 'handicap'
-  | 'overnight'
-  | 'abandoned'
-  | 'other';
-export type ViolationStatus = 'issued' | 'warning' | 'fine_due' | 'paid' | 'appealed' | 'dismissed' | 'towed';
-export type VehicleType = 'car' | 'truck' | 'suv' | 'motorcycle' | 'van' | 'rv' | 'other';
-
-export interface ParkingLot {
-  id: string;
-  propertyId: string;
-  name: string;
-  totalSpaces: number;
-  address: string;
-  operatingHours: {
-    start: string;
-    end: string;
-  };
-  isGated: boolean;
-  gateCode?: string;
-  monthlyRate: number;
-  visitorRate: number; // per hour
-  evChargingRate?: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ParkingSpace {
-  id: string;
-  lotId: string;
-  propertyId: string;
-  spaceNumber: string;
-  type: SpaceType;
-  status: SpaceStatus;
-  level?: string;
-  section?: string;
-  assignedTo?: {
-    tenantId: string;
-    leaseId: string;
-    vehicleId: string;
-  };
-  notes?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Vehicle {
-  id: string;
-  tenantId: string;
-  type: VehicleType;
-  make: string;
-  model: string;
-  year: number;
-  color: string;
-  licensePlate: string;
-  state: string;
-  isPrimary: boolean;
-  registrationExpiry?: string;
-  insuranceExpiry?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ParkingPermit {
-  id: string;
-  propertyId: string;
-  tenantId: string;
-  leaseId: string;
-  vehicleId: string;
-  spaceId?: string;
-  permitNumber: string;
-  type: 'assigned' | 'general' | 'visitor' | 'temporary';
-  status: PermitStatus;
-  startDate: string;
-  endDate: string;
-  monthlyFee: number;
-  issuedAt: string;
-  suspendedAt?: string;
-  suspendedReason?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface GuestPass {
-  id: string;
-  propertyId: string;
-  tenantId: string;
-  guestName: string;
-  vehicleLicensePlate: string;
-  vehicleMake?: string;
-  vehicleModel?: string;
-  vehicleColor?: string;
-  passCode: string;
-  validFrom: string;
-  validTo: string;
-  isUsed: boolean;
-  usedAt?: string;
-  spaceId?: string;
-  notes?: string;
-  createdAt: string;
-}
-
-export interface ParkingViolation {
-  id: string;
-  propertyId: string;
-  lotId?: string;
-  spaceId?: string;
-  licensePlate: string;
-  vehicleDescription?: string;
-  violationType: ViolationType;
-  status: ViolationStatus;
-  description: string;
-  issuedAt: string;
-  issuedBy: string;
-  fineAmount: number;
-  dueDate: string;
-  paidAt?: string;
-  appealedAt?: string;
-  appealReason?: string;
-  appealStatus?: 'pending' | 'approved' | 'denied';
-  appealDecision?: string;
-  towedAt?: string;
-  towCompany?: string;
-  towReferenceNumber?: string;
-  photoUrls?: string[];
-  notes?: string;
-  createdAt: string;
-}
-
-export interface TowRecord {
-  id: string;
-  violationId: string;
-  propertyId: string;
-  licensePlate: string;
-  vehicleDescription: string;
-  towCompany: string;
-  towCompanyPhone: string;
-  towDriver: string;
-  referenceNumber: string;
-  towedAt: string;
-  towLocation: string;
-  storageRate: number;
-  retrievedAt?: string;
-  retrievedBy?: string;
-  totalCharges?: number;
-  createdAt: string;
-}
-
-// ============================================================================
-// In-Memory Storage (placeholder for Prisma)
-// ============================================================================
-
-export const parkingLots = new Map<string, ParkingLot>();
-export const parkingSpaces = new Map<string, ParkingSpace>();
-export const vehicles = new Map<string, Vehicle>();
-export const parkingPermits = new Map<string, ParkingPermit>();
-export const guestPasses = new Map<string, GuestPass>();
-export const parkingViolations = new Map<string, ParkingViolation>();
-export const towRecords = new Map<string, TowRecord>();
+import {
+  prisma,
+  type ParkingSpaceType,
+  type ParkingSpaceStatus,
+  type ParkingPermitStatus,
+  type ParkingViolationType,
+  type ParkingViolationStatus,
+} from '@realriches/database';
 
 // ============================================================================
 // Helper Functions
@@ -190,7 +26,7 @@ export function generatePassCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-export function getLotOccupancy(lotId: string): {
+export async function getLotOccupancy(lotId: string): Promise<{
   total: number;
   available: number;
   assigned: number;
@@ -198,8 +34,10 @@ export function getLotOccupancy(lotId: string): {
   visitor: number;
   maintenance: number;
   occupancyRate: number;
-} {
-  const spaces = Array.from(parkingSpaces.values()).filter((s) => s.lotId === lotId);
+}> {
+  const spaces = await prisma.parkingSpace.findMany({
+    where: { lotId },
+  });
 
   const total = spaces.length;
   const available = spaces.filter((s) => s.status === 'available').length;
@@ -221,10 +59,14 @@ export function getLotOccupancy(lotId: string): {
   };
 }
 
-export function getSpacesByType(lotId: string): Record<SpaceType, { total: number; available: number }> {
-  const spaces = Array.from(parkingSpaces.values()).filter((s) => s.lotId === lotId);
+export async function getSpacesByType(
+  lotId: string
+): Promise<Record<ParkingSpaceType, { total: number; available: number }>> {
+  const spaces = await prisma.parkingSpace.findMany({
+    where: { lotId },
+  });
 
-  const result: Record<SpaceType, { total: number; available: number }> = {
+  const result: Record<ParkingSpaceType, { total: number; available: number }> = {
     standard: { total: 0, available: 0 },
     compact: { total: 0, available: 0 },
     handicap: { total: 0, available: 0 },
@@ -243,63 +85,91 @@ export function getSpacesByType(lotId: string): Record<SpaceType, { total: numbe
   return result;
 }
 
-export function findAvailableSpace(lotId: string, type?: SpaceType): ParkingSpace | null {
-  const spaces = Array.from(parkingSpaces.values()).filter(
-    (s) => s.lotId === lotId && s.status === 'available' && (!type || s.type === type)
-  );
+export async function findAvailableSpace(
+  lotId: string,
+  type?: ParkingSpaceType
+): Promise<{ id: string; spaceNumber: string } | null> {
+  const space = await prisma.parkingSpace.findFirst({
+    where: {
+      lotId,
+      status: 'available',
+      ...(type ? { type } : {}),
+    },
+    select: { id: true, spaceNumber: true },
+  });
 
-  return spaces[0] || null;
+  return space;
 }
 
-export function isPermitValid(permit: ParkingPermit): boolean {
-  if (permit.status !== 'active') return false;
+export async function isPermitValid(permitId: string): Promise<boolean> {
+  const permit = await prisma.parkingPermit.findUnique({
+    where: { id: permitId },
+  });
+
+  if (!permit || permit.status !== 'active') return false;
 
   const now = new Date();
-  const startDate = new Date(permit.startDate);
-  const endDate = new Date(permit.endDate);
-
-  return now >= startDate && now <= endDate;
+  return now >= permit.startDate && now <= permit.endDate;
 }
 
-export function getActivePermitsForTenant(tenantId: string): ParkingPermit[] {
-  return Array.from(parkingPermits.values()).filter((p) => p.tenantId === tenantId && isPermitValid(p));
-}
-
-export function isGuestPassValid(pass: GuestPass): boolean {
+export async function getActivePermitsForTenant(tenantId: string) {
   const now = new Date();
-  const validFrom = new Date(pass.validFrom);
-  const validTo = new Date(pass.validTo);
-
-  return now >= validFrom && now <= validTo;
+  return prisma.parkingPermit.findMany({
+    where: {
+      tenantId,
+      status: 'active',
+      startDate: { lte: now },
+      endDate: { gte: now },
+    },
+  });
 }
 
-export function getActiveGuestPasses(propertyId: string): GuestPass[] {
-  return Array.from(guestPasses.values()).filter((p) => p.propertyId === propertyId && isGuestPassValid(p));
+export async function isGuestPassValid(passId: string): Promise<boolean> {
+  const pass = await prisma.parkingGuestPass.findUnique({
+    where: { id: passId },
+  });
+
+  if (!pass) return false;
+
+  const now = new Date();
+  return now >= pass.validFrom && now <= pass.validTo;
 }
 
-export function calculateViolationStats(
+export async function getActiveGuestPasses(propertyId: string) {
+  const now = new Date();
+  return prisma.parkingGuestPass.findMany({
+    where: {
+      propertyId,
+      validFrom: { lte: now },
+      validTo: { gte: now },
+    },
+  });
+}
+
+export async function calculateViolationStats(
   propertyId: string,
   startDate?: string,
   endDate?: string
-): {
+): Promise<{
   total: number;
-  byType: Record<ViolationType, number>;
-  byStatus: Record<ViolationStatus, number>;
+  byType: Record<ParkingViolationType, number>;
+  byStatus: Record<ParkingViolationStatus, number>;
   totalFines: number;
   collectedFines: number;
   outstandingFines: number;
   towedVehicles: number;
-} {
-  let violations = Array.from(parkingViolations.values()).filter((v) => v.propertyId === propertyId);
+}> {
+  const where: Record<string, unknown> = { propertyId };
 
-  if (startDate) {
-    violations = violations.filter((v) => new Date(v.issuedAt) >= new Date(startDate));
-  }
-  if (endDate) {
-    violations = violations.filter((v) => new Date(v.issuedAt) <= new Date(endDate));
+  if (startDate || endDate) {
+    where.issuedAt = {};
+    if (startDate) (where.issuedAt as Record<string, Date>).gte = new Date(startDate);
+    if (endDate) (where.issuedAt as Record<string, Date>).lte = new Date(endDate);
   }
 
-  const byType: Record<ViolationType, number> = {
+  const violations = await prisma.parkingViolation.findMany({ where });
+
+  const byType: Record<ParkingViolationType, number> = {
     no_permit: 0,
     wrong_space: 0,
     expired_permit: 0,
@@ -311,7 +181,7 @@ export function calculateViolationStats(
     other: 0,
   };
 
-  const byStatus: Record<ViolationStatus, number> = {
+  const byStatus: Record<ParkingViolationStatus, number> = {
     issued: 0,
     warning: 0,
     fine_due: 0,
@@ -349,8 +219,8 @@ export function calculateViolationStats(
   };
 }
 
-export function getViolationFineAmount(violationType: ViolationType): number {
-  const fineSchedule: Record<ViolationType, number> = {
+export function getViolationFineAmount(violationType: ParkingViolationType): number {
+  const fineSchedule: Record<ParkingViolationType, number> = {
     no_permit: 50,
     wrong_space: 35,
     expired_permit: 25,
@@ -365,51 +235,48 @@ export function getViolationFineAmount(violationType: ViolationType): number {
   return fineSchedule[violationType];
 }
 
-export function calculateParkingRevenue(
+export async function calculateParkingRevenue(
   propertyId: string,
   startDate: string,
   endDate: string
-): {
+): Promise<{
   permitRevenue: number;
   violationRevenue: number;
   totalRevenue: number;
   permitCount: number;
-} {
+}> {
   const start = new Date(startDate);
   const end = new Date(endDate);
 
   // Calculate permit revenue
-  const permits = Array.from(parkingPermits.values()).filter((p) => {
-    const permitStart = new Date(p.startDate);
-    const permitEnd = new Date(p.endDate);
-    return (
-      p.propertyId === propertyId &&
-      permitStart <= end &&
-      permitEnd >= start &&
-      (p.status === 'active' || p.status === 'expired')
-    );
+  const permits = await prisma.parkingPermit.findMany({
+    where: {
+      propertyId,
+      startDate: { lte: end },
+      endDate: { gte: start },
+      status: { in: ['active', 'expired'] },
+    },
   });
 
   let permitRevenue = 0;
   for (const permit of permits) {
-    // Calculate months active in the period
-    const permitStart = new Date(Math.max(new Date(permit.startDate).getTime(), start.getTime()));
-    const permitEnd = new Date(Math.min(new Date(permit.endDate).getTime(), end.getTime()));
-    const months = Math.ceil(
-      (permitEnd.getTime() - permitStart.getTime()) / (30 * 24 * 60 * 60 * 1000)
-    );
+    const permitStart = new Date(Math.max(permit.startDate.getTime(), start.getTime()));
+    const permitEnd = new Date(Math.min(permit.endDate.getTime(), end.getTime()));
+    const months = Math.ceil((permitEnd.getTime() - permitStart.getTime()) / (30 * 24 * 60 * 60 * 1000));
     permitRevenue += permit.monthlyFee * months;
   }
 
   // Calculate violation revenue
-  const violations = Array.from(parkingViolations.values()).filter(
-    (v) =>
-      v.propertyId === propertyId &&
-      v.status === 'paid' &&
-      v.paidAt &&
-      new Date(v.paidAt) >= start &&
-      new Date(v.paidAt) <= end
-  );
+  const violations = await prisma.parkingViolation.findMany({
+    where: {
+      propertyId,
+      status: 'paid',
+      paidAt: {
+        gte: start,
+        lte: end,
+      },
+    },
+  });
 
   const violationRevenue = violations.reduce((sum, v) => sum + v.fineAmount, 0);
 
@@ -433,7 +300,7 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // Create parking lot
   app.post('/lots', async (request: FastifyRequest, reply: FastifyReply) => {
     const schema = z.object({
-      propertyId: z.string(),
+      propertyId: z.string().uuid(),
       name: z.string(),
       totalSpaces: z.number().min(1),
       address: z.string(),
@@ -449,30 +316,38 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const now = new Date().toISOString();
 
-    const lot: ParkingLot = {
-      id: `lot_${Date.now()}`,
-      ...body,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const lot = await prisma.parkingLot.create({
+      data: {
+        propertyId: body.propertyId,
+        name: body.name,
+        totalSpaces: body.totalSpaces,
+        address: body.address,
+        operatingHours: body.operatingHours,
+        isGated: body.isGated,
+        gateCode: body.gateCode,
+        monthlyRate: body.monthlyRate,
+        visitorRate: body.visitorRate,
+        evChargingRate: body.evChargingRate,
+      },
+    });
 
-    parkingLots.set(lot.id, lot);
     return reply.status(201).send(lot);
   });
 
   // Get parking lot
   app.get('/lots/:lotId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { lotId } = request.params as { lotId: string };
-    const lot = parkingLots.get(lotId);
+    const lot = await prisma.parkingLot.findUnique({
+      where: { id: lotId },
+    });
 
     if (!lot) {
       return reply.status(404).send({ error: 'Parking lot not found' });
     }
 
-    const occupancy = getLotOccupancy(lotId);
-    const spacesByType = getSpacesByType(lotId);
+    const occupancy = await getLotOccupancy(lotId);
+    const spacesByType = await getSpacesByType(lotId);
 
     return reply.send({ ...lot, occupancy, spacesByType });
   });
@@ -480,16 +355,17 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // List parking lots for property
   app.get('/lots', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.query as { propertyId?: string };
-    let lots = Array.from(parkingLots.values());
 
-    if (propertyId) {
-      lots = lots.filter((l) => l.propertyId === propertyId);
-    }
+    const lots = await prisma.parkingLot.findMany({
+      where: propertyId ? { propertyId } : {},
+    });
 
-    const lotsWithOccupancy = lots.map((lot) => ({
-      ...lot,
-      occupancy: getLotOccupancy(lot.id),
-    }));
+    const lotsWithOccupancy = await Promise.all(
+      lots.map(async (lot) => ({
+        ...lot,
+        occupancy: await getLotOccupancy(lot.id),
+      }))
+    );
 
     return reply.send({ lots: lotsWithOccupancy });
   });
@@ -501,8 +377,8 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // Create parking spaces (bulk)
   app.post('/spaces/bulk', async (request: FastifyRequest, reply: FastifyReply) => {
     const schema = z.object({
-      lotId: z.string(),
-      propertyId: z.string(),
+      lotId: z.string().uuid(),
+      propertyId: z.string().uuid(),
       spaces: z.array(
         z.object({
           spaceNumber: z.string(),
@@ -514,30 +390,34 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const now = new Date().toISOString();
 
-    const created: ParkingSpace[] = [];
-    for (const spaceData of body.spaces) {
-      const space: ParkingSpace = {
-        id: `space_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    const created = await prisma.parkingSpace.createMany({
+      data: body.spaces.map((spaceData) => ({
         lotId: body.lotId,
         propertyId: body.propertyId,
-        ...spaceData,
-        status: 'available',
-        createdAt: now,
-        updatedAt: now,
-      };
-      parkingSpaces.set(space.id, space);
-      created.push(space);
-    }
+        spaceNumber: spaceData.spaceNumber,
+        type: spaceData.type as ParkingSpaceType,
+        status: 'available' as ParkingSpaceStatus,
+        level: spaceData.level,
+        section: spaceData.section,
+      })),
+    });
 
-    return reply.status(201).send({ spaces: created, count: created.length });
+    const spaces = await prisma.parkingSpace.findMany({
+      where: { lotId: body.lotId },
+      orderBy: { createdAt: 'desc' },
+      take: body.spaces.length,
+    });
+
+    return reply.status(201).send({ spaces, count: created.count });
   });
 
   // Get space
   app.get('/spaces/:spaceId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { spaceId } = request.params as { spaceId: string };
-    const space = parkingSpaces.get(spaceId);
+    const space = await prisma.parkingSpace.findUnique({
+      where: { id: spaceId },
+    });
 
     if (!space) {
       return reply.status(404).send({ error: 'Parking space not found' });
@@ -549,20 +429,20 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // List spaces for lot
   app.get('/lots/:lotId/spaces', async (request: FastifyRequest, reply: FastifyReply) => {
     const { lotId } = request.params as { lotId: string };
-    const schema = z.object({
+    const querySchema = z.object({
       status: z.enum(['available', 'assigned', 'reserved', 'maintenance', 'visitor']).optional(),
       type: z.enum(['standard', 'compact', 'handicap', 'ev_charging', 'motorcycle', 'oversized']).optional(),
     });
 
-    const query = schema.parse(request.query);
-    let spaces = Array.from(parkingSpaces.values()).filter((s) => s.lotId === lotId);
+    const query = querySchema.parse(request.query);
 
-    if (query.status) {
-      spaces = spaces.filter((s) => s.status === query.status);
-    }
-    if (query.type) {
-      spaces = spaces.filter((s) => s.type === query.type);
-    }
+    const spaces = await prisma.parkingSpace.findMany({
+      where: {
+        lotId,
+        ...(query.status ? { status: query.status as ParkingSpaceStatus } : {}),
+        ...(query.type ? { type: query.type as ParkingSpaceType } : {}),
+      },
+    });
 
     return reply.send({ spaces, total: spaces.length });
   });
@@ -571,13 +451,15 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   app.post('/spaces/:spaceId/assign', async (request: FastifyRequest, reply: FastifyReply) => {
     const { spaceId } = request.params as { spaceId: string };
     const schema = z.object({
-      tenantId: z.string(),
-      leaseId: z.string(),
-      vehicleId: z.string(),
+      tenantId: z.string().uuid(),
+      leaseId: z.string().uuid(),
+      vehicleId: z.string().uuid(),
     });
 
     const body = schema.parse(request.body);
-    const space = parkingSpaces.get(spaceId);
+    const space = await prisma.parkingSpace.findUnique({
+      where: { id: spaceId },
+    });
 
     if (!space) {
       return reply.status(404).send({ error: 'Parking space not found' });
@@ -587,34 +469,36 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Space is not available', currentStatus: space.status });
     }
 
-    const updated: ParkingSpace = {
-      ...space,
-      status: 'assigned',
-      assignedTo: body,
-      updatedAt: new Date().toISOString(),
-    };
+    const updated = await prisma.parkingSpace.update({
+      where: { id: spaceId },
+      data: {
+        status: 'assigned',
+        assignedTo: body,
+      },
+    });
 
-    parkingSpaces.set(spaceId, updated);
     return reply.send(updated);
   });
 
   // Release space
   app.post('/spaces/:spaceId/release', async (request: FastifyRequest, reply: FastifyReply) => {
     const { spaceId } = request.params as { spaceId: string };
-    const space = parkingSpaces.get(spaceId);
+    const space = await prisma.parkingSpace.findUnique({
+      where: { id: spaceId },
+    });
 
     if (!space) {
       return reply.status(404).send({ error: 'Parking space not found' });
     }
 
-    const updated: ParkingSpace = {
-      ...space,
-      status: 'available',
-      assignedTo: undefined,
-      updatedAt: new Date().toISOString(),
-    };
+    const updated = await prisma.parkingSpace.update({
+      where: { id: spaceId },
+      data: {
+        status: 'available',
+        assignedTo: null,
+      },
+    });
 
-    parkingSpaces.set(spaceId, updated);
     return reply.send(updated);
   });
 
@@ -626,20 +510,22 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const space = parkingSpaces.get(spaceId);
+    const space = await prisma.parkingSpace.findUnique({
+      where: { id: spaceId },
+    });
 
     if (!space) {
       return reply.status(404).send({ error: 'Parking space not found' });
     }
 
-    const updated: ParkingSpace = {
-      ...space,
-      status: 'maintenance',
-      notes: body.notes,
-      updatedAt: new Date().toISOString(),
-    };
+    const updated = await prisma.parkingSpace.update({
+      where: { id: spaceId },
+      data: {
+        status: 'maintenance',
+        notes: body.notes,
+      },
+    });
 
-    parkingSpaces.set(spaceId, updated);
     return reply.send(updated);
   });
 
@@ -650,7 +536,7 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // Register vehicle
   app.post('/vehicles', async (request: FastifyRequest, reply: FastifyReply) => {
     const schema = z.object({
-      tenantId: z.string(),
+      tenantId: z.string().uuid(),
       type: z.enum(['car', 'truck', 'suv', 'motorcycle', 'van', 'rv', 'other']),
       make: z.string(),
       model: z.string(),
@@ -664,33 +550,40 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const now = new Date().toISOString();
 
     // If this is primary, unset other primary vehicles for tenant
     if (body.isPrimary) {
-      const tenantVehicles = Array.from(vehicles.values()).filter((v) => v.tenantId === body.tenantId);
-      for (const v of tenantVehicles) {
-        if (v.isPrimary) {
-          vehicles.set(v.id, { ...v, isPrimary: false, updatedAt: now });
-        }
-      }
+      await prisma.parkingVehicle.updateMany({
+        where: { tenantId: body.tenantId, isPrimary: true },
+        data: { isPrimary: false },
+      });
     }
 
-    const vehicle: Vehicle = {
-      id: `vehicle_${Date.now()}`,
-      ...body,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const vehicle = await prisma.parkingVehicle.create({
+      data: {
+        tenantId: body.tenantId,
+        type: body.type,
+        make: body.make,
+        model: body.model,
+        year: body.year,
+        color: body.color,
+        licensePlate: body.licensePlate,
+        state: body.state,
+        isPrimary: body.isPrimary,
+        registrationExpiry: body.registrationExpiry ? new Date(body.registrationExpiry) : null,
+        insuranceExpiry: body.insuranceExpiry ? new Date(body.insuranceExpiry) : null,
+      },
+    });
 
-    vehicles.set(vehicle.id, vehicle);
     return reply.status(201).send(vehicle);
   });
 
   // Get vehicle
   app.get('/vehicles/:vehicleId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { vehicleId } = request.params as { vehicleId: string };
-    const vehicle = vehicles.get(vehicleId);
+    const vehicle = await prisma.parkingVehicle.findUnique({
+      where: { id: vehicleId },
+    });
 
     if (!vehicle) {
       return reply.status(404).send({ error: 'Vehicle not found' });
@@ -702,8 +595,10 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // List tenant vehicles
   app.get('/vehicles/tenant/:tenantId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { tenantId } = request.params as { tenantId: string };
-    const tenantVehicles = Array.from(vehicles.values()).filter((v) => v.tenantId === tenantId);
-    return reply.send({ vehicles: tenantVehicles });
+    const vehicles = await prisma.parkingVehicle.findMany({
+      where: { tenantId },
+    });
+    return reply.send({ vehicles });
   });
 
   // Update vehicle
@@ -717,19 +612,24 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const vehicle = vehicles.get(vehicleId);
+    const vehicle = await prisma.parkingVehicle.findUnique({
+      where: { id: vehicleId },
+    });
 
     if (!vehicle) {
       return reply.status(404).send({ error: 'Vehicle not found' });
     }
 
-    const updated: Vehicle = {
-      ...vehicle,
-      ...body,
-      updatedAt: new Date().toISOString(),
-    };
+    const updated = await prisma.parkingVehicle.update({
+      where: { id: vehicleId },
+      data: {
+        licensePlate: body.licensePlate,
+        registrationExpiry: body.registrationExpiry ? new Date(body.registrationExpiry) : undefined,
+        insuranceExpiry: body.insuranceExpiry ? new Date(body.insuranceExpiry) : undefined,
+        color: body.color,
+      },
+    });
 
-    vehicles.set(vehicleId, updated);
     return reply.send(updated);
   });
 
@@ -737,14 +637,24 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/vehicles/:vehicleId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { vehicleId } = request.params as { vehicleId: string };
 
-    if (!vehicles.has(vehicleId)) {
+    const vehicle = await prisma.parkingVehicle.findUnique({
+      where: { id: vehicleId },
+    });
+
+    if (!vehicle) {
       return reply.status(404).send({ error: 'Vehicle not found' });
     }
 
     // Check for active permits
-    const activePermits = Array.from(parkingPermits.values()).filter(
-      (p) => p.vehicleId === vehicleId && isPermitValid(p)
-    );
+    const now = new Date();
+    const activePermits = await prisma.parkingPermit.findMany({
+      where: {
+        vehicleId,
+        status: 'active',
+        startDate: { lte: now },
+        endDate: { gte: now },
+      },
+    });
 
     if (activePermits.length > 0) {
       return reply.status(400).send({
@@ -753,7 +663,10 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    vehicles.delete(vehicleId);
+    await prisma.parkingVehicle.delete({
+      where: { id: vehicleId },
+    });
+
     return reply.status(204).send();
   });
 
@@ -764,11 +677,11 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // Issue permit
   app.post('/permits', async (request: FastifyRequest, reply: FastifyReply) => {
     const schema = z.object({
-      propertyId: z.string(),
-      tenantId: z.string(),
-      leaseId: z.string(),
-      vehicleId: z.string(),
-      spaceId: z.string().optional(),
+      propertyId: z.string().uuid(),
+      tenantId: z.string().uuid(),
+      leaseId: z.string().uuid(),
+      vehicleId: z.string().uuid(),
+      spaceId: z.string().uuid().optional(),
       type: z.enum(['assigned', 'general', 'visitor', 'temporary']),
       startDate: z.string(),
       endDate: z.string(),
@@ -776,16 +689,22 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const now = new Date().toISOString();
 
     // Verify vehicle exists
-    if (!vehicles.has(body.vehicleId)) {
+    const vehicle = await prisma.parkingVehicle.findUnique({
+      where: { id: body.vehicleId },
+    });
+
+    if (!vehicle) {
       return reply.status(404).send({ error: 'Vehicle not found' });
     }
 
     // If assigned type, verify and assign space
     if (body.type === 'assigned' && body.spaceId) {
-      const space = parkingSpaces.get(body.spaceId);
+      const space = await prisma.parkingSpace.findUnique({
+        where: { id: body.spaceId },
+      });
+
       if (!space) {
         return reply.status(404).send({ error: 'Parking space not found' });
       }
@@ -794,73 +713,82 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Assign the space
-      const updatedSpace: ParkingSpace = {
-        ...space,
-        status: 'assigned',
-        assignedTo: {
-          tenantId: body.tenantId,
-          leaseId: body.leaseId,
-          vehicleId: body.vehicleId,
+      await prisma.parkingSpace.update({
+        where: { id: body.spaceId },
+        data: {
+          status: 'assigned',
+          assignedTo: {
+            tenantId: body.tenantId,
+            leaseId: body.leaseId,
+            vehicleId: body.vehicleId,
+          },
         },
-        updatedAt: now,
-      };
-      parkingSpaces.set(body.spaceId, updatedSpace);
+      });
     }
 
-    const permit: ParkingPermit = {
-      id: `permit_${Date.now()}`,
-      ...body,
-      permitNumber: generatePermitNumber(),
-      status: 'active',
-      issuedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const permit = await prisma.parkingPermit.create({
+      data: {
+        propertyId: body.propertyId,
+        tenantId: body.tenantId,
+        leaseId: body.leaseId,
+        vehicleId: body.vehicleId,
+        spaceId: body.spaceId,
+        permitNumber: generatePermitNumber(),
+        type: body.type,
+        status: 'active',
+        startDate: new Date(body.startDate),
+        endDate: new Date(body.endDate),
+        monthlyFee: body.monthlyFee,
+        issuedAt: new Date(),
+      },
+    });
 
-    parkingPermits.set(permit.id, permit);
     return reply.status(201).send(permit);
   });
 
   // Get permit
   app.get('/permits/:permitId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { permitId } = request.params as { permitId: string };
-    const permit = parkingPermits.get(permitId);
+    const permit = await prisma.parkingPermit.findUnique({
+      where: { id: permitId },
+      include: { vehicle: true },
+    });
 
     if (!permit) {
       return reply.status(404).send({ error: 'Permit not found' });
     }
 
-    const vehicle = vehicles.get(permit.vehicleId);
-    const space = permit.spaceId ? parkingSpaces.get(permit.spaceId) : null;
+    const space = permit.spaceId
+      ? await prisma.parkingSpace.findUnique({ where: { id: permit.spaceId } })
+      : null;
+
+    const now = new Date();
+    const isValid = permit.status === 'active' && now >= permit.startDate && now <= permit.endDate;
 
     return reply.send({
       ...permit,
-      isValid: isPermitValid(permit),
-      vehicle,
+      isValid,
       space,
     });
   });
 
   // List permits
   app.get('/permits', async (request: FastifyRequest, reply: FastifyReply) => {
-    const schema = z.object({
-      propertyId: z.string().optional(),
-      tenantId: z.string().optional(),
+    const querySchema = z.object({
+      propertyId: z.string().uuid().optional(),
+      tenantId: z.string().uuid().optional(),
       status: z.enum(['active', 'expired', 'suspended', 'cancelled']).optional(),
     });
 
-    const query = schema.parse(request.query);
-    let permits = Array.from(parkingPermits.values());
+    const query = querySchema.parse(request.query);
 
-    if (query.propertyId) {
-      permits = permits.filter((p) => p.propertyId === query.propertyId);
-    }
-    if (query.tenantId) {
-      permits = permits.filter((p) => p.tenantId === query.tenantId);
-    }
-    if (query.status) {
-      permits = permits.filter((p) => p.status === query.status);
-    }
+    const permits = await prisma.parkingPermit.findMany({
+      where: {
+        ...(query.propertyId ? { propertyId: query.propertyId } : {}),
+        ...(query.tenantId ? { tenantId: query.tenantId } : {}),
+        ...(query.status ? { status: query.status as ParkingPermitStatus } : {}),
+      },
+    });
 
     return reply.send({ permits, total: permits.length });
   });
@@ -873,29 +801,32 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const permit = parkingPermits.get(permitId);
+    const permit = await prisma.parkingPermit.findUnique({
+      where: { id: permitId },
+    });
 
     if (!permit) {
       return reply.status(404).send({ error: 'Permit not found' });
     }
 
-    const now = new Date().toISOString();
-    const updated: ParkingPermit = {
-      ...permit,
-      status: 'suspended',
-      suspendedAt: now,
-      suspendedReason: body.reason,
-      updatedAt: now,
-    };
+    const updated = await prisma.parkingPermit.update({
+      where: { id: permitId },
+      data: {
+        status: 'suspended',
+        suspendedAt: new Date(),
+        suspendedReason: body.reason,
+      },
+    });
 
-    parkingPermits.set(permitId, updated);
     return reply.send(updated);
   });
 
   // Reactivate permit
   app.post('/permits/:permitId/reactivate', async (request: FastifyRequest, reply: FastifyReply) => {
     const { permitId } = request.params as { permitId: string };
-    const permit = parkingPermits.get(permitId);
+    const permit = await prisma.parkingPermit.findUnique({
+      where: { id: permitId },
+    });
 
     if (!permit) {
       return reply.status(404).send({ error: 'Permit not found' });
@@ -905,22 +836,24 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Permit is not suspended' });
     }
 
-    const updated: ParkingPermit = {
-      ...permit,
-      status: 'active',
-      suspendedAt: undefined,
-      suspendedReason: undefined,
-      updatedAt: new Date().toISOString(),
-    };
+    const updated = await prisma.parkingPermit.update({
+      where: { id: permitId },
+      data: {
+        status: 'active',
+        suspendedAt: null,
+        suspendedReason: null,
+      },
+    });
 
-    parkingPermits.set(permitId, updated);
     return reply.send(updated);
   });
 
   // Cancel permit
   app.post('/permits/:permitId/cancel', async (request: FastifyRequest, reply: FastifyReply) => {
     const { permitId } = request.params as { permitId: string };
-    const permit = parkingPermits.get(permitId);
+    const permit = await prisma.parkingPermit.findUnique({
+      where: { id: permitId },
+    });
 
     if (!permit) {
       return reply.status(404).send({ error: 'Permit not found' });
@@ -928,24 +861,26 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
 
     // Release assigned space if applicable
     if (permit.spaceId) {
-      const space = parkingSpaces.get(permit.spaceId);
+      const space = await prisma.parkingSpace.findUnique({
+        where: { id: permit.spaceId },
+      });
+
       if (space && space.status === 'assigned') {
-        parkingSpaces.set(permit.spaceId, {
-          ...space,
-          status: 'available',
-          assignedTo: undefined,
-          updatedAt: new Date().toISOString(),
+        await prisma.parkingSpace.update({
+          where: { id: permit.spaceId },
+          data: {
+            status: 'available',
+            assignedTo: null,
+          },
         });
       }
     }
 
-    const updated: ParkingPermit = {
-      ...permit,
-      status: 'cancelled',
-      updatedAt: new Date().toISOString(),
-    };
+    const updated = await prisma.parkingPermit.update({
+      where: { id: permitId },
+      data: { status: 'cancelled' },
+    });
 
-    parkingPermits.set(permitId, updated);
     return reply.send(updated);
   });
 
@@ -956,8 +891,8 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // Create guest pass
   app.post('/guest-passes', async (request: FastifyRequest, reply: FastifyReply) => {
     const schema = z.object({
-      propertyId: z.string(),
-      tenantId: z.string(),
+      propertyId: z.string().uuid(),
+      tenantId: z.string().uuid(),
       guestName: z.string(),
       vehicleLicensePlate: z.string(),
       vehicleMake: z.string().optional(),
@@ -970,45 +905,58 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
 
     const body = schema.parse(request.body);
 
-    const pass: GuestPass = {
-      id: `guestpass_${Date.now()}`,
-      ...body,
-      passCode: generatePassCode(),
-      isUsed: false,
-      createdAt: new Date().toISOString(),
-    };
+    const pass = await prisma.parkingGuestPass.create({
+      data: {
+        propertyId: body.propertyId,
+        tenantId: body.tenantId,
+        guestName: body.guestName,
+        vehicleLicensePlate: body.vehicleLicensePlate,
+        vehicleMake: body.vehicleMake,
+        vehicleModel: body.vehicleModel,
+        vehicleColor: body.vehicleColor,
+        passCode: generatePassCode(),
+        validFrom: new Date(body.validFrom),
+        validTo: new Date(body.validTo),
+        isUsed: false,
+        notes: body.notes,
+      },
+    });
 
-    guestPasses.set(pass.id, pass);
     return reply.status(201).send(pass);
   });
 
   // Get guest pass
   app.get('/guest-passes/:passId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { passId } = request.params as { passId: string };
-    const pass = guestPasses.get(passId);
+    const pass = await prisma.parkingGuestPass.findUnique({
+      where: { id: passId },
+    });
 
     if (!pass) {
       return reply.status(404).send({ error: 'Guest pass not found' });
     }
 
-    return reply.send({
-      ...pass,
-      isValid: isGuestPassValid(pass),
-    });
+    const now = new Date();
+    const isValid = now >= pass.validFrom && now <= pass.validTo;
+
+    return reply.send({ ...pass, isValid });
   });
 
   // Validate guest pass by code
   app.get('/guest-passes/validate/:passCode', async (request: FastifyRequest, reply: FastifyReply) => {
     const { passCode } = request.params as { passCode: string };
-    const pass = Array.from(guestPasses.values()).find(
-      (p) => p.passCode.toUpperCase() === passCode.toUpperCase()
-    );
+    const pass = await prisma.parkingGuestPass.findFirst({
+      where: {
+        passCode: { equals: passCode, mode: 'insensitive' },
+      },
+    });
 
     if (!pass) {
       return reply.status(404).send({ error: 'Guest pass not found' });
     }
 
-    const isValid = isGuestPassValid(pass);
+    const now = new Date();
+    const isValid = now >= pass.validFrom && now <= pass.validTo;
 
     return reply.send({
       ...pass,
@@ -1021,54 +969,61 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   app.post('/guest-passes/:passId/use', async (request: FastifyRequest, reply: FastifyReply) => {
     const { passId } = request.params as { passId: string };
     const schema = z.object({
-      spaceId: z.string().optional(),
+      spaceId: z.string().uuid().optional(),
     });
 
     const body = schema.parse(request.body);
-    const pass = guestPasses.get(passId);
+    const pass = await prisma.parkingGuestPass.findUnique({
+      where: { id: passId },
+    });
 
     if (!pass) {
       return reply.status(404).send({ error: 'Guest pass not found' });
     }
 
-    if (!isGuestPassValid(pass)) {
+    const now = new Date();
+    if (now < pass.validFrom || now > pass.validTo) {
       return reply.status(400).send({ error: 'Guest pass is not valid' });
     }
 
-    const updated: GuestPass = {
-      ...pass,
-      isUsed: true,
-      usedAt: new Date().toISOString(),
-      spaceId: body.spaceId,
-    };
+    const updated = await prisma.parkingGuestPass.update({
+      where: { id: passId },
+      data: {
+        isUsed: true,
+        usedAt: new Date(),
+        spaceId: body.spaceId,
+      },
+    });
 
-    guestPasses.set(passId, updated);
     return reply.send(updated);
   });
 
   // List guest passes
   app.get('/guest-passes', async (request: FastifyRequest, reply: FastifyReply) => {
-    const schema = z.object({
-      propertyId: z.string().optional(),
-      tenantId: z.string().optional(),
+    const querySchema = z.object({
+      propertyId: z.string().uuid().optional(),
+      tenantId: z.string().uuid().optional(),
       active: z
         .string()
         .transform((v) => v === 'true')
         .optional(),
     });
 
-    const query = schema.parse(request.query);
-    let passes = Array.from(guestPasses.values());
+    const query = querySchema.parse(request.query);
+    const now = new Date();
 
-    if (query.propertyId) {
-      passes = passes.filter((p) => p.propertyId === query.propertyId);
-    }
-    if (query.tenantId) {
-      passes = passes.filter((p) => p.tenantId === query.tenantId);
-    }
-    if (query.active) {
-      passes = passes.filter((p) => isGuestPassValid(p));
-    }
+    const passes = await prisma.parkingGuestPass.findMany({
+      where: {
+        ...(query.propertyId ? { propertyId: query.propertyId } : {}),
+        ...(query.tenantId ? { tenantId: query.tenantId } : {}),
+        ...(query.active
+          ? {
+              validFrom: { lte: now },
+              validTo: { gte: now },
+            }
+          : {}),
+      },
+    });
 
     return reply.send({ passes, total: passes.length });
   });
@@ -1080,9 +1035,9 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // Issue violation
   app.post('/violations', async (request: FastifyRequest, reply: FastifyReply) => {
     const schema = z.object({
-      propertyId: z.string(),
-      lotId: z.string().optional(),
-      spaceId: z.string().optional(),
+      propertyId: z.string().uuid(),
+      lotId: z.string().uuid().optional(),
+      spaceId: z.string().uuid().optional(),
       licensePlate: z.string(),
       vehicleDescription: z.string().optional(),
       violationType: z.enum([
@@ -1097,7 +1052,7 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
         'other',
       ]),
       description: z.string(),
-      issuedBy: z.string(),
+      issuedBy: z.string().uuid(),
       fineAmount: z.number().optional(),
       isWarning: z.boolean().default(false),
       photoUrls: z.array(z.string()).optional(),
@@ -1105,42 +1060,43 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const now = new Date().toISOString();
+    const now = new Date();
 
     // Calculate fine amount if not provided
-    const fineAmount = body.fineAmount ?? getViolationFineAmount(body.violationType);
+    const fineAmount = body.fineAmount ?? getViolationFineAmount(body.violationType as ParkingViolationType);
 
     // Set due date to 30 days from now
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + 30);
 
-    const violation: ParkingViolation = {
-      id: `violation_${Date.now()}`,
-      propertyId: body.propertyId,
-      lotId: body.lotId,
-      spaceId: body.spaceId,
-      licensePlate: body.licensePlate,
-      vehicleDescription: body.vehicleDescription,
-      violationType: body.violationType,
-      status: body.isWarning ? 'warning' : 'issued',
-      description: body.description,
-      issuedAt: now,
-      issuedBy: body.issuedBy,
-      fineAmount: body.isWarning ? 0 : fineAmount,
-      dueDate: dueDate.toISOString(),
-      photoUrls: body.photoUrls,
-      notes: body.notes,
-      createdAt: now,
-    };
+    const violation = await prisma.parkingViolation.create({
+      data: {
+        propertyId: body.propertyId,
+        lotId: body.lotId,
+        spaceId: body.spaceId,
+        licensePlate: body.licensePlate,
+        vehicleDescription: body.vehicleDescription,
+        violationType: body.violationType as ParkingViolationType,
+        status: body.isWarning ? 'warning' : 'issued',
+        description: body.description,
+        issuedAt: now,
+        issuedBy: body.issuedBy,
+        fineAmount: body.isWarning ? 0 : fineAmount,
+        dueDate,
+        photoUrls: body.photoUrls || [],
+        notes: body.notes,
+      },
+    });
 
-    parkingViolations.set(violation.id, violation);
     return reply.status(201).send(violation);
   });
 
   // Get violation
   app.get('/violations/:violationId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { violationId } = request.params as { violationId: string };
-    const violation = parkingViolations.get(violationId);
+    const violation = await prisma.parkingViolation.findUnique({
+      where: { id: violationId },
+    });
 
     if (!violation) {
       return reply.status(404).send({ error: 'Violation not found' });
@@ -1151,12 +1107,10 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
 
   // List violations
   app.get('/violations', async (request: FastifyRequest, reply: FastifyReply) => {
-    const schema = z.object({
-      propertyId: z.string().optional(),
+    const querySchema = z.object({
+      propertyId: z.string().uuid().optional(),
       licensePlate: z.string().optional(),
-      status: z
-        .enum(['issued', 'warning', 'fine_due', 'paid', 'appealed', 'dismissed', 'towed'])
-        .optional(),
+      status: z.enum(['issued', 'warning', 'fine_due', 'paid', 'appealed', 'dismissed', 'towed']).optional(),
       violationType: z
         .enum([
           'no_permit',
@@ -1172,23 +1126,16 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
         .optional(),
     });
 
-    const query = schema.parse(request.query);
-    let violations = Array.from(parkingViolations.values());
+    const query = querySchema.parse(request.query);
 
-    if (query.propertyId) {
-      violations = violations.filter((v) => v.propertyId === query.propertyId);
-    }
-    if (query.licensePlate) {
-      violations = violations.filter(
-        (v) => v.licensePlate.toLowerCase() === query.licensePlate!.toLowerCase()
-      );
-    }
-    if (query.status) {
-      violations = violations.filter((v) => v.status === query.status);
-    }
-    if (query.violationType) {
-      violations = violations.filter((v) => v.violationType === query.violationType);
-    }
+    const violations = await prisma.parkingViolation.findMany({
+      where: {
+        ...(query.propertyId ? { propertyId: query.propertyId } : {}),
+        ...(query.licensePlate ? { licensePlate: { equals: query.licensePlate, mode: 'insensitive' } } : {}),
+        ...(query.status ? { status: query.status as ParkingViolationStatus } : {}),
+        ...(query.violationType ? { violationType: query.violationType as ParkingViolationType } : {}),
+      },
+    });
 
     return reply.send({ violations, total: violations.length });
   });
@@ -1196,7 +1143,9 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // Pay violation fine
   app.post('/violations/:violationId/pay', async (request: FastifyRequest, reply: FastifyReply) => {
     const { violationId } = request.params as { violationId: string };
-    const violation = parkingViolations.get(violationId);
+    const violation = await prisma.parkingViolation.findUnique({
+      where: { id: violationId },
+    });
 
     if (!violation) {
       return reply.status(404).send({ error: 'Violation not found' });
@@ -1210,13 +1159,14 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'No fine due for this violation' });
     }
 
-    const updated: ParkingViolation = {
-      ...violation,
-      status: 'paid',
-      paidAt: new Date().toISOString(),
-    };
+    const updated = await prisma.parkingViolation.update({
+      where: { id: violationId },
+      data: {
+        status: 'paid',
+        paidAt: new Date(),
+      },
+    });
 
-    parkingViolations.set(violationId, updated);
     return reply.send(updated);
   });
 
@@ -1228,7 +1178,9 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const violation = parkingViolations.get(violationId);
+    const violation = await prisma.parkingViolation.findUnique({
+      where: { id: violationId },
+    });
 
     if (!violation) {
       return reply.status(404).send({ error: 'Violation not found' });
@@ -1238,15 +1190,16 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Cannot appeal this violation' });
     }
 
-    const updated: ParkingViolation = {
-      ...violation,
-      status: 'appealed',
-      appealedAt: new Date().toISOString(),
-      appealReason: body.reason,
-      appealStatus: 'pending',
-    };
+    const updated = await prisma.parkingViolation.update({
+      where: { id: violationId },
+      data: {
+        status: 'appealed',
+        appealedAt: new Date(),
+        appealReason: body.reason,
+        appealStatus: 'pending',
+      },
+    });
 
-    parkingViolations.set(violationId, updated);
     return reply.send(updated);
   });
 
@@ -1259,7 +1212,9 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const violation = parkingViolations.get(violationId);
+    const violation = await prisma.parkingViolation.findUnique({
+      where: { id: violationId },
+    });
 
     if (!violation) {
       return reply.status(404).send({ error: 'Violation not found' });
@@ -1269,14 +1224,15 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Violation is not under appeal' });
     }
 
-    const updated: ParkingViolation = {
-      ...violation,
-      status: body.approved ? 'dismissed' : 'fine_due',
-      appealStatus: body.approved ? 'approved' : 'denied',
-      appealDecision: body.decision,
-    };
+    const updated = await prisma.parkingViolation.update({
+      where: { id: violationId },
+      data: {
+        status: body.approved ? 'dismissed' : 'fine_due',
+        appealStatus: body.approved ? 'approved' : 'denied',
+        appealDecision: body.decision,
+      },
+    });
 
-    parkingViolations.set(violationId, updated);
     return reply.send(updated);
   });
 
@@ -1296,47 +1252,45 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const violation = parkingViolations.get(violationId);
+    const violation = await prisma.parkingViolation.findUnique({
+      where: { id: violationId },
+    });
 
     if (!violation) {
       return reply.status(404).send({ error: 'Violation not found' });
     }
 
-    const now = new Date().toISOString();
+    const now = new Date();
+    const referenceNumber = `TOW-${Date.now().toString(36).toUpperCase()}`;
 
     // Update violation status
-    const updatedViolation: ParkingViolation = {
-      ...violation,
-      status: 'towed',
-      towedAt: now,
-      towCompany: body.towCompany,
-    };
-    parkingViolations.set(violationId, updatedViolation);
-
-    // Create tow record
-    const towRecord: TowRecord = {
-      id: `tow_${Date.now()}`,
-      violationId,
-      propertyId: violation.propertyId,
-      licensePlate: violation.licensePlate,
-      vehicleDescription: violation.vehicleDescription || 'Unknown',
-      towCompany: body.towCompany,
-      towCompanyPhone: body.towCompanyPhone,
-      towDriver: body.towDriver,
-      referenceNumber: `TOW-${Date.now().toString(36).toUpperCase()}`,
-      towedAt: now,
-      towLocation: body.towLocation,
-      storageRate: body.storageRate,
-      createdAt: now,
-    };
-
-    // Update violation with reference
-    parkingViolations.set(violationId, {
-      ...updatedViolation,
-      towReferenceNumber: towRecord.referenceNumber,
+    const updatedViolation = await prisma.parkingViolation.update({
+      where: { id: violationId },
+      data: {
+        status: 'towed',
+        towedAt: now,
+        towCompany: body.towCompany,
+        towReferenceNumber: referenceNumber,
+      },
     });
 
-    towRecords.set(towRecord.id, towRecord);
+    // Create tow record
+    const towRecord = await prisma.towRecord.create({
+      data: {
+        violationId,
+        propertyId: violation.propertyId,
+        licensePlate: violation.licensePlate,
+        vehicleDescription: violation.vehicleDescription || 'Unknown',
+        towCompany: body.towCompany,
+        towCompanyPhone: body.towCompanyPhone,
+        towDriver: body.towDriver,
+        referenceNumber,
+        towedAt: now,
+        towLocation: body.towLocation,
+        storageRate: body.storageRate,
+      },
+    });
+
     return reply.status(201).send({ violation: updatedViolation, towRecord });
   });
 
@@ -1349,31 +1303,33 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const body = schema.parse(request.body);
-    const record = towRecords.get(towId);
+    const record = await prisma.towRecord.findUnique({
+      where: { id: towId },
+    });
 
     if (!record) {
       return reply.status(404).send({ error: 'Tow record not found' });
     }
 
-    const updated: TowRecord = {
-      ...record,
-      retrievedAt: new Date().toISOString(),
-      retrievedBy: body.retrievedBy,
-      totalCharges: body.totalCharges,
-    };
+    const updated = await prisma.towRecord.update({
+      where: { id: towId },
+      data: {
+        retrievedAt: new Date(),
+        retrievedBy: body.retrievedBy,
+        totalCharges: body.totalCharges,
+      },
+    });
 
-    towRecords.set(towId, updated);
     return reply.send(updated);
   });
 
   // List tow records
   app.get('/tow', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.query as { propertyId?: string };
-    let records = Array.from(towRecords.values());
 
-    if (propertyId) {
-      records = records.filter((r) => r.propertyId === propertyId);
-    }
+    const records = await prisma.towRecord.findMany({
+      where: propertyId ? { propertyId } : {},
+    });
 
     return reply.send({ records, total: records.length });
   });
@@ -1385,13 +1341,13 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // Violation stats
   app.get('/reports/violations/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const schema = z.object({
+    const querySchema = z.object({
       startDate: z.string().optional(),
       endDate: z.string().optional(),
     });
 
-    const query = schema.parse(request.query);
-    const stats = calculateViolationStats(propertyId, query.startDate, query.endDate);
+    const query = querySchema.parse(request.query);
+    const stats = await calculateViolationStats(propertyId, query.startDate, query.endDate);
 
     return reply.send(stats);
   });
@@ -1399,13 +1355,13 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // Revenue report
   app.get('/reports/revenue/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const schema = z.object({
+    const querySchema = z.object({
       startDate: z.string(),
       endDate: z.string(),
     });
 
-    const query = schema.parse(request.query);
-    const revenue = calculateParkingRevenue(propertyId, query.startDate, query.endDate);
+    const query = querySchema.parse(request.query);
+    const revenue = await calculateParkingRevenue(propertyId, query.startDate, query.endDate);
 
     return reply.send(revenue);
   });
@@ -1413,14 +1369,18 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
   // Occupancy report
   app.get('/reports/occupancy/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const lots = Array.from(parkingLots.values()).filter((l) => l.propertyId === propertyId);
+    const lots = await prisma.parkingLot.findMany({
+      where: { propertyId },
+    });
 
-    const report = lots.map((lot) => ({
-      lotId: lot.id,
-      lotName: lot.name,
-      ...getLotOccupancy(lot.id),
-      spacesByType: getSpacesByType(lot.id),
-    }));
+    const report = await Promise.all(
+      lots.map(async (lot) => ({
+        lotId: lot.id,
+        lotName: lot.name,
+        ...(await getLotOccupancy(lot.id)),
+        spacesByType: await getSpacesByType(lot.id),
+      }))
+    );
 
     const totals = report.reduce(
       (acc, lot) => ({

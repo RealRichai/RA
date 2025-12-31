@@ -5,8 +5,12 @@
  * and generate reconciliation reports.
  */
 
-import { prisma } from '@realriches/database';
-import { generatePrefixedId, logger, AppError } from '@realriches/utils';
+import {
+  prisma,
+  type BankTransactionStatus,
+  type DiscrepancyType,
+} from '@realriches/database';
+import { logger, AppError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -15,137 +19,75 @@ import { z } from 'zod';
 // =============================================================================
 
 export type TransactionStatus = 'pending' | 'matched' | 'partial_match' | 'unmatched' | 'disputed' | 'written_off';
-export type DiscrepancyType = 'amount_mismatch' | 'date_mismatch' | 'duplicate' | 'missing_payment' | 'unexpected' | 'partial';
 
-interface BankTransaction {
-  id: string;
-  userId: string;
-  bankAccountId: string;
-  externalId: string; // Bank's transaction ID
-  date: Date;
-  amount: number;
-  description: string;
+interface RuleConditions {
+  descriptionPattern?: string;
+  amountRange?: { min: number; max: number };
+  payerNamePattern?: string;
+}
+
+interface RuleActions {
+  matchToPropertyId?: string;
+  matchToTenantId?: string;
   category?: string;
-  payerName?: string;
-  payerReference?: string;
-  status: TransactionStatus;
-  matchedPaymentId?: string;
-  matchConfidence?: number; // 0-100
-  discrepancy?: {
-    type: DiscrepancyType;
-    expectedAmount?: number;
-    actualAmount?: number;
-    notes?: string;
-  };
-  importedAt: Date;
-  reconciledAt?: Date;
-  reconciledBy?: string;
+  autoMatch: boolean;
+  tolerance: number;
 }
 
-interface ReconciliationBatch {
-  id: string;
-  userId: string;
-  bankAccountId: string;
-  period: { start: Date; end: Date };
-  status: 'processing' | 'completed' | 'failed';
-  summary: {
-    totalTransactions: number;
-    matched: number;
-    partialMatch: number;
-    unmatched: number;
-    totalAmount: number;
-    matchedAmount: number;
-    unmatchedAmount: number;
-  };
-  createdAt: Date;
-  completedAt?: Date;
-}
-
-interface ReconciliationRule {
+interface ReconciliationRuleData {
   id: string;
   userId: string;
   name: string;
   isActive: boolean;
   priority: number;
-  conditions: {
-    descriptionPattern?: string;
-    amountRange?: { min: number; max: number };
-    payerNamePattern?: string;
-  };
-  actions: {
-    matchToPropertyId?: string;
-    matchToTenantId?: string;
-    category?: string;
-    autoMatch: boolean;
-    tolerance: number; // Amount tolerance for matching (e.g., $0.50)
-  };
-  createdAt: Date;
-  updatedAt: Date;
+  conditions: RuleConditions;
+  actions: RuleActions;
 }
-
-// =============================================================================
-// In-Memory Storage (would be Prisma in production)
-// =============================================================================
-
-const bankTransactions = new Map<string, BankTransaction>();
-const reconciliationBatches = new Map<string, ReconciliationBatch>();
-const reconciliationRules = new Map<string, ReconciliationRule>();
-
-// =============================================================================
-// Schemas
-// =============================================================================
-
-const ImportTransactionsSchema = z.object({
-  bankAccountId: z.string(),
-  transactions: z.array(z.object({
-    externalId: z.string(),
-    date: z.string().datetime(),
-    amount: z.number(),
-    description: z.string(),
-    category: z.string().optional(),
-    payerName: z.string().optional(),
-    payerReference: z.string().optional(),
-  })),
-});
-
-const ManualMatchSchema = z.object({
-  transactionId: z.string(),
-  paymentId: z.string(),
-  notes: z.string().optional(),
-});
-
-const CreateRuleSchema = z.object({
-  name: z.string().min(1).max(100),
-  priority: z.number().min(1).max(100).default(50),
-  conditions: z.object({
-    descriptionPattern: z.string().optional(),
-    amountRange: z.object({
-      min: z.number(),
-      max: z.number(),
-    }).optional(),
-    payerNamePattern: z.string().optional(),
-  }),
-  actions: z.object({
-    matchToPropertyId: z.string().optional(),
-    matchToTenantId: z.string().optional(),
-    category: z.string().optional(),
-    autoMatch: z.boolean().default(false),
-    tolerance: z.number().min(0).max(100).default(0.5),
-  }),
-});
-
-const WriteOffSchema = z.object({
-  transactionId: z.string(),
-  reason: z.string().min(1),
-});
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
+
+function mapRuleToConditions(rule: {
+  descriptionPattern: string | null;
+  amountMin: unknown;
+  amountMax: unknown;
+  payerNamePattern: string | null;
+  matchToPropertyId: string | null;
+  matchToTenantId: string | null;
+  category: string | null;
+  autoMatch: boolean;
+  tolerance: unknown;
+}): { conditions: RuleConditions; actions: RuleActions } {
+  return {
+    conditions: {
+      descriptionPattern: rule.descriptionPattern || undefined,
+      amountRange: rule.amountMin !== null && rule.amountMax !== null
+        ? { min: toNumber(rule.amountMin), max: toNumber(rule.amountMax) }
+        : undefined,
+      payerNamePattern: rule.payerNamePattern || undefined,
+    },
+    actions: {
+      matchToPropertyId: rule.matchToPropertyId || undefined,
+      matchToTenantId: rule.matchToTenantId || undefined,
+      category: rule.category || undefined,
+      autoMatch: rule.autoMatch,
+      tolerance: toNumber(rule.tolerance),
+    },
+  };
+}
+
 async function findMatchingPayment(
-  transaction: BankTransaction,
-  rules: ReconciliationRule[],
+  transaction: { date: Date; amount: number; description: string; payerName?: string | null },
+  rules: ReconciliationRuleData[],
   userId: string
 ): Promise<{
   paymentId: string | null;
@@ -205,7 +147,6 @@ async function findMatchingPayment(
     }
 
     if (matches && rule.actions.autoMatch) {
-      // Find payment matching rule criteria
       const payment = await prisma.payment.findFirst({
         where: {
           lease: {
@@ -226,8 +167,8 @@ async function findMatchingPayment(
       });
 
       if (payment) {
-        const amountDiff = Math.abs(payment.amount - transaction.amount);
-        const confidence = Math.max(50, 100 - (amountDiff / payment.amount) * 100);
+        const amountDiff = Math.abs(toNumber(payment.amount) - transaction.amount);
+        const confidence = Math.max(50, 100 - (amountDiff / toNumber(payment.amount)) * 100);
         return { paymentId: payment.id, confidence, matchType: 'rule' };
       }
     }
@@ -256,8 +197,8 @@ async function findMatchingPayment(
   });
 
   if (fuzzyMatch) {
-    const amountDiff = Math.abs(fuzzyMatch.amount - transaction.amount);
-    const confidence = Math.max(30, 80 - (amountDiff / fuzzyMatch.amount) * 100);
+    const amountDiff = Math.abs(toNumber(fuzzyMatch.amount) - transaction.amount);
+    const confidence = Math.max(30, 80 - (amountDiff / toNumber(fuzzyMatch.amount)) * 100);
     return { paymentId: fuzzyMatch.id, confidence, matchType: 'fuzzy' };
   }
 
@@ -265,31 +206,32 @@ async function findMatchingPayment(
 }
 
 function detectDiscrepancy(
-  transaction: BankTransaction,
+  transactionAmount: number,
+  transactionDate: Date,
   payment: { amount: number; dueDate: Date } | null
 ): { type: DiscrepancyType; expectedAmount?: number; actualAmount?: number } | null {
   if (!payment) {
-    return { type: 'unexpected', actualAmount: transaction.amount };
+    return { type: 'unexpected', actualAmount: transactionAmount };
   }
 
-  const amountDiff = Math.abs(payment.amount - transaction.amount);
+  const amountDiff = Math.abs(payment.amount - transactionAmount);
   if (amountDiff > 0.01) {
-    if (transaction.amount < payment.amount) {
+    if (transactionAmount < payment.amount) {
       return {
         type: 'partial',
         expectedAmount: payment.amount,
-        actualAmount: transaction.amount,
+        actualAmount: transactionAmount,
       };
     }
     return {
       type: 'amount_mismatch',
       expectedAmount: payment.amount,
-      actualAmount: transaction.amount,
+      actualAmount: transactionAmount,
     };
   }
 
   const daysDiff = Math.abs(
-    (transaction.date.getTime() - payment.dueDate.getTime()) / (1000 * 60 * 60 * 24)
+    (transactionDate.getTime() - payment.dueDate.getTime()) / (1000 * 60 * 60 * 24)
   );
   if (daysDiff > 14) {
     return { type: 'date_mismatch' };
@@ -297,6 +239,54 @@ function detectDiscrepancy(
 
   return null;
 }
+
+// =============================================================================
+// Schemas
+// =============================================================================
+
+const ImportTransactionsSchema = z.object({
+  bankAccountId: z.string(),
+  transactions: z.array(z.object({
+    externalId: z.string(),
+    date: z.string().datetime(),
+    amount: z.number(),
+    description: z.string(),
+    category: z.string().optional(),
+    payerName: z.string().optional(),
+    payerReference: z.string().optional(),
+  })),
+});
+
+const ManualMatchSchema = z.object({
+  transactionId: z.string().uuid(),
+  paymentId: z.string().uuid(),
+  notes: z.string().optional(),
+});
+
+const CreateRuleSchema = z.object({
+  name: z.string().min(1).max(100),
+  priority: z.number().min(1).max(100).default(50),
+  conditions: z.object({
+    descriptionPattern: z.string().optional(),
+    amountRange: z.object({
+      min: z.number(),
+      max: z.number(),
+    }).optional(),
+    payerNamePattern: z.string().optional(),
+  }),
+  actions: z.object({
+    matchToPropertyId: z.string().uuid().optional(),
+    matchToTenantId: z.string().uuid().optional(),
+    category: z.string().optional(),
+    autoMatch: z.boolean().default(false),
+    tolerance: z.number().min(0).max(100).default(0.5),
+  }),
+});
+
+const WriteOffSchema = z.object({
+  transactionId: z.string().uuid(),
+  reason: z.string().min(1),
+});
 
 // =============================================================================
 // Routes
@@ -333,60 +323,105 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
 
       const data = ImportTransactionsSchema.parse(request.body);
       const now = new Date();
-      const imported: BankTransaction[] = [];
+      const imported: Array<{
+        id: string;
+        status: BankTransactionStatus;
+        matchedPaymentId: string | null;
+        matchConfidence: number | null;
+      }> = [];
       const duplicates: string[] = [];
 
       // Get user's reconciliation rules
-      const userRules = Array.from(reconciliationRules.values())
-        .filter(r => r.userId === request.user!.id);
+      const userRulesRaw = await prisma.reconciliationRule.findMany({
+        where: { userId: request.user.id },
+      });
+      const userRules: ReconciliationRuleData[] = userRulesRaw.map(r => ({
+        id: r.id,
+        userId: r.userId,
+        name: r.name,
+        isActive: r.isActive,
+        priority: r.priority,
+        ...mapRuleToConditions(r),
+      }));
 
       for (const tx of data.transactions) {
         // Check for duplicates
-        const existing = Array.from(bankTransactions.values())
-          .find(t => t.externalId === tx.externalId && t.bankAccountId === data.bankAccountId);
+        const existing = await prisma.bankTransaction.findUnique({
+          where: {
+            bankAccountId_externalId: {
+              bankAccountId: data.bankAccountId,
+              externalId: tx.externalId,
+            },
+          },
+        });
 
         if (existing) {
           duplicates.push(tx.externalId);
           continue;
         }
 
-        const transaction: BankTransaction = {
-          id: generatePrefixedId('btx'),
-          userId: request.user.id,
-          bankAccountId: data.bankAccountId,
-          externalId: tx.externalId,
+        const transactionData = {
           date: new Date(tx.date),
           amount: tx.amount,
           description: tx.description,
-          category: tx.category,
           payerName: tx.payerName,
-          payerReference: tx.payerReference,
-          status: 'pending',
-          importedAt: now,
         };
 
         // Try to auto-match
-        const match = await findMatchingPayment(transaction, userRules, request.user.id);
+        const match = await findMatchingPayment(transactionData, userRules, request.user.id);
+        let status: BankTransactionStatus = 'pending';
+        let discrepancyType: DiscrepancyType | null = null;
+        let discrepancyNotes: string | null = null;
+        let expectedAmount: number | null = null;
+
         if (match.paymentId && match.confidence >= 80) {
-          transaction.matchedPaymentId = match.paymentId;
-          transaction.matchConfidence = match.confidence;
-          transaction.status = match.confidence === 100 ? 'matched' : 'partial_match';
+          status = match.confidence === 100 ? 'matched' : 'partial_match';
 
           // Check for discrepancies
           const payment = await prisma.payment.findUnique({
             where: { id: match.paymentId },
             select: { amount: true, dueDate: true },
           });
-          const discrepancy = detectDiscrepancy(transaction, payment);
+          const discrepancy = detectDiscrepancy(
+            tx.amount,
+            transactionData.date,
+            payment ? { amount: toNumber(payment.amount), dueDate: payment.dueDate } : null
+          );
           if (discrepancy) {
-            transaction.discrepancy = discrepancy;
+            discrepancyType = discrepancy.type;
+            expectedAmount = discrepancy.expectedAmount ?? null;
           }
         } else {
-          transaction.status = 'unmatched';
+          status = 'unmatched';
         }
 
-        bankTransactions.set(transaction.id, transaction);
-        imported.push(transaction);
+        const transaction = await prisma.bankTransaction.create({
+          data: {
+            userId: request.user.id,
+            bankAccountId: data.bankAccountId,
+            externalId: tx.externalId,
+            date: transactionData.date,
+            amount: tx.amount,
+            description: tx.description,
+            category: tx.category,
+            payerName: tx.payerName,
+            payerReference: tx.payerReference,
+            status,
+            matchedPaymentId: match.paymentId,
+            matchConfidence: match.confidence > 0 ? Math.round(match.confidence) : null,
+            discrepancyType,
+            discrepancyNotes,
+            expectedAmount,
+            importedAt: now,
+          },
+        });
+
+        imported.push({
+          id: transaction.id,
+          status: transaction.status,
+          matchedPaymentId: transaction.matchedPaymentId,
+          matchConfidence: transaction.matchConfidence,
+        });
       }
 
       logger.info({
@@ -414,17 +449,6 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
         description: 'List bank transactions',
         tags: ['Reconciliation'],
         security: [{ bearerAuth: [] }],
-        querystring: {
-          type: 'object',
-          properties: {
-            status: { type: 'string' },
-            bankAccountId: { type: 'string' },
-            startDate: { type: 'string' },
-            endDate: { type: 'string' },
-            page: { type: 'integer', default: 1 },
-            limit: { type: 'integer', default: 50 },
-          },
-        },
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
@@ -452,35 +476,38 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
 
       const { status, bankAccountId, startDate, endDate, page = 1, limit = 50 } = request.query;
 
-      let transactions = Array.from(bankTransactions.values())
-        .filter(t => t.userId === request.user!.id);
+      const where = {
+        userId: request.user.id,
+        ...(status && { status: status as BankTransactionStatus }),
+        ...(bankAccountId && { bankAccountId }),
+        ...(startDate && { date: { gte: new Date(startDate) } }),
+        ...(endDate && { date: { ...((startDate ? { gte: new Date(startDate) } : {})), lte: new Date(endDate) } }),
+      };
 
-      if (status) {
-        transactions = transactions.filter(t => t.status === status);
-      }
-      if (bankAccountId) {
-        transactions = transactions.filter(t => t.bankAccountId === bankAccountId);
-      }
-      if (startDate) {
-        const start = new Date(startDate);
-        transactions = transactions.filter(t => t.date >= start);
-      }
-      if (endDate) {
-        const end = new Date(endDate);
-        transactions = transactions.filter(t => t.date <= end);
-      }
-
-      // Sort by date descending
-      transactions.sort((a, b) => b.date.getTime() - a.date.getTime());
-
-      const total = transactions.length;
-      const offset = (page - 1) * limit;
-      transactions = transactions.slice(offset, offset + limit);
+      const [transactions, total] = await Promise.all([
+        prisma.bankTransaction.findMany({
+          where,
+          orderBy: { date: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.bankTransaction.count({ where }),
+      ]);
 
       return reply.send({
         success: true,
         data: {
-          transactions,
+          transactions: transactions.map(t => ({
+            ...t,
+            amount: toNumber(t.amount),
+            expectedAmount: t.expectedAmount ? toNumber(t.expectedAmount) : null,
+            discrepancy: t.discrepancyType ? {
+              type: t.discrepancyType,
+              expectedAmount: t.expectedAmount ? toNumber(t.expectedAmount) : undefined,
+              actualAmount: toNumber(t.amount),
+              notes: t.discrepancyNotes,
+            } : undefined,
+          })),
           pagination: {
             page,
             limit,
@@ -517,7 +544,9 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       }
 
       const { transactionId } = request.params;
-      const transaction = bankTransactions.get(transactionId);
+      const transaction = await prisma.bankTransaction.findUnique({
+        where: { id: transactionId },
+      });
 
       if (!transaction || transaction.userId !== request.user.id) {
         throw new AppError('NOT_FOUND', 'Transaction not found', 404);
@@ -535,8 +564,8 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
           },
           status: 'pending',
           amount: {
-            gte: transaction.amount * 0.8,
-            lte: transaction.amount * 1.2,
+            gte: toNumber(transaction.amount) * 0.8,
+            lte: toNumber(transaction.amount) * 1.2,
           },
         },
         include: {
@@ -555,13 +584,13 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       });
 
       const suggestions = potentialMatches.map(p => {
-        const amountDiff = Math.abs(p.amount - transaction.amount);
+        const amountDiff = Math.abs(toNumber(p.amount) - toNumber(transaction.amount));
         const dateDiff = Math.abs(p.dueDate.getTime() - transaction.date.getTime()) / (1000 * 60 * 60 * 24);
-        const confidence = Math.max(0, 100 - (amountDiff / p.amount) * 50 - dateDiff * 2);
+        const confidence = Math.max(0, 100 - (amountDiff / toNumber(p.amount)) * 50 - dateDiff * 2);
 
         return {
           paymentId: p.id,
-          amount: p.amount,
+          amount: toNumber(p.amount),
           dueDate: p.dueDate,
           tenantName: p.lease.tenant ? `${p.lease.tenant.firstName} ${p.lease.tenant.lastName}` : 'Unknown',
           propertyName: p.lease.unit.property.name,
@@ -573,7 +602,17 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       return reply.send({
         success: true,
         data: {
-          transaction,
+          transaction: {
+            ...transaction,
+            amount: toNumber(transaction.amount),
+            expectedAmount: transaction.expectedAmount ? toNumber(transaction.expectedAmount) : null,
+            discrepancy: transaction.discrepancyType ? {
+              type: transaction.discrepancyType,
+              expectedAmount: transaction.expectedAmount ? toNumber(transaction.expectedAmount) : undefined,
+              actualAmount: toNumber(transaction.amount),
+              notes: transaction.discrepancyNotes,
+            } : undefined,
+          },
           suggestions,
         },
       });
@@ -609,7 +648,9 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       }
 
       const data = ManualMatchSchema.parse(request.body);
-      const transaction = bankTransactions.get(data.transactionId);
+      const transaction = await prisma.bankTransaction.findUnique({
+        where: { id: data.transactionId },
+      });
 
       if (!transaction || transaction.userId !== request.user.id) {
         throw new AppError('NOT_FOUND', 'Transaction not found', 404);
@@ -634,18 +675,29 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
         throw new AppError('NOT_FOUND', 'Payment not found', 404);
       }
 
-      // Update transaction
-      transaction.matchedPaymentId = data.paymentId;
-      transaction.matchConfidence = 100;
-      transaction.status = 'matched';
-      transaction.reconciledAt = new Date();
-      transaction.reconciledBy = request.user.id;
-
       // Check for discrepancies
-      const discrepancy = detectDiscrepancy(transaction, { amount: payment.amount, dueDate: payment.dueDate });
-      if (discrepancy) {
-        transaction.discrepancy = { ...discrepancy, notes: data.notes };
-      }
+      const discrepancy = detectDiscrepancy(
+        toNumber(transaction.amount),
+        transaction.date,
+        { amount: toNumber(payment.amount), dueDate: payment.dueDate }
+      );
+
+      // Update transaction
+      const updated = await prisma.bankTransaction.update({
+        where: { id: data.transactionId },
+        data: {
+          matchedPaymentId: data.paymentId,
+          matchConfidence: 100,
+          status: 'matched',
+          reconciledAt: new Date(),
+          reconciledBy: request.user.id,
+          ...(discrepancy && {
+            discrepancyType: discrepancy.type,
+            expectedAmount: discrepancy.expectedAmount,
+            discrepancyNotes: data.notes,
+          }),
+        },
+      });
 
       // Update payment status
       await prisma.payment.update({
@@ -664,7 +716,13 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
 
       return reply.send({
         success: true,
-        data: { transaction },
+        data: {
+          transaction: {
+            ...updated,
+            amount: toNumber(updated.amount),
+            expectedAmount: updated.expectedAmount ? toNumber(updated.expectedAmount) : null,
+          },
+        },
       });
     }
   );
@@ -694,7 +752,9 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       }
 
       const { transactionId } = request.params;
-      const transaction = bankTransactions.get(transactionId);
+      const transaction = await prisma.bankTransaction.findUnique({
+        where: { id: transactionId },
+      });
 
       if (!transaction || transaction.userId !== request.user.id) {
         throw new AppError('NOT_FOUND', 'Transaction not found', 404);
@@ -713,16 +773,28 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
         },
       });
 
-      transaction.matchedPaymentId = undefined;
-      transaction.matchConfidence = undefined;
-      transaction.status = 'unmatched';
-      transaction.reconciledAt = undefined;
-      transaction.reconciledBy = undefined;
-      transaction.discrepancy = undefined;
+      const updated = await prisma.bankTransaction.update({
+        where: { id: transactionId },
+        data: {
+          matchedPaymentId: null,
+          matchConfidence: null,
+          status: 'unmatched',
+          reconciledAt: null,
+          reconciledBy: null,
+          discrepancyType: null,
+          discrepancyNotes: null,
+          expectedAmount: null,
+        },
+      });
 
       return reply.send({
         success: true,
-        data: { transaction },
+        data: {
+          transaction: {
+            ...updated,
+            amount: toNumber(updated.amount),
+          },
+        },
       });
     }
   );
@@ -752,20 +824,24 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       }
 
       const data = WriteOffSchema.parse(request.body);
-      const transaction = bankTransactions.get(data.transactionId);
+      const transaction = await prisma.bankTransaction.findUnique({
+        where: { id: data.transactionId },
+      });
 
       if (!transaction || transaction.userId !== request.user.id) {
         throw new AppError('NOT_FOUND', 'Transaction not found', 404);
       }
 
-      transaction.status = 'written_off';
-      transaction.discrepancy = {
-        type: 'unexpected',
-        actualAmount: transaction.amount,
-        notes: data.reason,
-      };
-      transaction.reconciledAt = new Date();
-      transaction.reconciledBy = request.user.id;
+      const updated = await prisma.bankTransaction.update({
+        where: { id: data.transactionId },
+        data: {
+          status: 'written_off',
+          discrepancyType: 'unexpected',
+          discrepancyNotes: data.reason,
+          reconciledAt: new Date(),
+          reconciledBy: request.user.id,
+        },
+      });
 
       logger.info({
         transactionId: transaction.id,
@@ -775,7 +851,12 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
 
       return reply.send({
         success: true,
-        data: { transaction },
+        data: {
+          transaction: {
+            ...updated,
+            amount: toNumber(updated.amount),
+          },
+        },
       });
     }
   );
@@ -805,13 +886,25 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
         });
       }
 
-      const rules = Array.from(reconciliationRules.values())
-        .filter(r => r.userId === request.user!.id)
-        .sort((a, b) => a.priority - b.priority);
+      const rules = await prisma.reconciliationRule.findMany({
+        where: { userId: request.user.id },
+        orderBy: { priority: 'asc' },
+      });
+
+      const formattedRules = rules.map(r => ({
+        id: r.id,
+        userId: r.userId,
+        name: r.name,
+        isActive: r.isActive,
+        priority: r.priority,
+        ...mapRuleToConditions(r),
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
 
       return reply.send({
         success: true,
-        data: { rules },
+        data: { rules: formattedRules },
       });
     }
   );
@@ -841,27 +934,41 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       }
 
       const data = CreateRuleSchema.parse(request.body);
-      const now = new Date();
 
-      const rule: ReconciliationRule = {
-        id: generatePrefixedId('rcr'),
-        userId: request.user.id,
-        name: data.name,
-        isActive: true,
-        priority: data.priority,
-        conditions: data.conditions,
-        actions: data.actions,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      reconciliationRules.set(rule.id, rule);
+      const rule = await prisma.reconciliationRule.create({
+        data: {
+          userId: request.user.id,
+          name: data.name,
+          isActive: true,
+          priority: data.priority,
+          descriptionPattern: data.conditions.descriptionPattern,
+          amountMin: data.conditions.amountRange?.min,
+          amountMax: data.conditions.amountRange?.max,
+          payerNamePattern: data.conditions.payerNamePattern,
+          matchToPropertyId: data.actions.matchToPropertyId,
+          matchToTenantId: data.actions.matchToTenantId,
+          category: data.actions.category,
+          autoMatch: data.actions.autoMatch,
+          tolerance: data.actions.tolerance,
+        },
+      });
 
       logger.info({ ruleId: rule.id, name: rule.name }, 'Reconciliation rule created');
 
       return reply.status(201).send({
         success: true,
-        data: { rule },
+        data: {
+          rule: {
+            id: rule.id,
+            userId: rule.userId,
+            name: rule.name,
+            isActive: rule.isActive,
+            priority: rule.priority,
+            ...mapRuleToConditions(rule),
+            createdAt: rule.createdAt,
+            updatedAt: rule.updatedAt,
+          },
+        },
       });
     }
   );
@@ -891,13 +998,17 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       }
 
       const { ruleId } = request.params;
-      const rule = reconciliationRules.get(ruleId);
+      const rule = await prisma.reconciliationRule.findUnique({
+        where: { id: ruleId },
+      });
 
       if (!rule || rule.userId !== request.user.id) {
         throw new AppError('NOT_FOUND', 'Rule not found', 404);
       }
 
-      reconciliationRules.delete(ruleId);
+      await prisma.reconciliationRule.delete({
+        where: { id: ruleId },
+      });
 
       return reply.send({
         success: true,
@@ -918,12 +1029,6 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
         description: 'Get reconciliation summary',
         tags: ['Reconciliation'],
         security: [{ bearerAuth: [] }],
-        querystring: {
-          type: 'object',
-          properties: {
-            periodDays: { type: 'integer', default: 30 },
-          },
-        },
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
@@ -943,8 +1048,12 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       const { periodDays = 30 } = request.query;
       const startDate = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000);
 
-      const transactions = Array.from(bankTransactions.values())
-        .filter(t => t.userId === request.user!.id && t.date >= startDate);
+      const transactions = await prisma.bankTransaction.findMany({
+        where: {
+          userId: request.user.id,
+          date: { gte: startDate },
+        },
+      });
 
       const summary = {
         period: { days: periodDays, start: startDate.toISOString(), end: new Date().toISOString() },
@@ -957,17 +1066,17 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
           writtenOff: transactions.filter(t => t.status === 'written_off').length,
         },
         amounts: {
-          total: transactions.reduce((sum, t) => sum + t.amount, 0),
-          matched: transactions.filter(t => t.status === 'matched').reduce((sum, t) => sum + t.amount, 0),
-          unmatched: transactions.filter(t => t.status === 'unmatched').reduce((sum, t) => sum + t.amount, 0),
+          total: transactions.reduce((sum, t) => sum + toNumber(t.amount), 0),
+          matched: transactions.filter(t => t.status === 'matched').reduce((sum, t) => sum + toNumber(t.amount), 0),
+          unmatched: transactions.filter(t => t.status === 'unmatched').reduce((sum, t) => sum + toNumber(t.amount), 0),
         },
         discrepancies: {
-          total: transactions.filter(t => t.discrepancy).length,
+          total: transactions.filter(t => t.discrepancyType).length,
           byType: {
-            amount_mismatch: transactions.filter(t => t.discrepancy?.type === 'amount_mismatch').length,
-            date_mismatch: transactions.filter(t => t.discrepancy?.type === 'date_mismatch').length,
-            partial: transactions.filter(t => t.discrepancy?.type === 'partial').length,
-            unexpected: transactions.filter(t => t.discrepancy?.type === 'unexpected').length,
+            amount_mismatch: transactions.filter(t => t.discrepancyType === 'amount_mismatch').length,
+            date_mismatch: transactions.filter(t => t.discrepancyType === 'date_mismatch').length,
+            partial: transactions.filter(t => t.discrepancyType === 'partial').length,
+            unexpected: transactions.filter(t => t.discrepancyType === 'unexpected').length,
           },
         },
         matchRate: transactions.length > 0
@@ -990,12 +1099,6 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
         description: 'Get expected payments without matching transactions',
         tags: ['Reconciliation'],
         security: [{ bearerAuth: [] }],
-        querystring: {
-          type: 'object',
-          properties: {
-            daysOverdue: { type: 'integer', default: 7 },
-          },
-        },
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
@@ -1044,7 +1147,7 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
 
       const missing = missingPayments.map(p => ({
         paymentId: p.id,
-        amount: p.amount,
+        amount: toNumber(p.amount),
         dueDate: p.dueDate,
         daysOverdue: Math.floor((Date.now() - p.dueDate.getTime()) / (1000 * 60 * 60 * 24)),
         tenantName: p.lease.tenant ? `${p.lease.tenant.firstName} ${p.lease.tenant.lastName}` : 'Unknown',
@@ -1073,14 +1176,6 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
         description: 'Generate reconciliation report',
         tags: ['Reconciliation'],
         security: [{ bearerAuth: [] }],
-        querystring: {
-          type: 'object',
-          properties: {
-            startDate: { type: 'string' },
-            endDate: { type: 'string' },
-            bankAccountId: { type: 'string' },
-          },
-        },
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
@@ -1108,13 +1203,13 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       const start = new Date(startDate);
       const end = new Date(endDate);
 
-      let transactions = Array.from(bankTransactions.values())
-        .filter(t => t.userId === request.user!.id)
-        .filter(t => t.date >= start && t.date <= end);
-
-      if (bankAccountId) {
-        transactions = transactions.filter(t => t.bankAccountId === bankAccountId);
-      }
+      const transactions = await prisma.bankTransaction.findMany({
+        where: {
+          userId: request.user.id,
+          date: { gte: start, lte: end },
+          ...(bankAccountId && { bankAccountId }),
+        },
+      });
 
       // Get expected payments for the period
       const expectedPayments = await prisma.payment.findMany({
@@ -1134,7 +1229,7 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
         period: { start: start.toISOString(), end: end.toISOString() },
         bankTransactions: {
           total: transactions.length,
-          totalAmount: transactions.reduce((sum, t) => sum + t.amount, 0),
+          totalAmount: transactions.reduce((sum, t) => sum + toNumber(t.amount), 0),
           byStatus: {
             matched: transactions.filter(t => t.status === 'matched').length,
             unmatched: transactions.filter(t => t.status === 'unmatched').length,
@@ -1144,24 +1239,29 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
         },
         expectedPayments: {
           total: expectedPayments.length,
-          totalAmount: expectedPayments.reduce((sum, p) => sum + p.amount, 0),
+          totalAmount: expectedPayments.reduce((sum, p) => sum + toNumber(p.amount), 0),
           received: expectedPayments.filter(p => p.status === 'completed').length,
           pending: expectedPayments.filter(p => p.status === 'pending').length,
         },
         variance: {
-          amount: transactions.reduce((sum, t) => sum + t.amount, 0) -
-                  expectedPayments.filter(p => p.status === 'completed').reduce((sum, p) => sum + p.amount, 0),
+          amount: transactions.reduce((sum, t) => sum + toNumber(t.amount), 0) -
+                  expectedPayments.filter(p => p.status === 'completed').reduce((sum, p) => sum + toNumber(p.amount), 0),
           matchRate: transactions.length > 0
             ? (transactions.filter(t => t.status === 'matched').length / transactions.length) * 100
             : 0,
         },
         discrepancies: transactions
-          .filter(t => t.discrepancy)
+          .filter(t => t.discrepancyType)
           .map(t => ({
             transactionId: t.id,
             date: t.date,
-            amount: t.amount,
-            discrepancy: t.discrepancy,
+            amount: toNumber(t.amount),
+            discrepancy: {
+              type: t.discrepancyType,
+              expectedAmount: t.expectedAmount ? toNumber(t.expectedAmount) : undefined,
+              actualAmount: toNumber(t.amount),
+              notes: t.discrepancyNotes,
+            },
           })),
       };
 
@@ -1178,9 +1278,6 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
 // =============================================================================
 
 export {
-  bankTransactions,
-  reconciliationBatches,
-  reconciliationRules,
   findMatchingPayment,
   detectDiscrepancy,
 };

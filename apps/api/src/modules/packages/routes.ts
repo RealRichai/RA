@@ -1,123 +1,14 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-type Carrier = 'usps' | 'ups' | 'fedex' | 'amazon' | 'dhl' | 'other';
-type PackageSize = 'envelope' | 'small' | 'medium' | 'large' | 'oversized';
-type PackageStatus = 'received' | 'stored' | 'notified' | 'picked_up' | 'returned' | 'forwarded';
-type LockerSize = 'small' | 'medium' | 'large' | 'extra_large';
-type LockerStatus = 'available' | 'occupied' | 'maintenance' | 'reserved';
-
-interface PackageLocker {
-  id: string;
-  propertyId: string;
-  lockerNumber: string;
-  size: LockerSize;
-  status: LockerStatus;
-  location: string;
-  currentPackageId?: string;
-  accessCode?: string;
-  lastAccessedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface Package {
-  id: string;
-  propertyId: string;
-  unitId: string;
-  tenantId: string;
-  trackingNumber?: string;
-  carrier: Carrier;
-  size: PackageSize;
-  description?: string;
-  status: PackageStatus;
-  lockerId?: string;
-  accessCode?: string;
-  receivedAt: string;
-  receivedBy: string;
-  notifiedAt?: string;
-  notificationCount: number;
-  pickedUpAt?: string;
-  pickedUpBy?: string;
-  signatureUrl?: string;
-  photoUrl?: string;
-  returnedAt?: string;
-  forwardedTo?: string;
-  notes?: string;
-  isOverdue: boolean;
-  overdueNotifiedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface PackageSettings {
-  id: string;
-  propertyId: string;
-  holdDays: number;
-  overdueReminderDays: number;
-  requireSignature: boolean;
-  allowProxyPickup: boolean;
-  notifyOnReceive: boolean;
-  notifyOnOverdue: boolean;
-  autoAssignLocker: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface PackageNotification {
-  id: string;
-  packageId: string;
-  tenantId: string;
-  type: 'received' | 'reminder' | 'overdue' | 'returned';
-  channel: 'email' | 'sms' | 'push';
-  sentAt: string;
-  deliveredAt?: string;
-  readAt?: string;
-}
-
-interface ProxyAuthorization {
-  id: string;
-  tenantId: string;
-  authorizedPersonName: string;
-  relationship?: string;
-  photoIdUrl?: string;
-  validFrom: string;
-  validUntil?: string;
-  isActive: boolean;
-  createdAt: string;
-}
-
-interface ForwardingAddress {
-  id: string;
-  tenantId: string;
-  address: {
-    street: string;
-    city: string;
-    state: string;
-    zip: string;
-  };
-  startDate: string;
-  endDate?: string;
-  isActive: boolean;
-  createdAt: string;
-}
-
-// ============================================================================
-// IN-MEMORY STORAGE
-// ============================================================================
-
-export const lockers = new Map<string, PackageLocker>();
-export const packages = new Map<string, Package>();
-export const packageSettings = new Map<string, PackageSettings>();
-export const pickupLogs = new Map<string, PackageNotification>(); // alias for tests
-export const proxyAuthorizations = new Map<string, ProxyAuthorization>();
-export const forwardingAddresses = new Map<string, ForwardingAddress>();
-// Internal reference
-const notifications = pickupLogs;
+import {
+  prisma,
+  type Carrier,
+  type PackageSize,
+  type PackageStatus,
+  type LockerSize,
+  type LockerStatus,
+  type PackageNotificationType,
+} from '@realriches/database';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -132,10 +23,10 @@ export function generateAccessCode(length: number = 6): string {
   return code;
 }
 
-export function findAvailableLocker(
+export async function findAvailableLocker(
   propertyId: string,
   size: PackageSize
-): PackageLocker | null {
+): Promise<{ id: string; lockerNumber: string; size: LockerSize; location: string } | null> {
   const sizeMapping: Record<PackageSize, LockerSize[]> = {
     envelope: ['small', 'medium', 'large', 'extra_large'],
     small: ['small', 'medium', 'large', 'extra_large'],
@@ -147,29 +38,38 @@ export function findAvailableLocker(
   const acceptableSizes = sizeMapping[size];
 
   for (const acceptableSize of acceptableSizes) {
-    const available = Array.from(lockers.values()).find(
-      (l) =>
-        l.propertyId === propertyId &&
-        l.size === acceptableSize &&
-        l.status === 'available'
-    );
+    const available = await prisma.packageLocker.findFirst({
+      where: {
+        propertyId,
+        size: acceptableSize,
+        status: 'available',
+      },
+    });
     if (available) return available;
   }
 
   return null;
 }
 
-export function isPackageOverdue(pkg: Package, holdDays: number = 7): boolean {
-  const receivedDate = new Date(pkg.receivedAt);
+export function isPackageOverdue(receivedAt: Date, status: PackageStatus, holdDays: number = 7): boolean {
   const now = new Date();
   const daysSinceReceived = Math.floor(
-    (now.getTime() - receivedDate.getTime()) / (1000 * 60 * 60 * 24)
+    (now.getTime() - receivedAt.getTime()) / (1000 * 60 * 60 * 24)
   );
-  return daysSinceReceived > holdDays && pkg.status !== 'picked_up' && pkg.status !== 'returned';
+  return daysSinceReceived > holdDays && status !== 'picked_up' && status !== 'returned';
+}
+
+interface PackageData {
+  receivedAt: Date;
+  pickedUpAt: Date | null;
+  status: PackageStatus;
+  carrier: Carrier;
+  size: PackageSize;
+  isOverdue: boolean;
 }
 
 export function calculatePackageStats(
-  packageList: Package[],
+  packageList: PackageData[],
   startDate?: string,
   endDate?: string
 ): {
@@ -182,16 +82,16 @@ export function calculatePackageStats(
 } {
   let filtered = packageList;
   if (startDate) {
-    filtered = filtered.filter((p) => p.receivedAt >= startDate);
+    filtered = filtered.filter((p) => p.receivedAt >= new Date(startDate));
   }
   if (endDate) {
-    filtered = filtered.filter((p) => p.receivedAt <= endDate);
+    filtered = filtered.filter((p) => p.receivedAt <= new Date(endDate));
   }
 
   const pickedUp = filtered.filter((p) => p.status === 'picked_up' && p.pickedUpAt);
   const pickupTimes = pickedUp.map((p) => {
-    const received = new Date(p.receivedAt);
-    const picked = new Date(p.pickedUpAt!);
+    const received = p.receivedAt;
+    const picked = p.pickedUpAt!;
     return (picked.getTime() - received.getTime()) / (1000 * 60 * 60); // hours
   });
 
@@ -215,16 +115,16 @@ export function calculatePackageStats(
   };
 }
 
-export function getLockerUtilization(propertyId: string): {
+export async function getLockerUtilization(propertyId: string): Promise<{
   total: number;
   available: number;
   occupied: number;
   maintenance: number;
   utilizationRate: number;
-} {
-  const propertyLockers = Array.from(lockers.values()).filter(
-    (l) => l.propertyId === propertyId
-  );
+}> {
+  const propertyLockers = await prisma.packageLocker.findMany({
+    where: { propertyId },
+  });
 
   const total = propertyLockers.length;
   const available = propertyLockers.filter((l) => l.status === 'available').length;
@@ -333,17 +233,17 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = LockerSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const locker: PackageLocker = {
-        id: `lock_${Date.now()}`,
-        ...data,
-        status: 'available',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const locker = await prisma.packageLocker.create({
+        data: {
+          propertyId: data.propertyId,
+          lockerNumber: data.lockerNumber,
+          size: data.size,
+          location: data.location,
+          status: 'available',
+        },
+      });
 
-      lockers.set(locker.id, locker);
       return reply.status(201).send(locker);
     }
   );
@@ -357,20 +257,16 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(lockers.values());
-
-      if (request.query.propertyId) {
-        results = results.filter((l) => l.propertyId === request.query.propertyId);
-      }
-      if (request.query.status) {
-        results = results.filter((l) => l.status === request.query.status);
-      }
-      if (request.query.size) {
-        results = results.filter((l) => l.size === request.query.size);
-      }
+      const results = await prisma.packageLocker.findMany({
+        where: {
+          ...(request.query.propertyId && { propertyId: request.query.propertyId }),
+          ...(request.query.status && { status: request.query.status as LockerStatus }),
+          ...(request.query.size && { size: request.query.size as LockerSize }),
+        },
+      });
 
       const propertyId = request.query.propertyId;
-      const utilization = propertyId ? getLockerUtilization(propertyId) : null;
+      const utilization = propertyId ? await getLockerUtilization(propertyId) : null;
 
       return reply.send({ lockers: results, utilization });
     }
@@ -386,16 +282,15 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const locker = lockers.get(request.params.id);
-      if (!locker) {
+      try {
+        const locker = await prisma.packageLocker.update({
+          where: { id: request.params.id },
+          data: { status: request.body.status },
+        });
+        return reply.send(locker);
+      } catch {
         return reply.status(404).send({ error: 'Locker not found' });
       }
-
-      locker.status = request.body.status;
-      locker.updatedAt = new Date().toISOString();
-      lockers.set(locker.id, locker);
-
-      return reply.send(locker);
     }
   );
 
@@ -411,65 +306,93 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = PackageSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
 
       // Get settings
-      const settings = Array.from(packageSettings.values()).find(
-        (s) => s.propertyId === data.propertyId
-      );
+      const settings = await prisma.packageSettings.findUnique({
+        where: { propertyId: data.propertyId },
+      });
 
       // Validate tracking number if provided
       if (data.trackingNumber && !validateTrackingNumber(data.trackingNumber, data.carrier)) {
         return reply.status(400).send({ error: 'Invalid tracking number format' });
       }
 
-      const pkg: Package = {
-        id: `pkg_${Date.now()}`,
-        ...data,
-        status: 'received',
-        receivedAt: now,
-        notificationCount: 0,
-        isOverdue: false,
-        createdAt: now,
-        updatedAt: now,
-      };
+      let lockerId: string | undefined;
+      let accessCode: string | undefined;
+      let status: PackageStatus = 'received';
 
       // Auto-assign locker if enabled
       if (settings?.autoAssignLocker) {
-        const locker = findAvailableLocker(data.propertyId, data.size);
+        const locker = await findAvailableLocker(data.propertyId, data.size);
         if (locker) {
-          const accessCode = generateAccessCode();
-          pkg.lockerId = locker.id;
-          pkg.accessCode = accessCode;
-          pkg.status = 'stored';
+          accessCode = generateAccessCode();
+          lockerId = locker.id;
+          status = 'stored';
 
-          locker.status = 'occupied';
-          locker.currentPackageId = pkg.id;
-          locker.accessCode = accessCode;
-          locker.updatedAt = now;
-          lockers.set(locker.id, locker);
+          await prisma.packageLocker.update({
+            where: { id: locker.id },
+            data: {
+              status: 'occupied',
+              currentPackageId: 'pending', // Will update after package creation
+              accessCode,
+            },
+          });
         }
       }
 
-      packages.set(pkg.id, pkg);
+      const pkg = await prisma.package.create({
+        data: {
+          propertyId: data.propertyId,
+          unitId: data.unitId,
+          tenantId: data.tenantId,
+          trackingNumber: data.trackingNumber,
+          carrier: data.carrier,
+          size: data.size,
+          description: data.description,
+          status,
+          lockerId,
+          accessCode,
+          receivedAt: now,
+          receivedBy: data.receivedBy,
+          notificationCount: 0,
+          isOverdue: false,
+          photoUrl: data.photoUrl,
+          notes: data.notes,
+        },
+      });
+
+      // Update locker with actual package ID
+      if (lockerId) {
+        await prisma.packageLocker.update({
+          where: { id: lockerId },
+          data: { currentPackageId: pkg.id },
+        });
+      }
 
       // Send notification if enabled
       if (settings?.notifyOnReceive) {
-        const notification: PackageNotification = {
-          id: `notif_${Date.now()}`,
-          packageId: pkg.id,
-          tenantId: pkg.tenantId,
-          type: 'received',
-          channel: 'email',
-          sentAt: now,
-        };
-        notifications.set(notification.id, notification);
-        pkg.notifiedAt = now;
-        pkg.notificationCount = 1;
+        await prisma.packageNotification.create({
+          data: {
+            packageId: pkg.id,
+            tenantId: pkg.tenantId,
+            type: 'received',
+            channel: 'email',
+            sentAt: now,
+          },
+        });
+
+        await prisma.package.update({
+          where: { id: pkg.id },
+          data: {
+            notifiedAt: now,
+            notificationCount: 1,
+          },
+        });
       }
 
-      packages.set(pkg.id, pkg);
-      return reply.status(201).send(pkg);
+      const updatedPkg = await prisma.package.findUnique({ where: { id: pkg.id } });
+      return reply.status(201).send(updatedPkg);
     }
   );
 
@@ -488,29 +411,18 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(packages.values());
-
-      if (request.query.propertyId) {
-        results = results.filter((p) => p.propertyId === request.query.propertyId);
-      }
-      if (request.query.unitId) {
-        results = results.filter((p) => p.unitId === request.query.unitId);
-      }
-      if (request.query.tenantId) {
-        results = results.filter((p) => p.tenantId === request.query.tenantId);
-      }
-      if (request.query.status) {
-        results = results.filter((p) => p.status === request.query.status);
-      }
-      if (request.query.isOverdue === 'true') {
-        results = results.filter((p) => p.isOverdue);
-      }
-
-      return reply.send({
-        packages: results.sort(
-          (a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()
-        ),
+      const results = await prisma.package.findMany({
+        where: {
+          ...(request.query.propertyId && { propertyId: request.query.propertyId }),
+          ...(request.query.unitId && { unitId: request.query.unitId }),
+          ...(request.query.tenantId && { tenantId: request.query.tenantId }),
+          ...(request.query.status && { status: request.query.status as PackageStatus }),
+          ...(request.query.isOverdue === 'true' && { isOverdue: true }),
+        },
+        orderBy: { receivedAt: 'desc' },
       });
+
+      return reply.send({ packages: results });
     }
   );
 
@@ -518,17 +430,23 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const pkg = packages.get(request.params.id);
+      const pkg = await prisma.package.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!pkg) {
         return reply.status(404).send({ error: 'Package not found' });
       }
 
-      const locker = pkg.lockerId ? lockers.get(pkg.lockerId) : null;
-      const pkgNotifications = Array.from(notifications.values()).filter(
-        (n) => n.packageId === pkg.id
-      );
+      const locker = pkg.lockerId
+        ? await prisma.packageLocker.findUnique({ where: { id: pkg.lockerId } })
+        : null;
 
-      return reply.send({ ...pkg, locker, notifications: pkgNotifications });
+      const notifications = await prisma.packageNotification.findMany({
+        where: { packageId: pkg.id },
+      });
+
+      return reply.send({ ...pkg, locker, notifications });
     }
   );
 
@@ -542,7 +460,10 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const pkg = packages.get(request.params.id);
+      const pkg = await prisma.package.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!pkg) {
         return reply.status(404).send({ error: 'Package not found' });
       }
@@ -552,11 +473,14 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const data = PickupSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const now = new Date();
 
       // Validate proxy authorization if not the tenant
       if (data.proxyAuthorizationId) {
-        const auth = proxyAuthorizations.get(data.proxyAuthorizationId);
+        const auth = await prisma.proxyAuthorization.findUnique({
+          where: { id: data.proxyAuthorizationId },
+        });
+
         if (!auth || !auth.isActive || auth.tenantId !== pkg.tenantId) {
           return reply.status(403).send({ error: 'Invalid proxy authorization' });
         }
@@ -565,27 +489,30 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      pkg.status = 'picked_up';
-      pkg.pickedUpAt = now;
-      pkg.pickedUpBy = data.pickedUpBy;
-      pkg.signatureUrl = data.signatureUrl;
-      pkg.updatedAt = now;
+      const updated = await prisma.package.update({
+        where: { id: pkg.id },
+        data: {
+          status: 'picked_up',
+          pickedUpAt: now,
+          pickedUpBy: data.pickedUpBy,
+          signatureUrl: data.signatureUrl,
+        },
+      });
 
       // Free up locker
       if (pkg.lockerId) {
-        const locker = lockers.get(pkg.lockerId);
-        if (locker) {
-          locker.status = 'available';
-          locker.currentPackageId = undefined;
-          locker.accessCode = undefined;
-          locker.lastAccessedAt = now;
-          locker.updatedAt = now;
-          lockers.set(locker.id, locker);
-        }
+        await prisma.packageLocker.update({
+          where: { id: pkg.lockerId },
+          data: {
+            status: 'available',
+            currentPackageId: null,
+            accessCode: null,
+            lastAccessedAt: now,
+          },
+        });
       }
 
-      packages.set(pkg.id, pkg);
-      return reply.send(pkg);
+      return reply.send(updated);
     }
   );
 
@@ -599,31 +526,38 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const pkg = packages.get(request.params.id);
+      const pkg = await prisma.package.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!pkg) {
         return reply.status(404).send({ error: 'Package not found' });
       }
 
-      const now = new Date().toISOString();
-      pkg.status = 'returned';
-      pkg.returnedAt = now;
-      pkg.notes = request.body.reason || 'Returned to sender';
-      pkg.updatedAt = now;
+      const now = new Date();
+
+      const updated = await prisma.package.update({
+        where: { id: pkg.id },
+        data: {
+          status: 'returned',
+          returnedAt: now,
+          notes: request.body.reason || 'Returned to sender',
+        },
+      });
 
       // Free up locker
       if (pkg.lockerId) {
-        const locker = lockers.get(pkg.lockerId);
-        if (locker) {
-          locker.status = 'available';
-          locker.currentPackageId = undefined;
-          locker.accessCode = undefined;
-          locker.updatedAt = now;
-          lockers.set(locker.id, locker);
-        }
+        await prisma.packageLocker.update({
+          where: { id: pkg.lockerId },
+          data: {
+            status: 'available',
+            currentPackageId: null,
+            accessCode: null,
+          },
+        });
       }
 
-      packages.set(pkg.id, pkg);
-      return reply.send(pkg);
+      return reply.send(updated);
     }
   );
 
@@ -637,7 +571,10 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const pkg = packages.get(request.params.id);
+      const pkg = await prisma.package.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!pkg) {
         return reply.status(404).send({ error: 'Package not found' });
       }
@@ -645,9 +582,12 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       let forwardAddress = request.body.address;
 
       if (request.body.forwardingAddressId) {
-        const fwd = forwardingAddresses.get(request.body.forwardingAddressId);
+        const fwd = await prisma.forwardingAddress.findUnique({
+          where: { id: request.body.forwardingAddressId },
+        });
+
         if (fwd && fwd.isActive) {
-          forwardAddress = `${fwd.address.street}, ${fwd.address.city}, ${fwd.address.state} ${fwd.address.zip}`;
+          forwardAddress = `${fwd.street}, ${fwd.city}, ${fwd.state} ${fwd.zip}`;
         }
       }
 
@@ -655,25 +595,27 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Forwarding address required' });
       }
 
-      const now = new Date().toISOString();
-      pkg.status = 'forwarded';
-      pkg.forwardedTo = forwardAddress;
-      pkg.updatedAt = now;
+      const updated = await prisma.package.update({
+        where: { id: pkg.id },
+        data: {
+          status: 'forwarded',
+          forwardedTo: forwardAddress,
+        },
+      });
 
       // Free up locker
       if (pkg.lockerId) {
-        const locker = lockers.get(pkg.lockerId);
-        if (locker) {
-          locker.status = 'available';
-          locker.currentPackageId = undefined;
-          locker.accessCode = undefined;
-          locker.updatedAt = now;
-          lockers.set(locker.id, locker);
-        }
+        await prisma.packageLocker.update({
+          where: { id: pkg.lockerId },
+          data: {
+            status: 'available',
+            currentPackageId: null,
+            accessCode: null,
+          },
+        });
       }
 
-      packages.set(pkg.id, pkg);
-      return reply.send(pkg);
+      return reply.send(updated);
     }
   );
 
@@ -687,12 +629,18 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const pkg = packages.get(request.params.id);
+      const pkg = await prisma.package.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!pkg) {
         return reply.status(404).send({ error: 'Package not found' });
       }
 
-      const locker = lockers.get(request.body.lockerId);
+      const locker = await prisma.packageLocker.findUnique({
+        where: { id: request.body.lockerId },
+      });
+
       if (!locker) {
         return reply.status(404).send({ error: 'Locker not found' });
       }
@@ -701,23 +649,27 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Locker not available' });
       }
 
-      const now = new Date().toISOString();
       const accessCode = generateAccessCode();
 
-      pkg.lockerId = locker.id;
-      pkg.accessCode = accessCode;
-      pkg.status = 'stored';
-      pkg.updatedAt = now;
+      const updatedPkg = await prisma.package.update({
+        where: { id: pkg.id },
+        data: {
+          lockerId: locker.id,
+          accessCode,
+          status: 'stored',
+        },
+      });
 
-      locker.status = 'occupied';
-      locker.currentPackageId = pkg.id;
-      locker.accessCode = accessCode;
-      locker.updatedAt = now;
+      const updatedLocker = await prisma.packageLocker.update({
+        where: { id: locker.id },
+        data: {
+          status: 'occupied',
+          currentPackageId: pkg.id,
+          accessCode,
+        },
+      });
 
-      packages.set(pkg.id, pkg);
-      lockers.set(locker.id, locker);
-
-      return reply.send({ package: pkg, locker });
+      return reply.send({ package: updatedPkg, locker: updatedLocker });
     }
   );
 
@@ -725,25 +677,32 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/:id/remind',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const pkg = packages.get(request.params.id);
+      const pkg = await prisma.package.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!pkg) {
         return reply.status(404).send({ error: 'Package not found' });
       }
 
-      const now = new Date().toISOString();
-      const notification: PackageNotification = {
-        id: `notif_${Date.now()}`,
-        packageId: pkg.id,
-        tenantId: pkg.tenantId,
-        type: 'reminder',
-        channel: 'email',
-        sentAt: now,
-      };
+      const now = new Date();
 
-      notifications.set(notification.id, notification);
-      pkg.notificationCount++;
-      pkg.updatedAt = now;
-      packages.set(pkg.id, pkg);
+      const notification = await prisma.packageNotification.create({
+        data: {
+          packageId: pkg.id,
+          tenantId: pkg.tenantId,
+          type: 'reminder',
+          channel: 'email',
+          sentAt: now,
+        },
+      });
+
+      await prisma.package.update({
+        where: { id: pkg.id },
+        data: {
+          notificationCount: { increment: 1 },
+        },
+      });
 
       return reply.send({ message: 'Reminder sent', notification });
     }
@@ -758,9 +717,9 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const propertyPackages = Array.from(packages.values()).filter(
-        (p) => p.propertyId === request.query.propertyId
-      );
+      const propertyPackages = await prisma.package.findMany({
+        where: { propertyId: request.query.propertyId },
+      });
 
       const stats = calculatePackageStats(
         propertyPackages,
@@ -768,7 +727,7 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
         request.query.endDate
       );
 
-      const lockerUtil = getLockerUtilization(request.query.propertyId);
+      const lockerUtil = await getLockerUtilization(request.query.propertyId);
 
       return reply.send({ ...stats, lockerUtilization: lockerUtil });
     }
@@ -786,26 +745,30 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = SettingsSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const existing = Array.from(packageSettings.values()).find(
-        (s) => s.propertyId === data.propertyId
-      );
+      const settings = await prisma.packageSettings.upsert({
+        where: { propertyId: data.propertyId },
+        update: {
+          holdDays: data.holdDays,
+          overdueReminderDays: data.overdueReminderDays,
+          requireSignature: data.requireSignature,
+          allowProxyPickup: data.allowProxyPickup,
+          notifyOnReceive: data.notifyOnReceive,
+          notifyOnOverdue: data.notifyOnOverdue,
+          autoAssignLocker: data.autoAssignLocker,
+        },
+        create: {
+          propertyId: data.propertyId,
+          holdDays: data.holdDays,
+          overdueReminderDays: data.overdueReminderDays,
+          requireSignature: data.requireSignature,
+          allowProxyPickup: data.allowProxyPickup,
+          notifyOnReceive: data.notifyOnReceive,
+          notifyOnOverdue: data.notifyOnOverdue,
+          autoAssignLocker: data.autoAssignLocker,
+        },
+      });
 
-      if (existing) {
-        Object.assign(existing, data, { updatedAt: now });
-        packageSettings.set(existing.id, existing);
-        return reply.send(existing);
-      }
-
-      const settings: PackageSettings = {
-        id: `settings_${Date.now()}`,
-        ...data,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      packageSettings.set(settings.id, settings);
       return reply.status(201).send(settings);
     }
   );
@@ -813,9 +776,9 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/settings/:propertyId',
     async (request: FastifyRequest<{ Params: { propertyId: string } }>, reply) => {
-      const settings = Array.from(packageSettings.values()).find(
-        (s) => s.propertyId === request.params.propertyId
-      );
+      const settings = await prisma.packageSettings.findUnique({
+        where: { propertyId: request.params.propertyId },
+      });
 
       if (!settings) {
         return reply.status(404).send({ error: 'Settings not found' });
@@ -838,14 +801,18 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
     ) => {
       const data = ProxyAuthSchema.parse(request.body);
 
-      const auth: ProxyAuthorization = {
-        id: `proxy_${Date.now()}`,
-        ...data,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-      };
+      const auth = await prisma.proxyAuthorization.create({
+        data: {
+          tenantId: data.tenantId,
+          authorizedPersonName: data.authorizedPersonName,
+          relationship: data.relationship,
+          photoIdUrl: data.photoIdUrl,
+          validFrom: new Date(data.validFrom),
+          validUntil: data.validUntil ? new Date(data.validUntil) : null,
+          isActive: true,
+        },
+      });
 
-      proxyAuthorizations.set(auth.id, auth);
       return reply.status(201).send(auth);
     }
   );
@@ -857,11 +824,11 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       request: FastifyRequest<{ Querystring: { tenantId?: string } }>,
       reply
     ) => {
-      let results = Array.from(proxyAuthorizations.values());
-
-      if (request.query.tenantId) {
-        results = results.filter((a) => a.tenantId === request.query.tenantId);
-      }
+      const results = await prisma.proxyAuthorization.findMany({
+        where: {
+          ...(request.query.tenantId && { tenantId: request.query.tenantId }),
+        },
+      });
 
       return reply.send({ authorizations: results });
     }
@@ -871,14 +838,15 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
   app.delete(
     '/proxy-auth/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const auth = proxyAuthorizations.get(request.params.id);
-      if (!auth) {
+      try {
+        await prisma.proxyAuthorization.update({
+          where: { id: request.params.id },
+          data: { isActive: false },
+        });
+        return reply.send({ message: 'Authorization revoked' });
+      } catch {
         return reply.status(404).send({ error: 'Authorization not found' });
       }
-
-      auth.isActive = false;
-      proxyAuthorizations.set(auth.id, auth);
-      return reply.send({ message: 'Authorization revoked' });
     }
   );
 
@@ -895,14 +863,19 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
     ) => {
       const data = ForwardingSchema.parse(request.body);
 
-      const forwarding: ForwardingAddress = {
-        id: `fwd_${Date.now()}`,
-        ...data,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-      };
+      const forwarding = await prisma.forwardingAddress.create({
+        data: {
+          tenantId: data.tenantId,
+          street: data.address.street,
+          city: data.address.city,
+          state: data.address.state,
+          zip: data.address.zip,
+          startDate: new Date(data.startDate),
+          endDate: data.endDate ? new Date(data.endDate) : null,
+          isActive: true,
+        },
+      });
 
-      forwardingAddresses.set(forwarding.id, forwarding);
       return reply.status(201).send(forwarding);
     }
   );
@@ -911,9 +884,12 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/forwarding/:tenantId',
     async (request: FastifyRequest<{ Params: { tenantId: string } }>, reply) => {
-      const forwarding = Array.from(forwardingAddresses.values()).find(
-        (f) => f.tenantId === request.params.tenantId && f.isActive
-      );
+      const forwarding = await prisma.forwardingAddress.findFirst({
+        where: {
+          tenantId: request.params.tenantId,
+          isActive: true,
+        },
+      });
 
       if (!forwarding) {
         return reply.status(404).send({ error: 'Forwarding address not found' });
@@ -927,15 +903,15 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
   app.delete(
     '/forwarding/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const forwarding = forwardingAddresses.get(request.params.id);
-      if (!forwarding) {
+      try {
+        await prisma.forwardingAddress.update({
+          where: { id: request.params.id },
+          data: { isActive: false },
+        });
+        return reply.send({ message: 'Forwarding cancelled' });
+      } catch {
         return reply.status(404).send({ error: 'Forwarding address not found' });
       }
-
-      forwarding.isActive = false;
-      forwardingAddresses.set(forwarding.id, forwarding);
-      return reply.send({ message: 'Forwarding cancelled' });
     }
   );
 }
-

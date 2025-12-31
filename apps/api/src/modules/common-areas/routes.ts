@@ -1,199 +1,18 @@
 import { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-type AreaType = 'party_room' | 'conference_room' | 'rooftop' | 'courtyard' | 'bbq_area' | 'theater' | 'game_room' | 'business_center' | 'lounge' | 'kitchen' | 'laundry' | 'other';
-type AreaStatus = 'available' | 'reserved' | 'occupied' | 'maintenance' | 'closed';
-type ReservationStatus = 'pending' | 'confirmed' | 'checked_in' | 'completed' | 'cancelled' | 'no_show';
-type EventType = 'private' | 'community' | 'management' | 'maintenance';
-
-export interface CommonArea {
-  id: string;
-  propertyId: string;
-  name: string;
-  type: AreaType;
-  status: AreaStatus;
-  description?: string;
-  location: string;
-  floor?: number;
-  capacity: number;
-  squareFeet?: number;
-  amenities: string[];
-  equipment: string[];
-  rules: string[];
-  images?: string[];
-  requiresApproval: boolean;
-  requiresDeposit: boolean;
-  depositAmount?: number;
-  hourlyRate?: number;
-  minimumHours?: number;
-  maximumHours?: number;
-  advanceBookingDays: number;
-  cancellationHours: number;
-  cleanupTimeMinutes: number;
-  operatingHours: {
-    dayOfWeek: number;
-    openTime: string;
-    closeTime: string;
-    isClosed: boolean;
-  }[];
-  blackoutDates?: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AreaReservation {
-  id: string;
-  areaId: string;
-  propertyId: string;
-  tenantId: string;
-  eventType: EventType;
-  eventName?: string;
-  eventDescription?: string;
-  status: ReservationStatus;
-  date: string;
-  startTime: string;
-  endTime: string;
-  setupTime?: string;
-  expectedGuests: number;
-  actualGuests?: number;
-  depositAmount?: number;
-  depositPaid: boolean;
-  depositRefunded: boolean;
-  rentalFee?: number;
-  feePaid: boolean;
-  confirmationCode: string;
-  specialRequests?: string;
-  equipmentRequested?: string[];
-  cateringApproved?: boolean;
-  alcoholApproved?: boolean;
-  checkedInAt?: string;
-  checkedOutAt?: string;
-  cleanupCompleted?: boolean;
-  damageReported?: boolean;
-  damageNotes?: string;
-  damageCharges?: number;
-  cancellationReason?: string;
-  cancelledAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AreaAvailability {
-  id: string;
-  areaId: string;
-  date: string;
-  slots: {
-    startTime: string;
-    endTime: string;
-    isAvailable: boolean;
-    reservationId?: string;
-  }[];
-  isBlackout: boolean;
-  specialHours?: {
-    openTime: string;
-    closeTime: string;
-  };
-  createdAt: string;
-}
-
-export interface AreaWaitlist {
-  id: string;
-  areaId: string;
-  propertyId: string;
-  tenantId: string;
-  preferredDate: string;
-  preferredStartTime: string;
-  preferredEndTime: string;
-  alternativeDates?: string[];
-  expectedGuests: number;
-  eventType: EventType;
-  priority: number;
-  status: 'waiting' | 'offered' | 'accepted' | 'declined' | 'expired';
-  offerExpiresAt?: string;
-  notes?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AreaIncident {
-  id: string;
-  areaId: string;
-  reservationId?: string;
-  propertyId: string;
-  reportedBy: string;
-  incidentType: 'damage' | 'noise_complaint' | 'rule_violation' | 'safety_issue' | 'cleanup_issue' | 'other';
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  description: string;
-  photos?: string[];
-  witnesses?: string[];
-  actionTaken?: string;
-  charges?: number;
-  chargesPaid: boolean;
-  status: 'reported' | 'investigating' | 'resolved' | 'closed';
-  resolvedAt?: string;
-  resolvedBy?: string;
-  resolution?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AreaRating {
-  id: string;
-  areaId: string;
-  reservationId: string;
-  tenantId: string;
-  overallRating: number;
-  cleanlinessRating?: number;
-  amenitiesRating?: number;
-  equipmentRating?: number;
-  comment?: string;
-  wouldRecommend: boolean;
-  createdAt: string;
-}
-
-export interface CommunityEvent {
-  id: string;
-  areaId?: string;
-  propertyId: string;
-  name: string;
-  description: string;
-  eventType: 'social' | 'educational' | 'fitness' | 'meeting' | 'holiday' | 'maintenance_notice';
-  date: string;
-  startTime: string;
-  endTime: string;
-  location: string;
-  organizer: string;
-  maxAttendees?: number;
-  currentAttendees: number;
-  rsvpRequired: boolean;
-  rsvpDeadline?: string;
-  cost?: number;
-  isRecurring: boolean;
-  recurrence?: {
-    frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly';
-    endDate?: string;
-  };
-  status: 'scheduled' | 'cancelled' | 'completed';
-  attendees: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-// ============================================================================
-// IN-MEMORY STORES
-// ============================================================================
-
-export const commonAreas = new Map<string, CommonArea>();
-export const areaReservations = new Map<string, AreaReservation>();
-export const areaAvailabilities = new Map<string, AreaAvailability>();
-export const areaWaitlists = new Map<string, AreaWaitlist>();
-export const areaIncidents = new Map<string, AreaIncident>();
-export const areaRatings = new Map<string, AreaRating>();
-export const communityEvents = new Map<string, CommunityEvent>();
+import {
+  prisma,
+  type CommonAreaType,
+  type CommonAreaStatus,
+  type ReservationEventType,
+  type ReservationStatus,
+  type WaitlistStatus,
+  type AreaIncidentType,
+  type AreaIncidentSeverity,
+  type AreaIncidentStatus,
+  type CommunityEventType,
+  type CommunityEventStatus,
+} from '@realriches/database';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -208,19 +27,44 @@ export function generateConfirmationCode(): string {
   return code;
 }
 
-export function getOperatingHoursForDay(area: CommonArea, dayOfWeek: number): { openTime: string; closeTime: string; isClosed: boolean } | null {
-  const hours = area.operatingHours.find((h) => h.dayOfWeek === dayOfWeek);
+interface OperatingHours {
+  dayOfWeek: number;
+  openTime: string;
+  closeTime: string;
+  isClosed: boolean;
+}
+
+interface CommonAreaWithOperatingHours {
+  operatingHours: OperatingHours[] | null;
+  blackoutDates: string[];
+  cleanupTimeMinutes: number;
+  cancellationHours: number;
+  capacity: number;
+  hourlyRate: { toNumber: () => number } | null;
+  requiresDeposit: boolean;
+  depositAmount: { toNumber: () => number } | null;
+}
+
+export function getOperatingHoursForDay(
+  area: CommonAreaWithOperatingHours,
+  dayOfWeek: number
+): OperatingHours | null {
+  if (!area.operatingHours || !Array.isArray(area.operatingHours)) return null;
+  const hours = (area.operatingHours as OperatingHours[]).find((h) => h.dayOfWeek === dayOfWeek);
   return hours || null;
 }
 
-export function isTimeSlotAvailable(
+export async function isTimeSlotAvailable(
   areaId: string,
   date: string,
   startTime: string,
   endTime: string,
   excludeReservationId?: string
-): boolean {
-  const area = commonAreas.get(areaId);
+): Promise<boolean> {
+  const area = await prisma.commonArea.findUnique({
+    where: { id: areaId },
+  });
+
   if (!area) return false;
 
   // Check if date is blackout
@@ -230,7 +74,7 @@ export function isTimeSlotAvailable(
 
   // Check operating hours
   const dayOfWeek = new Date(date).getDay();
-  const hours = getOperatingHoursForDay(area, dayOfWeek);
+  const hours = getOperatingHoursForDay(area as CommonAreaWithOperatingHours, dayOfWeek);
   if (!hours || hours.isClosed) {
     return false;
   }
@@ -240,19 +84,21 @@ export function isTimeSlotAvailable(
   }
 
   // Check existing reservations
-  const reservations = Array.from(areaReservations.values()).filter(
-    (r) =>
-      r.areaId === areaId &&
-      r.date === date &&
-      r.status !== 'cancelled' &&
-      r.status !== 'no_show' &&
-      r.id !== excludeReservationId
-  );
+  const reservationDate = new Date(date);
+  const reservations = await prisma.commonAreaBooking.findMany({
+    where: {
+      areaId,
+      date: reservationDate,
+      status: {
+        notIn: ['cancelled', 'no_show'],
+      },
+      ...(excludeReservationId && { id: { not: excludeReservationId } }),
+    },
+  });
 
   for (const res of reservations) {
     // Include cleanup time
-    const area = commonAreas.get(areaId);
-    const cleanupMinutes = area?.cleanupTimeMinutes || 0;
+    const cleanupMinutes = area.cleanupTimeMinutes || 0;
     const resEndWithCleanup = addMinutesToTime(res.endTime, cleanupMinutes);
 
     // Check overlap
@@ -277,7 +123,7 @@ export function addMinutesToTime(time: string, minutes: number): string {
 }
 
 export function calculateReservationFee(
-  area: CommonArea,
+  area: CommonAreaWithOperatingHours,
   startTime: string,
   endTime: string
 ): { fee: number; hours: number } {
@@ -293,21 +139,24 @@ export function calculateReservationFee(
   const durationMinutes = endMinutes - startMinutes;
   const hours = Math.ceil(durationMinutes / 60);
 
-  const fee = hours * area.hourlyRate;
+  const fee = hours * area.hourlyRate.toNumber();
 
   return { fee, hours };
 }
 
-export function getAvailableSlots(
+export async function getAvailableSlots(
   areaId: string,
   date: string,
   slotDurationMinutes: number = 60
-): { startTime: string; endTime: string; isAvailable: boolean }[] {
-  const area = commonAreas.get(areaId);
+): Promise<{ startTime: string; endTime: string; isAvailable: boolean }[]> {
+  const area = await prisma.commonArea.findUnique({
+    where: { id: areaId },
+  });
+
   if (!area) return [];
 
   const dayOfWeek = new Date(date).getDay();
-  const hours = getOperatingHoursForDay(area, dayOfWeek);
+  const hours = getOperatingHoursForDay(area as CommonAreaWithOperatingHours, dayOfWeek);
 
   if (!hours || hours.isClosed) {
     return [];
@@ -320,7 +169,7 @@ export function getAvailableSlots(
     const endTime = addMinutesToTime(currentTime, slotDurationMinutes);
     if (endTime > hours.closeTime) break;
 
-    const isAvailable = isTimeSlotAvailable(areaId, date, currentTime, endTime);
+    const isAvailable = await isTimeSlotAvailable(areaId, date, currentTime, endTime);
     slots.push({
       startTime: currentTime,
       endTime,
@@ -333,11 +182,11 @@ export function getAvailableSlots(
   return slots;
 }
 
-export function getAreaUtilization(
+export async function getAreaUtilization(
   areaId: string,
   startDate?: string,
   endDate?: string
-): {
+): Promise<{
   totalReservations: number;
   completedReservations: number;
   cancelledReservations: number;
@@ -347,17 +196,19 @@ export function getAreaUtilization(
   utilizationRate: number;
   totalRevenue: number;
   averageRating: number;
-} {
-  let reservations = Array.from(areaReservations.values()).filter(
-    (r) => r.areaId === areaId
-  );
+}> {
+  const where: Parameters<typeof prisma.commonAreaBooking.findMany>[0]['where'] = {
+    areaId,
+  };
 
   if (startDate) {
-    reservations = reservations.filter((r) => r.date >= startDate);
+    where.date = { gte: new Date(startDate) };
   }
   if (endDate) {
-    reservations = reservations.filter((r) => r.date <= endDate);
+    where.date = { ...where.date, lte: new Date(endDate) };
   }
+
+  const reservations = await prisma.commonAreaBooking.findMany({ where });
 
   const totalReservations = reservations.length;
   const completedReservations = reservations.filter((r) => r.status === 'completed').length;
@@ -376,7 +227,7 @@ export function getAreaUtilization(
       totalGuests += r.actualGuests || r.expectedGuests;
     }
     if (r.feePaid && r.rentalFee) {
-      totalRevenue += r.rentalFee;
+      totalRevenue += r.rentalFee.toNumber();
     }
   });
 
@@ -389,12 +240,13 @@ export function getAreaUtilization(
     : 0;
 
   // Calculate utilization rate (simplified)
-  const area = commonAreas.get(areaId);
   const totalAvailableHours = 8 * 30; // Assume 8 hours/day * 30 days
   const utilizationRate = Math.round((totalHoursBooked / totalAvailableHours) * 100);
 
   // Get average rating
-  const ratings = Array.from(areaRatings.values()).filter((r) => r.areaId === areaId);
+  const ratings = await prisma.areaRating.findMany({
+    where: { areaId },
+  });
   const averageRating = ratings.length > 0
     ? Math.round((ratings.reduce((sum, r) => sum + r.overallRating, 0) / ratings.length) * 10) / 10
     : 0;
@@ -412,10 +264,17 @@ export function getAreaUtilization(
   };
 }
 
-export function checkCancellationEligibility(
-  reservation: AreaReservation
-): { eligible: boolean; refundEligible: boolean; reason?: string } {
-  const area = commonAreas.get(reservation.areaId);
+export async function checkCancellationEligibility(
+  reservation: Awaited<ReturnType<typeof prisma.commonAreaBooking.findUnique>>
+): Promise<{ eligible: boolean; refundEligible: boolean; reason?: string }> {
+  if (!reservation) {
+    return { eligible: false, refundEligible: false, reason: 'Reservation not found' };
+  }
+
+  const area = await prisma.commonArea.findUnique({
+    where: { id: reservation.areaId },
+  });
+
   if (!area) {
     return { eligible: false, refundEligible: false, reason: 'Area not found' };
   }
@@ -429,7 +288,9 @@ export function checkCancellationEligibility(
   }
 
   const now = new Date();
-  const reservationDateTime = new Date(`${reservation.date}T${reservation.startTime}`);
+  const reservationDateTime = new Date(reservation.date);
+  const [hours, mins] = reservation.startTime.split(':').map(Number);
+  reservationDateTime.setHours(hours, mins);
   const hoursUntil = (reservationDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
 
   if (hoursUntil < 0) {
@@ -450,11 +311,11 @@ export function checkCancellationEligibility(
 // ============================================================================
 
 const AreaSchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   name: z.string(),
   type: z.enum(['party_room', 'conference_room', 'rooftop', 'courtyard', 'bbq_area', 'theater', 'game_room', 'business_center', 'lounge', 'kitchen', 'laundry', 'other']),
   description: z.string().optional(),
-  location: z.string(),
+  location: z.string().optional(),
   floor: z.number().int().optional(),
   capacity: z.number().int().positive(),
   squareFeet: z.number().positive().optional(),
@@ -476,14 +337,14 @@ const AreaSchema = z.object({
     openTime: z.string(),
     closeTime: z.string(),
     isClosed: z.boolean().default(false),
-  })),
+  })).optional(),
   blackoutDates: z.array(z.string()).optional(),
 });
 
 const ReservationSchema = z.object({
-  areaId: z.string(),
-  propertyId: z.string(),
-  tenantId: z.string(),
+  areaId: z.string().uuid(),
+  propertyId: z.string().uuid(),
+  tenantId: z.string().uuid(),
   eventType: z.enum(['private', 'community', 'management', 'maintenance']),
   eventName: z.string().optional(),
   eventDescription: z.string().optional(),
@@ -499,9 +360,9 @@ const ReservationSchema = z.object({
 });
 
 const WaitlistSchema = z.object({
-  areaId: z.string(),
-  propertyId: z.string(),
-  tenantId: z.string(),
+  areaId: z.string().uuid(),
+  propertyId: z.string().uuid(),
+  tenantId: z.string().uuid(),
   preferredDate: z.string(),
   preferredStartTime: z.string(),
   preferredEndTime: z.string(),
@@ -512,10 +373,10 @@ const WaitlistSchema = z.object({
 });
 
 const IncidentSchema = z.object({
-  areaId: z.string(),
-  reservationId: z.string().optional(),
-  propertyId: z.string(),
-  reportedBy: z.string(),
+  areaId: z.string().uuid(),
+  reservationId: z.string().uuid().optional(),
+  propertyId: z.string().uuid(),
+  reportedBy: z.string().uuid(),
   incidentType: z.enum(['damage', 'noise_complaint', 'rule_violation', 'safety_issue', 'cleanup_issue', 'other']),
   severity: z.enum(['low', 'medium', 'high', 'critical']),
   description: z.string(),
@@ -524,9 +385,9 @@ const IncidentSchema = z.object({
 });
 
 const RatingSchema = z.object({
-  areaId: z.string(),
-  reservationId: z.string(),
-  tenantId: z.string(),
+  areaId: z.string().uuid(),
+  reservationId: z.string().uuid(),
+  tenantId: z.string().uuid(),
   overallRating: z.number().min(1).max(5),
   cleanlinessRating: z.number().min(1).max(5).optional(),
   amenitiesRating: z.number().min(1).max(5).optional(),
@@ -536,8 +397,8 @@ const RatingSchema = z.object({
 });
 
 const CommunityEventSchema = z.object({
-  areaId: z.string().optional(),
-  propertyId: z.string(),
+  areaId: z.string().uuid().optional(),
+  propertyId: z.string().uuid(),
   name: z.string(),
   description: z.string(),
   eventType: z.enum(['social', 'educational', 'fitness', 'meeting', 'holiday', 'maintenance_notice']),
@@ -574,17 +435,36 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = AreaSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const area: CommonArea = {
-        id: `car_${Date.now()}`,
-        ...data,
-        status: 'available',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const area = await prisma.commonArea.create({
+        data: {
+          propertyId: data.propertyId,
+          name: data.name,
+          type: data.type as CommonAreaType,
+          status: 'available',
+          description: data.description,
+          location: data.location,
+          floor: data.floor,
+          capacity: data.capacity,
+          squareFeet: data.squareFeet,
+          amenities: data.amenities,
+          equipment: data.equipment,
+          rules: data.rules,
+          images: data.images || [],
+          requiresApproval: data.requiresApproval,
+          requiresDeposit: data.requiresDeposit,
+          depositAmount: data.depositAmount,
+          hourlyRate: data.hourlyRate,
+          minimumHours: data.minimumHours,
+          maximumHours: data.maximumHours,
+          advanceBookingDays: data.advanceBookingDays,
+          cancellationHours: data.cancellationHours,
+          cleanupTimeMinutes: data.cleanupTimeMinutes,
+          operatingHours: data.operatingHours as object | undefined,
+          blackoutDates: data.blackoutDates || [],
+        },
+      });
 
-      commonAreas.set(area.id, area);
       return reply.status(201).send(area);
     }
   );
@@ -594,22 +474,23 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
     '/areas',
     async (
       request: FastifyRequest<{
-        Querystring: { propertyId?: string; type?: AreaType; status?: AreaStatus };
+        Querystring: { propertyId?: string; type?: CommonAreaType; status?: CommonAreaStatus };
       }>,
       reply
     ) => {
-      let areas = Array.from(commonAreas.values());
+      const where: Parameters<typeof prisma.commonArea.findMany>[0]['where'] = {};
 
       if (request.query.propertyId) {
-        areas = areas.filter((a) => a.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.type) {
-        areas = areas.filter((a) => a.type === request.query.type);
+        where.type = request.query.type;
       }
       if (request.query.status) {
-        areas = areas.filter((a) => a.status === request.query.status);
+        where.status = request.query.status;
       }
 
+      const areas = await prisma.commonArea.findMany({ where });
       return reply.send(areas);
     }
   );
@@ -618,7 +499,10 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/areas/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const area = commonAreas.get(request.params.id);
+      const area = await prisma.commonArea.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!area) {
         return reply.status(404).send({ error: 'Area not found' });
       }
@@ -632,22 +516,27 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
     async (
       request: FastifyRequest<{
         Params: { id: string };
-        Body: Partial<CommonArea>;
+        Body: Partial<z.infer<typeof AreaSchema>>;
       }>,
       reply
     ) => {
-      const area = commonAreas.get(request.params.id);
+      const area = await prisma.commonArea.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!area) {
         return reply.status(404).send({ error: 'Area not found' });
       }
 
-      const updated: CommonArea = {
-        ...area,
-        ...request.body,
-        updatedAt: new Date().toISOString(),
-      };
+      const { operatingHours, ...rest } = request.body;
+      const updated = await prisma.commonArea.update({
+        where: { id: request.params.id },
+        data: {
+          ...rest,
+          ...(operatingHours && { operatingHours: operatingHours as object }),
+        },
+      });
 
-      commonAreas.set(area.id, updated);
       return reply.send(updated);
     }
   );
@@ -662,7 +551,7 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const utilization = getAreaUtilization(
+      const utilization = await getAreaUtilization(
         request.params.id,
         request.query.startDate,
         request.query.endDate
@@ -685,7 +574,7 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
         ? parseInt(request.query.slotDuration)
         : 60;
 
-      const slots = getAvailableSlots(request.params.id, request.query.date, slotDuration);
+      const slots = await getAvailableSlots(request.params.id, request.query.date, slotDuration);
       return reply.send({ date: request.query.date, slots });
     }
   );
@@ -702,15 +591,18 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = ReservationSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const area = commonAreas.get(data.areaId);
+      const area = await prisma.commonArea.findUnique({
+        where: { id: data.areaId },
+      });
+
       if (!area) {
         return reply.status(404).send({ error: 'Area not found' });
       }
 
       // Check availability
-      if (!isTimeSlotAvailable(data.areaId, data.date, data.startTime, data.endTime)) {
+      const available = await isTimeSlotAvailable(data.areaId, data.date, data.startTime, data.endTime);
+      if (!available) {
         return reply.status(400).send({ error: 'Time slot is not available' });
       }
 
@@ -729,7 +621,7 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Calculate fee
-      const { fee, hours } = calculateReservationFee(area, data.startTime, data.endTime);
+      const { fee, hours } = calculateReservationFee(area as CommonAreaWithOperatingHours, data.startTime, data.endTime);
 
       // Check minimum/maximum hours
       if (area.minimumHours && hours < area.minimumHours) {
@@ -743,21 +635,33 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const reservation: AreaReservation = {
-        id: `res_${Date.now()}`,
-        ...data,
-        status: area.requiresApproval ? 'pending' : 'confirmed',
-        depositAmount: area.requiresDeposit ? area.depositAmount : undefined,
-        depositPaid: false,
-        depositRefunded: false,
-        rentalFee: fee,
-        feePaid: false,
-        confirmationCode: generateConfirmationCode(),
-        createdAt: now,
-        updatedAt: now,
-      };
+      const reservation = await prisma.commonAreaBooking.create({
+        data: {
+          areaId: data.areaId,
+          propertyId: data.propertyId,
+          tenantId: data.tenantId,
+          eventType: data.eventType as ReservationEventType,
+          eventName: data.eventName,
+          eventDescription: data.eventDescription,
+          status: area.requiresApproval ? 'pending' : 'confirmed',
+          date: reservationDate,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          setupTime: data.setupTime,
+          expectedGuests: data.expectedGuests,
+          depositAmount: area.requiresDeposit ? area.depositAmount : null,
+          depositPaid: false,
+          depositRefunded: false,
+          rentalFee: fee,
+          feePaid: false,
+          confirmationCode: generateConfirmationCode(),
+          specialRequests: data.specialRequests,
+          equipmentRequested: data.equipmentRequested || [],
+          cateringApproved: data.cateringApproved,
+          alcoholApproved: data.alcoholApproved,
+        },
+      });
 
-      areaReservations.set(reservation.id, reservation);
       return reply.status(201).send(reservation);
     }
   );
@@ -779,30 +683,31 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let reservations = Array.from(areaReservations.values());
+      const where: Parameters<typeof prisma.commonAreaBooking.findMany>[0]['where'] = {};
 
       if (request.query.areaId) {
-        reservations = reservations.filter((r) => r.areaId === request.query.areaId);
+        where.areaId = request.query.areaId;
       }
       if (request.query.propertyId) {
-        reservations = reservations.filter((r) => r.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.tenantId) {
-        reservations = reservations.filter((r) => r.tenantId === request.query.tenantId);
+        where.tenantId = request.query.tenantId;
       }
       if (request.query.status) {
-        reservations = reservations.filter((r) => r.status === request.query.status);
+        where.status = request.query.status;
       }
       if (request.query.date) {
-        reservations = reservations.filter((r) => r.date === request.query.date);
+        where.date = new Date(request.query.date);
       }
-      if (request.query.startDate) {
-        reservations = reservations.filter((r) => r.date >= request.query.startDate!);
-      }
-      if (request.query.endDate) {
-        reservations = reservations.filter((r) => r.date <= request.query.endDate!);
+      if (request.query.startDate || request.query.endDate) {
+        where.date = {
+          ...(request.query.startDate && { gte: new Date(request.query.startDate) }),
+          ...(request.query.endDate && { lte: new Date(request.query.endDate) }),
+        };
       }
 
+      const reservations = await prisma.commonAreaBooking.findMany({ where });
       return reply.send(reservations);
     }
   );
@@ -811,7 +716,10 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/reservations/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const reservation = areaReservations.get(request.params.id);
+      const reservation = await prisma.commonAreaBooking.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!reservation) {
         return reply.status(404).send({ error: 'Reservation not found' });
       }
@@ -823,7 +731,10 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/reservations/:id/approve',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const reservation = areaReservations.get(request.params.id);
+      const reservation = await prisma.commonAreaBooking.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!reservation) {
         return reply.status(404).send({ error: 'Reservation not found' });
       }
@@ -832,11 +743,12 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(400).send({ error: 'Reservation is not pending approval' });
       }
 
-      reservation.status = 'confirmed';
-      reservation.updatedAt = new Date().toISOString();
+      const updated = await prisma.commonAreaBooking.update({
+        where: { id: request.params.id },
+        data: { status: 'confirmed' },
+      });
 
-      areaReservations.set(reservation.id, reservation);
-      return reply.send(reservation);
+      return reply.send(updated);
     }
   );
 
@@ -850,30 +762,32 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const reservation = areaReservations.get(request.params.id);
+      const reservation = await prisma.commonAreaBooking.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!reservation) {
         return reply.status(404).send({ error: 'Reservation not found' });
       }
 
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      reservation.status = 'checked_in';
-      reservation.checkedInAt = now;
-      if (request.body.actualGuests) {
-        reservation.actualGuests = request.body.actualGuests;
-      }
-      reservation.updatedAt = now;
+      const updated = await prisma.commonAreaBooking.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'checked_in',
+          checkedInAt: now,
+          actualGuests: request.body.actualGuests,
+        },
+      });
 
       // Update area status
-      const area = commonAreas.get(reservation.areaId);
-      if (area) {
-        area.status = 'occupied';
-        area.updatedAt = now;
-        commonAreas.set(area.id, area);
-      }
+      await prisma.commonArea.update({
+        where: { id: reservation.areaId },
+        data: { status: 'occupied' },
+      });
 
-      areaReservations.set(reservation.id, reservation);
-      return reply.send(reservation);
+      return reply.send(updated);
     }
   );
 
@@ -887,31 +801,33 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const reservation = areaReservations.get(request.params.id);
+      const reservation = await prisma.commonAreaBooking.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!reservation) {
         return reply.status(404).send({ error: 'Reservation not found' });
       }
 
-      const now = new Date().toISOString();
-
-      reservation.status = 'completed';
-      reservation.checkedOutAt = now;
-      reservation.cleanupCompleted = request.body.cleanupCompleted;
-      reservation.damageReported = request.body.damageReported;
-      reservation.damageNotes = request.body.damageNotes;
-      reservation.damageCharges = request.body.damageCharges;
-      reservation.updatedAt = now;
+      const updated = await prisma.commonAreaBooking.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'completed',
+          checkedOutAt: new Date(),
+          cleanupCompleted: request.body.cleanupCompleted,
+          damageReported: request.body.damageReported,
+          damageNotes: request.body.damageNotes,
+          damageCharges: request.body.damageCharges,
+        },
+      });
 
       // Update area status
-      const area = commonAreas.get(reservation.areaId);
-      if (area) {
-        area.status = 'available';
-        area.updatedAt = now;
-        commonAreas.set(area.id, area);
-      }
+      await prisma.commonArea.update({
+        where: { id: reservation.areaId },
+        data: { status: 'available' },
+      });
 
-      areaReservations.set(reservation.id, reservation);
-      return reply.send(reservation);
+      return reply.send(updated);
     }
   );
 
@@ -925,50 +841,56 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const reservation = areaReservations.get(request.params.id);
+      const reservation = await prisma.commonAreaBooking.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!reservation) {
         return reply.status(404).send({ error: 'Reservation not found' });
       }
 
-      const eligibility = checkCancellationEligibility(reservation);
+      const eligibility = await checkCancellationEligibility(reservation);
       if (!eligibility.eligible) {
         return reply.status(400).send({ error: eligibility.reason });
       }
 
-      const now = new Date().toISOString();
+      const now = new Date();
 
-      reservation.status = 'cancelled';
-      reservation.cancellationReason = request.body.reason;
-      reservation.cancelledAt = now;
-      if (eligibility.refundEligible && reservation.depositPaid) {
-        reservation.depositRefunded = true;
-      }
-      reservation.updatedAt = now;
+      const updated = await prisma.commonAreaBooking.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'cancelled',
+          cancellationReason: request.body.reason,
+          cancelledAt: now,
+          depositRefunded: eligibility.refundEligible && reservation.depositPaid,
+        },
+      });
 
-      areaReservations.set(reservation.id, reservation);
-
-      // Check waitlist
-      const waitlistEntries = Array.from(areaWaitlists.values())
-        .filter(
-          (w) =>
-            w.areaId === reservation.areaId &&
-            w.preferredDate === reservation.date &&
-            w.status === 'waiting'
-        )
-        .sort((a, b) => a.priority - b.priority);
+      // Check waitlist and offer to next person
+      const waitlistEntries = await prisma.areaWaitlist.findMany({
+        where: {
+          areaId: reservation.areaId,
+          preferredDate: reservation.date,
+          status: 'waiting',
+        },
+        orderBy: { priority: 'asc' },
+        take: 1,
+      });
 
       if (waitlistEntries.length > 0) {
-        const nextInLine = waitlistEntries[0];
         const offerExpires = new Date();
         offerExpires.setHours(offerExpires.getHours() + 24);
 
-        nextInLine.status = 'offered';
-        nextInLine.offerExpiresAt = offerExpires.toISOString();
-        nextInLine.updatedAt = now;
-        areaWaitlists.set(nextInLine.id, nextInLine);
+        await prisma.areaWaitlist.update({
+          where: { id: waitlistEntries[0].id },
+          data: {
+            status: 'offered',
+            offerExpiresAt: offerExpires,
+          },
+        });
       }
 
-      return reply.send(reservation);
+      return reply.send(updated);
     }
   );
 
@@ -982,22 +904,22 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const reservation = areaReservations.get(request.params.id);
+      const reservation = await prisma.commonAreaBooking.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!reservation) {
         return reply.status(404).send({ error: 'Reservation not found' });
       }
 
-      const now = new Date().toISOString();
+      const updated = await prisma.commonAreaBooking.update({
+        where: { id: request.params.id },
+        data: {
+          ...(request.body.type === 'deposit' ? { depositPaid: true } : { feePaid: true }),
+        },
+      });
 
-      if (request.body.type === 'deposit') {
-        reservation.depositPaid = true;
-      } else if (request.body.type === 'fee') {
-        reservation.feePaid = true;
-      }
-      reservation.updatedAt = now;
-
-      areaReservations.set(reservation.id, reservation);
-      return reply.send(reservation);
+      return reply.send(updated);
     }
   );
 
@@ -1013,27 +935,34 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = WaitlistSchema.parse(request.body);
-      const now = new Date().toISOString();
+      const preferredDate = new Date(data.preferredDate);
 
       // Calculate priority
-      const existingEntries = Array.from(areaWaitlists.values()).filter(
-        (w) =>
-          w.areaId === data.areaId &&
-          w.preferredDate === data.preferredDate &&
-          w.status === 'waiting'
-      );
-      const priority = existingEntries.length + 1;
+      const existingCount = await prisma.areaWaitlist.count({
+        where: {
+          areaId: data.areaId,
+          preferredDate,
+          status: 'waiting',
+        },
+      });
 
-      const entry: AreaWaitlist = {
-        id: `awl_${Date.now()}`,
-        ...data,
-        priority,
-        status: 'waiting',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const entry = await prisma.areaWaitlist.create({
+        data: {
+          areaId: data.areaId,
+          propertyId: data.propertyId,
+          tenantId: data.tenantId,
+          preferredDate,
+          preferredStartTime: data.preferredStartTime,
+          preferredEndTime: data.preferredEndTime,
+          alternativeDates: data.alternativeDates || [],
+          expectedGuests: data.expectedGuests,
+          eventType: data.eventType as ReservationEventType,
+          priority: existingCount + 1,
+          status: 'waiting',
+          notes: data.notes,
+        },
+      });
 
-      areaWaitlists.set(entry.id, entry);
       return reply.status(201).send(entry);
     }
   );
@@ -1043,26 +972,31 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
     '/waitlist',
     async (
       request: FastifyRequest<{
-        Querystring: { areaId?: string; propertyId?: string; tenantId?: string; status?: string };
+        Querystring: { areaId?: string; propertyId?: string; tenantId?: string; status?: WaitlistStatus };
       }>,
       reply
     ) => {
-      let entries = Array.from(areaWaitlists.values());
+      const where: Parameters<typeof prisma.areaWaitlist.findMany>[0]['where'] = {};
 
       if (request.query.areaId) {
-        entries = entries.filter((e) => e.areaId === request.query.areaId);
+        where.areaId = request.query.areaId;
       }
       if (request.query.propertyId) {
-        entries = entries.filter((e) => e.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.tenantId) {
-        entries = entries.filter((e) => e.tenantId === request.query.tenantId);
+        where.tenantId = request.query.tenantId;
       }
       if (request.query.status) {
-        entries = entries.filter((e) => e.status === request.query.status);
+        where.status = request.query.status;
       }
 
-      return reply.send(entries.sort((a, b) => a.priority - b.priority));
+      const entries = await prisma.areaWaitlist.findMany({
+        where,
+        orderBy: { priority: 'asc' },
+      });
+
+      return reply.send(entries);
     }
   );
 
@@ -1076,7 +1010,10 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const entry = areaWaitlists.get(request.params.id);
+      const entry = await prisma.areaWaitlist.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!entry) {
         return reply.status(404).send({ error: 'Waitlist entry not found' });
       }
@@ -1085,47 +1022,52 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(400).send({ error: 'No offer pending' });
       }
 
-      const now = new Date().toISOString();
-
       if (request.body.accept) {
-        entry.status = 'accepted';
+        const area = await prisma.commonArea.findUnique({
+          where: { id: entry.areaId },
+        });
 
-        // Create reservation
-        const area = commonAreas.get(entry.areaId);
         const { fee } = area
-          ? calculateReservationFee(area, entry.preferredStartTime, entry.preferredEndTime)
+          ? calculateReservationFee(area as CommonAreaWithOperatingHours, entry.preferredStartTime, entry.preferredEndTime)
           : { fee: 0 };
 
-        const reservation: AreaReservation = {
-          id: `res_${Date.now()}`,
-          areaId: entry.areaId,
-          propertyId: entry.propertyId,
-          tenantId: entry.tenantId,
-          eventType: entry.eventType,
-          status: 'confirmed',
-          date: entry.preferredDate,
-          startTime: entry.preferredStartTime,
-          endTime: entry.preferredEndTime,
-          expectedGuests: entry.expectedGuests,
-          depositAmount: area?.requiresDeposit ? area.depositAmount : undefined,
-          depositPaid: false,
-          depositRefunded: false,
-          rentalFee: fee,
-          feePaid: false,
-          confirmationCode: generateConfirmationCode(),
-          createdAt: now,
-          updatedAt: now,
-        };
+        // Create reservation
+        await prisma.commonAreaBooking.create({
+          data: {
+            areaId: entry.areaId,
+            propertyId: entry.propertyId,
+            tenantId: entry.tenantId,
+            eventType: entry.eventType,
+            status: 'confirmed',
+            date: entry.preferredDate,
+            startTime: entry.preferredStartTime,
+            endTime: entry.preferredEndTime,
+            expectedGuests: entry.expectedGuests,
+            depositAmount: area?.requiresDeposit ? area.depositAmount : null,
+            depositPaid: false,
+            depositRefunded: false,
+            rentalFee: fee,
+            feePaid: false,
+            confirmationCode: generateConfirmationCode(),
+          },
+        });
 
-        areaReservations.set(reservation.id, reservation);
+        await prisma.areaWaitlist.update({
+          where: { id: entry.id },
+          data: { status: 'accepted' },
+        });
       } else {
-        entry.status = 'declined';
+        await prisma.areaWaitlist.update({
+          where: { id: entry.id },
+          data: { status: 'declined' },
+        });
       }
 
-      entry.updatedAt = now;
-      areaWaitlists.set(entry.id, entry);
+      const updated = await prisma.areaWaitlist.findUnique({
+        where: { id: entry.id },
+      });
 
-      return reply.send(entry);
+      return reply.send(updated);
     }
   );
 
@@ -1141,18 +1083,23 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = IncidentSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const incident: AreaIncident = {
-        id: `inc_${Date.now()}`,
-        ...data,
-        chargesPaid: false,
-        status: 'reported',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const incident = await prisma.areaIncident.create({
+        data: {
+          areaId: data.areaId,
+          reservationId: data.reservationId,
+          propertyId: data.propertyId,
+          reportedBy: data.reportedBy,
+          incidentType: data.incidentType as AreaIncidentType,
+          severity: data.severity as AreaIncidentSeverity,
+          description: data.description,
+          photos: data.photos || [],
+          witnesses: data.witnesses || [],
+          chargesPaid: false,
+          status: 'reported',
+        },
+      });
 
-      areaIncidents.set(incident.id, incident);
       return reply.status(201).send(incident);
     }
   );
@@ -1166,30 +1113,31 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
           areaId?: string;
           propertyId?: string;
           reservationId?: string;
-          status?: string;
-          severity?: string;
+          status?: AreaIncidentStatus;
+          severity?: AreaIncidentSeverity;
         };
       }>,
       reply
     ) => {
-      let incidents = Array.from(areaIncidents.values());
+      const where: Parameters<typeof prisma.areaIncident.findMany>[0]['where'] = {};
 
       if (request.query.areaId) {
-        incidents = incidents.filter((i) => i.areaId === request.query.areaId);
+        where.areaId = request.query.areaId;
       }
       if (request.query.propertyId) {
-        incidents = incidents.filter((i) => i.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.reservationId) {
-        incidents = incidents.filter((i) => i.reservationId === request.query.reservationId);
+        where.reservationId = request.query.reservationId;
       }
       if (request.query.status) {
-        incidents = incidents.filter((i) => i.status === request.query.status);
+        where.status = request.query.status;
       }
       if (request.query.severity) {
-        incidents = incidents.filter((i) => i.severity === request.query.severity);
+        where.severity = request.query.severity;
       }
 
+      const incidents = await prisma.areaIncident.findMany({ where });
       return reply.send(incidents);
     }
   );
@@ -1204,24 +1152,26 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const incident = areaIncidents.get(request.params.id);
+      const incident = await prisma.areaIncident.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!incident) {
         return reply.status(404).send({ error: 'Incident not found' });
       }
 
-      const now = new Date().toISOString();
+      const updated = await prisma.areaIncident.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'resolved',
+          resolvedAt: new Date(),
+          resolvedBy: request.body.resolvedBy,
+          resolution: request.body.resolution,
+          charges: request.body.charges,
+        },
+      });
 
-      incident.status = 'resolved';
-      incident.resolvedAt = now;
-      incident.resolvedBy = request.body.resolvedBy;
-      incident.resolution = request.body.resolution;
-      if (request.body.charges) {
-        incident.charges = request.body.charges;
-      }
-      incident.updatedAt = now;
-
-      areaIncidents.set(incident.id, incident);
-      return reply.send(incident);
+      return reply.send(updated);
     }
   );
 
@@ -1237,10 +1187,12 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = RatingSchema.parse(request.body);
-      const now = new Date().toISOString();
 
       // Check if reservation exists and is completed
-      const reservation = areaReservations.get(data.reservationId);
+      const reservation = await prisma.commonAreaBooking.findUnique({
+        where: { id: data.reservationId },
+      });
+
       if (!reservation) {
         return reply.status(404).send({ error: 'Reservation not found' });
       }
@@ -1249,20 +1201,28 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Check for existing rating
-      const existingRating = Array.from(areaRatings.values()).find(
-        (r) => r.reservationId === data.reservationId
-      );
+      const existingRating = await prisma.areaRating.findUnique({
+        where: { reservationId: data.reservationId },
+      });
+
       if (existingRating) {
         return reply.status(400).send({ error: 'Reservation already rated' });
       }
 
-      const rating: AreaRating = {
-        id: `rat_${Date.now()}`,
-        ...data,
-        createdAt: now,
-      };
+      const rating = await prisma.areaRating.create({
+        data: {
+          areaId: data.areaId,
+          reservationId: data.reservationId,
+          tenantId: data.tenantId,
+          overallRating: data.overallRating,
+          cleanlinessRating: data.cleanlinessRating,
+          amenitiesRating: data.amenitiesRating,
+          equipmentRating: data.equipmentRating,
+          comment: data.comment,
+          wouldRecommend: data.wouldRecommend,
+        },
+      });
 
-      areaRatings.set(rating.id, rating);
       return reply.status(201).send(rating);
     }
   );
@@ -1276,19 +1236,19 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      let ratings = Array.from(areaRatings.values());
+      const where: Parameters<typeof prisma.areaRating.findMany>[0]['where'] = {};
 
       if (request.query.areaId) {
-        ratings = ratings.filter((r) => r.areaId === request.query.areaId);
+        where.areaId = request.query.areaId;
       }
       if (request.query.tenantId) {
-        ratings = ratings.filter((r) => r.tenantId === request.query.tenantId);
+        where.tenantId = request.query.tenantId;
       }
       if (request.query.minRating) {
-        const min = parseFloat(request.query.minRating);
-        ratings = ratings.filter((r) => r.overallRating >= min);
+        where.overallRating = { gte: parseInt(request.query.minRating) };
       }
 
+      const ratings = await prisma.areaRating.findMany({ where });
       return reply.send(ratings);
     }
   );
@@ -1305,19 +1265,31 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const data = CommunityEventSchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const event: CommunityEvent = {
-        id: `evt_${Date.now()}`,
-        ...data,
-        currentAttendees: 0,
-        status: 'scheduled',
-        attendees: [],
-        createdAt: now,
-        updatedAt: now,
-      };
+      const event = await prisma.communityEvent.create({
+        data: {
+          areaId: data.areaId,
+          propertyId: data.propertyId,
+          name: data.name,
+          description: data.description,
+          eventType: data.eventType as CommunityEventType,
+          date: new Date(data.date),
+          startTime: data.startTime,
+          endTime: data.endTime,
+          location: data.location,
+          organizer: data.organizer,
+          maxAttendees: data.maxAttendees,
+          currentAttendees: 0,
+          rsvpRequired: data.rsvpRequired,
+          rsvpDeadline: data.rsvpDeadline ? new Date(data.rsvpDeadline) : null,
+          cost: data.cost,
+          isRecurring: data.isRecurring,
+          recurrence: data.recurrence as object | undefined,
+          status: 'scheduled',
+          attendees: [],
+        },
+      });
 
-      communityEvents.set(event.id, event);
       return reply.status(201).send(event);
     }
   );
@@ -1329,32 +1301,33 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       request: FastifyRequest<{
         Querystring: {
           propertyId?: string;
-          eventType?: string;
-          status?: string;
+          eventType?: CommunityEventType;
+          status?: CommunityEventStatus;
           startDate?: string;
           endDate?: string;
         };
       }>,
       reply
     ) => {
-      let events = Array.from(communityEvents.values());
+      const where: Parameters<typeof prisma.communityEvent.findMany>[0]['where'] = {};
 
       if (request.query.propertyId) {
-        events = events.filter((e) => e.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.eventType) {
-        events = events.filter((e) => e.eventType === request.query.eventType);
+        where.eventType = request.query.eventType;
       }
       if (request.query.status) {
-        events = events.filter((e) => e.status === request.query.status);
+        where.status = request.query.status;
       }
-      if (request.query.startDate) {
-        events = events.filter((e) => e.date >= request.query.startDate!);
-      }
-      if (request.query.endDate) {
-        events = events.filter((e) => e.date <= request.query.endDate!);
+      if (request.query.startDate || request.query.endDate) {
+        where.date = {
+          ...(request.query.startDate && { gte: new Date(request.query.startDate) }),
+          ...(request.query.endDate && { lte: new Date(request.query.endDate) }),
+        };
       }
 
+      const events = await prisma.communityEvent.findMany({ where });
       return reply.send(events);
     }
   );
@@ -1369,7 +1342,10 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const event = communityEvents.get(request.params.id);
+      const event = await prisma.communityEvent.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!event) {
         return reply.status(404).send({ error: 'Event not found' });
       }
@@ -1382,16 +1358,19 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(400).send({ error: 'Event is at capacity' });
       }
 
-      if (event.rsvpDeadline && new Date() > new Date(event.rsvpDeadline)) {
+      if (event.rsvpDeadline && new Date() > event.rsvpDeadline) {
         return reply.status(400).send({ error: 'RSVP deadline has passed' });
       }
 
-      event.attendees.push(request.body.tenantId);
-      event.currentAttendees++;
-      event.updatedAt = new Date().toISOString();
+      const updated = await prisma.communityEvent.update({
+        where: { id: request.params.id },
+        data: {
+          attendees: [...event.attendees, request.body.tenantId],
+          currentAttendees: event.currentAttendees + 1,
+        },
+      });
 
-      communityEvents.set(event.id, event);
-      return reply.send(event);
+      return reply.send(updated);
     }
   );
 
@@ -1405,7 +1384,10 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const event = communityEvents.get(request.params.id);
+      const event = await prisma.communityEvent.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!event) {
         return reply.status(404).send({ error: 'Event not found' });
       }
@@ -1415,12 +1397,18 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(400).send({ error: 'Not RSVP\'d to this event' });
       }
 
-      event.attendees.splice(index, 1);
-      event.currentAttendees--;
-      event.updatedAt = new Date().toISOString();
+      const newAttendees = [...event.attendees];
+      newAttendees.splice(index, 1);
 
-      communityEvents.set(event.id, event);
-      return reply.send(event);
+      const updated = await prisma.communityEvent.update({
+        where: { id: request.params.id },
+        data: {
+          attendees: newAttendees,
+          currentAttendees: event.currentAttendees - 1,
+        },
+      });
+
+      return reply.send(updated);
     }
   );
 
@@ -1428,16 +1416,20 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/events/:id/cancel',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const event = communityEvents.get(request.params.id);
+      const event = await prisma.communityEvent.findUnique({
+        where: { id: request.params.id },
+      });
+
       if (!event) {
         return reply.status(404).send({ error: 'Event not found' });
       }
 
-      event.status = 'cancelled';
-      event.updatedAt = new Date().toISOString();
+      const updated = await prisma.communityEvent.update({
+        where: { id: request.params.id },
+        data: { status: 'cancelled' },
+      });
 
-      communityEvents.set(event.id, event);
-      return reply.send(event);
+      return reply.send(updated);
     }
   );
 };

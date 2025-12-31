@@ -69,7 +69,7 @@ import { storageRoutes } from './storage/routes';
 import { taxDocumentRoutes } from './tax-documents/routes';
 import { tenantPortalRoutes } from './tenant-portal/routes';
 import { userRoutes } from './users/routes';
-import { utilitiesRoutes } from './utilities/routes';
+import { utilityRoutes } from './utilities/routes';
 import { vendorRoutes } from './vendors/routes';
 import { violationRoutes } from './violations/routes';
 import { webhookRoutes } from './webhooks/routes';
@@ -128,7 +128,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(screeningRoutes, { prefix: '/screening' });
       await api.register(communicationRoutes, { prefix: '/communications' });
       await api.register(insuranceRoutes, { prefix: '/insurance' });
-      await api.register(utilitiesRoutes, { prefix: '/utilities' });
+      await api.register(utilityRoutes, { prefix: '/utilities' });
       await api.register(ownerPortalRoutes, { prefix: '/owner-portal' });
       await api.register(budgetRoutes, { prefix: '/budgets' });
       await api.register(showingRoutes, { prefix: '/showings' });

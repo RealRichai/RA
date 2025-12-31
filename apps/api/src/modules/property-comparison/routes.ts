@@ -1,5 +1,19 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import {
+  prisma,
+  Prisma,
+  type BenchmarkSource as PrismaBenchmarkSource,
+} from '@realriches/database';
+
+// Helper to convert Prisma Decimal to number
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value) || 0;
+}
 
 // Types
 interface PropertyMetrics {
@@ -123,12 +137,47 @@ interface TrendData {
   dataPoints: { date: Date; value: number }[];
 }
 
-// In-memory stores
-export const propertyMetrics = new Map<string, PropertyMetrics>();
-export const comparisonReports = new Map<string, ComparisonReport>();
-export const benchmarks = new Map<string, Benchmark>();
-export const savedComparisons = new Map<string, SavedComparison>();
-export const trendDataStore = new Map<string, TrendData>();
+// Note: TrendData is still generated dynamically, not stored in DB
+
+// Helper to convert Prisma PropertyMetric to interface
+function toPropertyMetrics(pm: Awaited<ReturnType<typeof prisma.propertyMetric.findFirst>>): PropertyMetrics | null {
+  if (!pm) return null;
+  return {
+    propertyId: pm.propertyId,
+    propertyName: pm.propertyName,
+    recordedAt: pm.recordedAt,
+    totalUnits: pm.totalUnits,
+    totalSquareFeet: pm.totalSquareFeet,
+    yearBuilt: pm.yearBuilt ?? undefined,
+    propertyType: pm.propertyType,
+    amenities: pm.amenities as string[],
+    grossPotentialRent: toNumber(pm.grossPotentialRent),
+    effectiveGrossIncome: toNumber(pm.effectiveGrossIncome),
+    operatingExpenses: toNumber(pm.operatingExpenses),
+    netOperatingIncome: toNumber(pm.netOperatingIncome),
+    capRate: toNumber(pm.capRate),
+    cashOnCashReturn: pm.cashOnCashReturn ? toNumber(pm.cashOnCashReturn) : undefined,
+    occupancyRate: toNumber(pm.occupancyRate),
+    physicalOccupancy: toNumber(pm.physicalOccupancy),
+    economicOccupancy: toNumber(pm.economicOccupancy),
+    averageDaysVacant: toNumber(pm.averageDaysVacant),
+    turnoverRate: toNumber(pm.turnoverRate),
+    averageRentPerUnit: toNumber(pm.averageRentPerUnit),
+    averageRentPerSqFt: toNumber(pm.averageRentPerSqFt),
+    marketRentPerUnit: toNumber(pm.marketRentPerUnit),
+    lossToLease: toNumber(pm.lossToLease),
+    lossToLeasePercent: toNumber(pm.lossToLeasePercent),
+    collectionRate: toNumber(pm.collectionRate),
+    delinquencyRate: toNumber(pm.delinquencyRate),
+    badDebtWriteOff: toNumber(pm.badDebtWriteOff),
+    maintenanceExpensePerUnit: toNumber(pm.maintenanceExpensePerUnit),
+    workOrdersPerUnit: toNumber(pm.workOrdersPerUnit),
+    averageWorkOrderCompletionDays: toNumber(pm.averageWorkOrderCompletionDays),
+    renewalRate: toNumber(pm.renewalRate),
+    averageLeaseTerm: toNumber(pm.averageLeaseTerm),
+    concessionRate: toNumber(pm.concessionRate),
+  };
+}
 
 // Available metrics for comparison
 export const availableMetrics = [
@@ -154,10 +203,21 @@ export function getMetricDefinition(key: string): typeof availableMetrics[0] | u
   return availableMetrics.find(m => m.key === key);
 }
 
-export function compareProperties(propertyIds: string[], metricKeys: string[]): ComparisonResult {
-  const properties = propertyIds
-    .map(id => propertyMetrics.get(id))
-    .filter((p): p is PropertyMetrics => p !== undefined);
+export async function compareProperties(propertyIds: string[], metricKeys: string[]): Promise<ComparisonResult> {
+  const metricsRecords = await prisma.propertyMetric.findMany({
+    where: { propertyId: { in: propertyIds } },
+    orderBy: { recordedAt: 'desc' },
+  });
+
+  // Get latest metric for each property
+  const latestMetrics = new Map<string, PropertyMetrics>();
+  for (const record of metricsRecords) {
+    if (!latestMetrics.has(record.propertyId)) {
+      const converted = toPropertyMetrics(record);
+      if (converted) latestMetrics.set(record.propertyId, converted);
+    }
+  }
+  const properties = Array.from(latestMetrics.values());
 
   const rankings: MetricRanking[] = [];
   const averages: Record<string, number> = {};
@@ -179,7 +239,7 @@ export function compareProperties(propertyIds: string[], metricKeys: string[]): 
     );
 
     const rankedValues = sorted.map((v, i) => ({ ...v, rank: i + 1 }));
-    const avg = values.reduce((sum, v) => sum + v.value, 0) / values.length;
+    const avg = values.length > 0 ? values.reduce((sum, v) => sum + v.value, 0) / values.length : 0;
 
     averages[metricKey] = avg;
 
@@ -215,10 +275,21 @@ export function compareProperties(propertyIds: string[], metricKeys: string[]): 
   return { properties, rankings, averages, highlights };
 }
 
-export function calculatePortfolioAverages(propertyIds: string[]): Record<string, number> {
-  const properties = propertyIds
-    .map(id => propertyMetrics.get(id))
-    .filter((p): p is PropertyMetrics => p !== undefined);
+export async function calculatePortfolioAverages(propertyIds: string[]): Promise<Record<string, number>> {
+  const metricsRecords = await prisma.propertyMetric.findMany({
+    where: { propertyId: { in: propertyIds } },
+    orderBy: { recordedAt: 'desc' },
+  });
+
+  // Get latest metric for each property
+  const latestMetrics = new Map<string, PropertyMetrics>();
+  for (const record of metricsRecords) {
+    if (!latestMetrics.has(record.propertyId)) {
+      const converted = toPropertyMetrics(record);
+      if (converted) latestMetrics.set(record.propertyId, converted);
+    }
+  }
+  const properties = Array.from(latestMetrics.values());
 
   if (properties.length === 0) return {};
 
@@ -232,12 +303,29 @@ export function calculatePortfolioAverages(propertyIds: string[]): Record<string
   return averages;
 }
 
-export function rankPropertyInPortfolio(propertyId: string, portfolioIds: string[]): Record<string, { rank: number; total: number; percentile: number }> {
+export async function rankPropertyInPortfolio(propertyId: string, portfolioIds: string[]): Promise<Record<string, { rank: number; total: number; percentile: number }>> {
+  const metricsRecords = await prisma.propertyMetric.findMany({
+    where: { propertyId: { in: portfolioIds } },
+    orderBy: { recordedAt: 'desc' },
+  });
+
+  // Get latest metric for each property
+  const latestMetrics = new Map<string, PropertyMetrics>();
+  for (const record of metricsRecords) {
+    if (!latestMetrics.has(record.propertyId)) {
+      const converted = toPropertyMetrics(record);
+      if (converted) latestMetrics.set(record.propertyId, converted);
+    }
+  }
+
   const rankings: Record<string, { rank: number; total: number; percentile: number }> = {};
 
   for (const metric of availableMetrics) {
     const values = portfolioIds
-      .map(id => ({ id, value: (propertyMetrics.get(id) as unknown as Record<string, number>)?.[metric.key] || 0 }))
+      .map(id => {
+        const metrics = latestMetrics.get(id);
+        return { id, value: metrics ? (metrics as unknown as Record<string, number>)[metric.key] || 0 : 0 };
+      })
       .filter(v => v.value !== undefined);
 
     const sorted = [...values].sort((a, b) =>
@@ -257,14 +345,28 @@ export function rankPropertyInPortfolio(propertyId: string, portfolioIds: string
   return rankings;
 }
 
-export function findSimilarProperties(propertyId: string, allPropertyIds: string[], limit: number = 5): string[] {
-  const target = propertyMetrics.get(propertyId);
+export async function findSimilarProperties(propertyId: string, allPropertyIds: string[], limit: number = 5): Promise<string[]> {
+  const metricsRecords = await prisma.propertyMetric.findMany({
+    where: { propertyId: { in: allPropertyIds } },
+    orderBy: { recordedAt: 'desc' },
+  });
+
+  // Get latest metric for each property
+  const latestMetrics = new Map<string, PropertyMetrics>();
+  for (const record of metricsRecords) {
+    if (!latestMetrics.has(record.propertyId)) {
+      const converted = toPropertyMetrics(record);
+      if (converted) latestMetrics.set(record.propertyId, converted);
+    }
+  }
+
+  const target = latestMetrics.get(propertyId);
   if (!target) return [];
 
   const scores = allPropertyIds
     .filter(id => id !== propertyId)
     .map(id => {
-      const prop = propertyMetrics.get(id);
+      const prop = latestMetrics.get(id);
       if (!prop) return { id, score: Infinity };
 
       // Calculate similarity score based on key attributes
@@ -280,9 +382,15 @@ export function findSimilarProperties(propertyId: string, allPropertyIds: string
   return scores.slice(0, limit).map(s => s.id);
 }
 
-export function generateTrendData(propertyId: string, metric: string, months: number = 12): TrendData {
+export async function generateTrendData(propertyId: string, metric: string, months: number = 12): Promise<TrendData> {
   const dataPoints: { date: Date; value: number }[] = [];
-  const baseMetrics = propertyMetrics.get(propertyId);
+
+  const latestMetric = await prisma.propertyMetric.findFirst({
+    where: { propertyId },
+    orderBy: { recordedAt: 'desc' },
+  });
+
+  const baseMetrics = toPropertyMetrics(latestMetric);
   const baseValue = baseMetrics ? (baseMetrics as unknown as Record<string, number>)[metric] || 100 : 100;
 
   // Generate mock trend data
@@ -297,15 +405,22 @@ export function generateTrendData(propertyId: string, metric: string, months: nu
   return { propertyId, metric, dataPoints };
 }
 
-export function compareToBenchmark(propertyId: string, benchmarkId: string): Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }> {
-  const property = propertyMetrics.get(propertyId);
-  const benchmark = benchmarks.get(benchmarkId);
+export async function compareToBenchmark(propertyId: string, benchmarkId: string): Promise<Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }>> {
+  const propertyMetric = await prisma.propertyMetric.findFirst({
+    where: { propertyId },
+    orderBy: { recordedAt: 'desc' },
+  });
+  const benchmarkRecord = await prisma.benchmark.findUnique({
+    where: { id: benchmarkId },
+  });
 
-  if (!property || !benchmark) return {};
+  const property = toPropertyMetrics(propertyMetric);
+  if (!property || !benchmarkRecord) return {};
 
+  const benchmarkMetrics = benchmarkRecord.metrics as Record<string, { value: number; percentile?: number }>;
   const comparison: Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }> = {};
 
-  for (const [key, benchmarkData] of Object.entries(benchmark.metrics)) {
+  for (const [key, benchmarkData] of Object.entries(benchmarkMetrics)) {
     const value = (property as unknown as Record<string, number>)[key] || 0;
     const benchmarkValue = benchmarkData.value;
     const variance = benchmarkValue !== 0 ? ((value - benchmarkValue) / benchmarkValue) * 100 : 0;
@@ -396,32 +511,79 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.post('/metrics', async (request: FastifyRequest, reply: FastifyReply) => {
     const data = metricsSchema.parse(request.body);
 
-    const metrics: PropertyMetrics = {
-      ...data,
-      recordedAt: new Date()
-    };
+    const metric = await prisma.propertyMetric.create({
+      data: {
+        propertyId: data.propertyId,
+        propertyName: data.propertyName,
+        totalUnits: data.totalUnits,
+        totalSquareFeet: data.totalSquareFeet,
+        yearBuilt: data.yearBuilt,
+        propertyType: data.propertyType,
+        amenities: data.amenities as unknown as Prisma.JsonValue,
+        grossPotentialRent: data.grossPotentialRent,
+        effectiveGrossIncome: data.effectiveGrossIncome,
+        operatingExpenses: data.operatingExpenses,
+        netOperatingIncome: data.netOperatingIncome,
+        capRate: data.capRate,
+        cashOnCashReturn: data.cashOnCashReturn,
+        occupancyRate: data.occupancyRate,
+        physicalOccupancy: data.physicalOccupancy,
+        economicOccupancy: data.economicOccupancy,
+        averageDaysVacant: data.averageDaysVacant,
+        turnoverRate: data.turnoverRate,
+        averageRentPerUnit: data.averageRentPerUnit,
+        averageRentPerSqFt: data.averageRentPerSqFt,
+        marketRentPerUnit: data.marketRentPerUnit,
+        lossToLease: data.lossToLease,
+        lossToLeasePercent: data.lossToLeasePercent,
+        collectionRate: data.collectionRate,
+        delinquencyRate: data.delinquencyRate,
+        badDebtWriteOff: data.badDebtWriteOff,
+        maintenanceExpensePerUnit: data.maintenanceExpensePerUnit,
+        workOrdersPerUnit: data.workOrdersPerUnit,
+        averageWorkOrderCompletionDays: data.averageWorkOrderCompletionDays,
+        renewalRate: data.renewalRate,
+        averageLeaseTerm: data.averageLeaseTerm,
+        concessionRate: data.concessionRate,
+      },
+    });
 
-    propertyMetrics.set(data.propertyId, metrics);
-    return reply.status(201).send(metrics);
+    return reply.status(201).send(toPropertyMetrics(metric));
   });
 
   app.get('/metrics/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const metrics = propertyMetrics.get(propertyId);
-    if (!metrics) return reply.status(404).send({ error: 'Metrics not found' });
-    return reply.send(metrics);
+    const metric = await prisma.propertyMetric.findFirst({
+      where: { propertyId },
+      orderBy: { recordedAt: 'desc' },
+    });
+    if (!metric) return reply.status(404).send({ error: 'Metrics not found' });
+    return reply.send(toPropertyMetrics(metric));
   });
 
   app.get('/metrics', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyIds } = request.query as { propertyIds?: string };
-    let metrics = Array.from(propertyMetrics.values());
 
+    const where: Prisma.PropertyMetricWhereInput = {};
     if (propertyIds) {
-      const ids = propertyIds.split(',');
-      metrics = metrics.filter(m => ids.includes(m.propertyId));
+      where.propertyId = { in: propertyIds.split(',') };
     }
 
-    return reply.send(metrics);
+    const metrics = await prisma.propertyMetric.findMany({
+      where,
+      orderBy: { recordedAt: 'desc' },
+    });
+
+    // Get latest metric per property
+    const latestMetrics = new Map<string, PropertyMetrics>();
+    for (const m of metrics) {
+      if (!latestMetrics.has(m.propertyId)) {
+        const converted = toPropertyMetrics(m);
+        if (converted) latestMetrics.set(m.propertyId, converted);
+      }
+    }
+
+    return reply.send(Array.from(latestMetrics.values()));
   });
 
   // Available metrics
@@ -433,18 +595,31 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.post('/compare', async (request: FastifyRequest, reply: FastifyReply) => {
     const data = comparisonSchema.parse(request.body);
 
-    const results = compareProperties(data.propertyIds, data.metrics);
+    const results = await compareProperties(data.propertyIds, data.metrics);
 
-    const id = `comparison_${Date.now()}`;
-    const report: ComparisonReport = {
-      id,
-      ...data,
-      createdAt: new Date(),
-      results
-    };
+    const report = await prisma.comparisonReport.create({
+      data: {
+        name: data.name,
+        description: data.description,
+        propertyIds: data.propertyIds as unknown as Prisma.JsonValue,
+        metrics: data.metrics as unknown as Prisma.JsonValue,
+        period: { startDate: data.period.startDate, endDate: data.period.endDate } as unknown as Prisma.JsonValue,
+        results: results as unknown as Prisma.JsonValue,
+        createdBy: data.createdBy,
+      },
+    });
 
-    comparisonReports.set(id, report);
-    return reply.status(201).send(report);
+    return reply.status(201).send({
+      id: report.id,
+      name: report.name,
+      description: report.description,
+      propertyIds: report.propertyIds,
+      metrics: report.metrics,
+      period: report.period,
+      createdBy: report.createdBy,
+      createdAt: report.createdAt,
+      results: report.results,
+    });
   });
 
   app.get('/compare/quick', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -453,19 +628,21 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     const ids = propertyIds.split(',');
     const metricKeys = metrics ? metrics.split(',') : availableMetrics.map(m => m.key);
 
-    const results = compareProperties(ids, metricKeys);
+    const results = await compareProperties(ids, metricKeys);
     return reply.send(results);
   });
 
   // Comparison reports
   app.get('/reports', async (request: FastifyRequest, reply: FastifyReply) => {
-    const reports = Array.from(comparisonReports.values());
-    return reply.send(reports.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+    const reports = await prisma.comparisonReport.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+    return reply.send(reports);
   });
 
   app.get('/reports/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const report = comparisonReports.get(id);
+    const report = await prisma.comparisonReport.findUnique({ where: { id } });
     if (!report) return reply.status(404).send({ error: 'Report not found' });
     return reply.send(report);
   });
@@ -475,11 +652,18 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     const { propertyId } = request.params as { propertyId: string };
     const { portfolioIds } = request.query as { portfolioIds?: string };
 
-    const ids = portfolioIds
-      ? portfolioIds.split(',')
-      : Array.from(propertyMetrics.keys());
+    let ids: string[];
+    if (portfolioIds) {
+      ids = portfolioIds.split(',');
+    } else {
+      const allMetrics = await prisma.propertyMetric.findMany({
+        select: { propertyId: true },
+        distinct: ['propertyId'],
+      });
+      ids = allMetrics.map(m => m.propertyId);
+    }
 
-    const rankings = rankPropertyInPortfolio(propertyId, ids);
+    const rankings = await rankPropertyInPortfolio(propertyId, ids);
     return reply.send(rankings);
   });
 
@@ -487,11 +671,18 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.get('/portfolio/averages', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyIds } = request.query as { propertyIds?: string };
 
-    const ids = propertyIds
-      ? propertyIds.split(',')
-      : Array.from(propertyMetrics.keys());
+    let ids: string[];
+    if (propertyIds) {
+      ids = propertyIds.split(',');
+    } else {
+      const allMetrics = await prisma.propertyMetric.findMany({
+        select: { propertyId: true },
+        distinct: ['propertyId'],
+      });
+      ids = allMetrics.map(m => m.propertyId);
+    }
 
-    const averages = calculatePortfolioAverages(ids);
+    const averages = await calculatePortfolioAverages(ids);
     return reply.send(averages);
   });
 
@@ -500,10 +691,30 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     const { propertyId } = request.params as { propertyId: string };
     const { limit } = request.query as { limit?: string };
 
-    const allIds = Array.from(propertyMetrics.keys());
-    const similarIds = findSimilarProperties(propertyId, allIds, limit ? parseInt(limit) : 5);
+    const allMetrics = await prisma.propertyMetric.findMany({
+      select: { propertyId: true },
+      distinct: ['propertyId'],
+    });
+    const allIds = allMetrics.map(m => m.propertyId);
 
-    const similarProperties = similarIds.map(id => propertyMetrics.get(id)).filter(Boolean);
+    const similarIds = await findSimilarProperties(propertyId, allIds, limit ? parseInt(limit) : 5);
+
+    // Get the metrics for similar properties
+    const similarMetrics = await prisma.propertyMetric.findMany({
+      where: { propertyId: { in: similarIds } },
+      orderBy: { recordedAt: 'desc' },
+    });
+
+    // Get latest for each
+    const latestMetrics = new Map<string, PropertyMetrics>();
+    for (const m of similarMetrics) {
+      if (!latestMetrics.has(m.propertyId)) {
+        const converted = toPropertyMetrics(m);
+        if (converted) latestMetrics.set(m.propertyId, converted);
+      }
+    }
+
+    const similarProperties = similarIds.map(id => latestMetrics.get(id)).filter(Boolean);
     return reply.send(similarProperties);
   });
 
@@ -512,7 +723,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     const { propertyId, metric } = request.params as { propertyId: string; metric: string };
     const { months } = request.query as { months?: string };
 
-    const trendData = generateTrendData(propertyId, metric, months ? parseInt(months) : 12);
+    const trendData = await generateTrendData(propertyId, metric, months ? parseInt(months) : 12);
     return reply.send(trendData);
   });
 
@@ -524,7 +735,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     };
 
     const ids = propertyIds.split(',');
-    const trends = ids.map(id => generateTrendData(id, metric, months ? parseInt(months) : 12));
+    const trends = await Promise.all(ids.map(id => generateTrendData(id, metric, months ? parseInt(months) : 12)));
 
     return reply.send(trends);
   });
@@ -533,30 +744,44 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.post('/benchmarks', async (request: FastifyRequest, reply: FastifyReply) => {
     const data = benchmarkSchema.parse(request.body);
 
-    const id = `benchmark_${Date.now()}`;
-    const benchmark: Benchmark = {
-      id,
-      ...data,
-      createdAt: new Date()
-    };
+    const benchmark = await prisma.benchmark.create({
+      data: {
+        name: data.name,
+        propertyType: data.propertyType,
+        market: data.market,
+        source: data.source as PrismaBenchmarkSource,
+        metrics: data.metrics as unknown as Prisma.JsonValue,
+        effectiveDate: data.effectiveDate,
+      },
+    });
 
-    benchmarks.set(id, benchmark);
-    return reply.status(201).send(benchmark);
+    return reply.status(201).send({
+      id: benchmark.id,
+      name: benchmark.name,
+      propertyType: benchmark.propertyType,
+      market: benchmark.market,
+      source: benchmark.source,
+      metrics: benchmark.metrics,
+      effectiveDate: benchmark.effectiveDate,
+      createdAt: benchmark.createdAt,
+    });
   });
 
   app.get('/benchmarks', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyType, source } = request.query as { propertyType?: string; source?: string };
-    let allBenchmarks = Array.from(benchmarks.values());
 
-    if (propertyType) allBenchmarks = allBenchmarks.filter(b => b.propertyType === propertyType);
-    if (source) allBenchmarks = allBenchmarks.filter(b => b.source === source);
+    const where: Prisma.BenchmarkWhereInput = {};
+    if (propertyType) where.propertyType = propertyType;
+    if (source) where.source = source as PrismaBenchmarkSource;
+
+    const allBenchmarks = await prisma.benchmark.findMany({ where });
 
     return reply.send(allBenchmarks);
   });
 
   app.get('/benchmarks/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const benchmark = benchmarks.get(id);
+    const benchmark = await prisma.benchmark.findUnique({ where: { id } });
     if (!benchmark) return reply.status(404).send({ error: 'Benchmark not found' });
     return reply.send(benchmark);
   });
@@ -565,7 +790,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.get('/compare-to-benchmark/:propertyId/:benchmarkId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId, benchmarkId } = request.params as { propertyId: string; benchmarkId: string };
 
-    const comparison = compareToBenchmark(propertyId, benchmarkId);
+    const comparison = await compareToBenchmark(propertyId, benchmarkId);
     if (Object.keys(comparison).length === 0) {
       return reply.status(404).send({ error: 'Property or benchmark not found' });
     }
@@ -577,31 +802,46 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.post('/saved', async (request: FastifyRequest, reply: FastifyReply) => {
     const data = savedComparisonSchema.parse(request.body);
 
-    const id = `saved_${Date.now()}`;
-    const saved: SavedComparison = {
-      id,
-      ...data,
-      isDefault: data.isDefault || false,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
+    const saved = await prisma.savedPropertyComparison.create({
+      data: {
+        name: data.name,
+        description: data.description,
+        propertyIds: data.propertyIds as unknown as Prisma.JsonValue,
+        metrics: data.metrics as unknown as Prisma.JsonValue,
+        benchmarkId: data.benchmarkId,
+        isDefault: data.isDefault ?? false,
+        createdBy: data.createdBy,
+      },
+    });
 
-    savedComparisons.set(id, saved);
-    return reply.status(201).send(saved);
+    return reply.status(201).send({
+      id: saved.id,
+      name: saved.name,
+      description: saved.description,
+      propertyIds: saved.propertyIds,
+      metrics: saved.metrics,
+      benchmarkId: saved.benchmarkId,
+      isDefault: saved.isDefault,
+      createdBy: saved.createdBy,
+      createdAt: saved.createdAt,
+      updatedAt: saved.updatedAt,
+    });
   });
 
   app.get('/saved', async (request: FastifyRequest, reply: FastifyReply) => {
     const { createdBy } = request.query as { createdBy?: string };
-    let saved = Array.from(savedComparisons.values());
 
-    if (createdBy) saved = saved.filter(s => s.createdBy === createdBy);
+    const where: Prisma.SavedPropertyComparisonWhereInput = {};
+    if (createdBy) where.createdBy = createdBy;
+
+    const saved = await prisma.savedPropertyComparison.findMany({ where });
 
     return reply.send(saved);
   });
 
   app.get('/saved/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const saved = savedComparisons.get(id);
+    const saved = await prisma.savedPropertyComparison.findUnique({ where: { id } });
     if (!saved) return reply.status(404).send({ error: 'Saved comparison not found' });
     return reply.send(saved);
   });
@@ -609,11 +849,12 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.delete('/saved/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
 
-    if (!savedComparisons.has(id)) {
+    const existing = await prisma.savedPropertyComparison.findUnique({ where: { id } });
+    if (!existing) {
       return reply.status(404).send({ error: 'Saved comparison not found' });
     }
 
-    savedComparisons.delete(id);
+    await prisma.savedPropertyComparison.delete({ where: { id } });
     return reply.status(204).send();
   });
 
@@ -621,17 +862,19 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.post('/saved/:id/run', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
 
-    const saved = savedComparisons.get(id);
+    const saved = await prisma.savedPropertyComparison.findUnique({ where: { id } });
     if (!saved) return reply.status(404).send({ error: 'Saved comparison not found' });
 
-    const results = compareProperties(saved.propertyIds, saved.metrics);
+    const propertyIds = saved.propertyIds as string[];
+    const metrics = saved.metrics as string[];
+    const results = await compareProperties(propertyIds, metrics);
 
     // If benchmark specified, add benchmark comparison
-    let benchmarkComparison;
+    let benchmarkComparison: Record<string, Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }>> | undefined;
     if (saved.benchmarkId) {
       benchmarkComparison = {};
-      for (const propId of saved.propertyIds) {
-        benchmarkComparison[propId] = compareToBenchmark(propId, saved.benchmarkId);
+      for (const propId of propertyIds) {
+        benchmarkComparison[propId] = await compareToBenchmark(propId, saved.benchmarkId);
       }
     }
 
@@ -647,7 +890,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     const { reportId } = request.params as { reportId: string };
     const { format } = request.query as { format?: string };
 
-    const report = comparisonReports.get(reportId);
+    const report = await prisma.comparisonReport.findUnique({ where: { id: reportId } });
     if (!report) return reply.status(404).send({ error: 'Report not found' });
 
     // In production, this would generate actual files
@@ -665,15 +908,26 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     const { propertyId } = request.params as { propertyId: string };
     const { portfolioIds } = request.query as { portfolioIds?: string };
 
-    const metrics = propertyMetrics.get(propertyId);
+    const metricRecord = await prisma.propertyMetric.findFirst({
+      where: { propertyId },
+      orderBy: { recordedAt: 'desc' },
+    });
+    const metrics = toPropertyMetrics(metricRecord);
     if (!metrics) return reply.status(404).send({ error: 'Property metrics not found' });
 
-    const ids = portfolioIds
-      ? portfolioIds.split(',')
-      : Array.from(propertyMetrics.keys());
+    let ids: string[];
+    if (portfolioIds) {
+      ids = portfolioIds.split(',');
+    } else {
+      const allMetrics = await prisma.propertyMetric.findMany({
+        select: { propertyId: true },
+        distinct: ['propertyId'],
+      });
+      ids = allMetrics.map(m => m.propertyId);
+    }
 
-    const rankings = rankPropertyInPortfolio(propertyId, ids);
-    const portfolioAvgs = calculatePortfolioAverages(ids);
+    const rankings = await rankPropertyInPortfolio(propertyId, ids);
+    const portfolioAvgs = await calculatePortfolioAverages(ids);
 
     // Calculate grades based on percentile
     const grades: Record<string, string> = {};

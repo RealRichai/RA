@@ -1,107 +1,17 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-
-// Types
-interface GuestPass {
-  id: string;
-  propertyId: string;
-  unitId: string;
-  residentId: string;
-  guestName: string;
-  guestEmail?: string;
-  guestPhone?: string;
-  passType: 'one_time' | 'recurring' | 'extended_stay';
-  purpose: 'visitor' | 'service' | 'delivery' | 'contractor' | 'caregiver';
-  validFrom: Date;
-  validUntil: Date;
-  recurringDays?: number[]; // 0-6 for Sunday-Saturday
-  accessCode?: string;
-  vehicleInfo?: {
-    licensePlate: string;
-    make?: string;
-    model?: string;
-    color?: string;
-  };
-  parkingAssigned?: string;
-  notes?: string;
-  status: 'active' | 'expired' | 'revoked' | 'used';
-  checkIns: GuestCheckIn[];
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-interface GuestCheckIn {
-  id: string;
-  passId: string;
-  checkInTime: Date;
-  checkOutTime?: Date;
-  verifiedBy?: string;
-  verificationMethod: 'access_code' | 'id_scan' | 'manual' | 'intercom';
-  notes?: string;
-}
-
-interface GuestParking {
-  id: string;
-  propertyId: string;
-  spotNumber: string;
-  location: string;
-  type: 'visitor' | 'reserved_guest' | 'temporary';
-  status: 'available' | 'occupied' | 'reserved' | 'maintenance';
-  currentPassId?: string;
-  reservedUntil?: Date;
-  createdAt: Date;
-}
-
-interface GuestPolicy {
-  id: string;
-  propertyId: string;
-  maxGuestsPerUnit: number;
-  maxConsecutiveDays: number;
-  requiresPreRegistration: boolean;
-  requiresIdVerification: boolean;
-  quietHoursStart?: string;
-  quietHoursEnd?: string;
-  parkingRequired: boolean;
-  allowedPurposes: string[];
-  blackoutDates?: string[];
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-interface GuestIncident {
-  id: string;
-  propertyId: string;
-  passId?: string;
-  guestName: string;
-  incidentType: 'unauthorized_access' | 'noise_complaint' | 'parking_violation' | 'property_damage' | 'policy_violation' | 'other';
-  description: string;
-  reportedBy: string;
-  reportedAt: Date;
-  severity: 'low' | 'medium' | 'high';
-  status: 'open' | 'investigating' | 'resolved' | 'escalated';
-  resolution?: string;
-  resolvedAt?: Date;
-  resolvedBy?: string;
-}
-
-interface GuestNotification {
-  id: string;
-  passId: string;
-  type: 'arrival' | 'departure' | 'expiring_soon' | 'expired' | 'revoked';
-  recipientId: string;
-  recipientType: 'resident' | 'staff';
-  sentAt: Date;
-  channel: 'email' | 'sms' | 'push';
-  status: 'sent' | 'delivered' | 'failed';
-}
-
-// In-memory stores
-export const guestPasses = new Map<string, GuestPass>();
-export const guestCheckIns = new Map<string, GuestCheckIn>();
-export const guestParkingSpots = new Map<string, GuestParking>();
-export const guestPolicies = new Map<string, GuestPolicy>();
-export const guestIncidents = new Map<string, GuestIncident>();
-export const guestNotifications = new Map<string, GuestNotification>();
+import {
+  prisma,
+  type GuestPassType,
+  type GuestPassPurpose,
+  type GuestPassStatus,
+  type VerificationMethod,
+  type GuestParkingType,
+  type GuestParkingStatus,
+  type GuestIncidentType,
+  type GuestIncidentSeverity,
+  type GuestIncidentStatus,
+} from '@realriches/database';
 
 // Helper functions
 export function generateAccessCode(length: number = 6): string {
@@ -113,11 +23,20 @@ export function generateAccessCode(length: number = 6): string {
   return code;
 }
 
-export function isPassValid(pass: GuestPass, checkTime: Date = new Date()): boolean {
+interface GuestPassWithCheckIns {
+  status: GuestPassStatus;
+  validFrom: Date;
+  validUntil: Date;
+  passType: GuestPassType;
+  recurringDays: number[];
+  checkIns: { id: string }[];
+}
+
+export function isPassValid(pass: GuestPassWithCheckIns, checkTime: Date = new Date()): boolean {
   if (pass.status !== 'active') return false;
   if (checkTime < pass.validFrom || checkTime > pass.validUntil) return false;
 
-  if (pass.passType === 'recurring' && pass.recurringDays) {
+  if (pass.passType === 'recurring' && pass.recurringDays.length > 0) {
     const dayOfWeek = checkTime.getDay();
     if (!pass.recurringDays.includes(dayOfWeek)) return false;
   }
@@ -129,53 +48,91 @@ export function isPassValid(pass: GuestPass, checkTime: Date = new Date()): bool
   return true;
 }
 
-export function getAvailableParkingSpots(propertyId: string): GuestParking[] {
-  return Array.from(guestParkingSpots.values()).filter(
-    spot => spot.propertyId === propertyId && spot.status === 'available'
-  );
+export async function getAvailableParkingSpots(propertyId: string) {
+  return prisma.guestParking.findMany({
+    where: {
+      propertyId,
+      status: 'available',
+    },
+  });
 }
 
-export function getActivePassesForUnit(unitId: string): GuestPass[] {
+export async function getActivePassesForUnit(unitId: string) {
   const now = new Date();
-  return Array.from(guestPasses.values()).filter(
-    pass => pass.unitId === unitId && isPassValid(pass, now)
-  );
+  const passes = await prisma.guestPass.findMany({
+    where: {
+      unitId,
+      status: 'active',
+      validFrom: { lte: now },
+      validUntil: { gte: now },
+    },
+    include: { checkIns: true },
+  });
+
+  return passes.filter((pass) => isPassValid(pass, now));
 }
 
-export function getGuestStats(propertyId: string): {
-  totalActivePasses: number;
-  checkInsToday: number;
-  currentlyOnSite: number;
-  parkingSpotsAvailable: number;
-  parkingSpotsTotal: number;
-} {
+export async function getGuestStats(propertyId: string) {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  const propertyPasses = Array.from(guestPasses.values()).filter(p => p.propertyId === propertyId);
-  const propertyCheckIns = Array.from(guestCheckIns.values()).filter(c => {
-    const pass = guestPasses.get(c.passId);
-    return pass?.propertyId === propertyId;
-  });
-  const propertyParking = Array.from(guestParkingSpots.values()).filter(p => p.propertyId === propertyId);
+  const [
+    activePasses,
+    checkInsToday,
+    currentlyOnSite,
+    parkingStats,
+  ] = await Promise.all([
+    prisma.guestPass.count({
+      where: {
+        propertyId,
+        status: 'active',
+        validFrom: { lte: now },
+        validUntil: { gte: now },
+      },
+    }),
+    prisma.guestCheckIn.count({
+      where: {
+        pass: { propertyId },
+        checkInTime: { gte: startOfDay },
+      },
+    }),
+    prisma.guestCheckIn.count({
+      where: {
+        pass: { propertyId },
+        checkInTime: { gte: startOfDay },
+        checkOutTime: null,
+      },
+    }),
+    prisma.guestParking.groupBy({
+      by: ['status'],
+      where: { propertyId },
+      _count: true,
+    }),
+  ]);
+
+  const parkingSpotsTotal = parkingStats.reduce((sum, s) => sum + s._count, 0);
+  const parkingSpotsAvailable = parkingStats.find((s) => s.status === 'available')?._count || 0;
 
   return {
-    totalActivePasses: propertyPasses.filter(p => isPassValid(p, now)).length,
-    checkInsToday: propertyCheckIns.filter(c => c.checkInTime >= startOfDay).length,
-    currentlyOnSite: propertyCheckIns.filter(c => c.checkInTime >= startOfDay && !c.checkOutTime).length,
-    parkingSpotsAvailable: propertyParking.filter(p => p.status === 'available').length,
-    parkingSpotsTotal: propertyParking.length
+    totalActivePasses: activePasses,
+    checkInsToday,
+    currentlyOnSite,
+    parkingSpotsAvailable,
+    parkingSpotsTotal,
   };
 }
 
-export function checkPolicyCompliance(
+export async function checkPolicyCompliance(
   propertyId: string,
   unitId: string,
   validFrom: Date,
   validUntil: Date,
   purpose: string
-): { compliant: boolean; violations: string[] } {
-  const policy = Array.from(guestPolicies.values()).find(p => p.propertyId === propertyId);
+): Promise<{ compliant: boolean; violations: string[] }> {
+  const policy = await prisma.guestPolicy.findUnique({
+    where: { propertyId },
+  });
+
   const violations: string[] = [];
 
   if (!policy) {
@@ -183,7 +140,7 @@ export function checkPolicyCompliance(
   }
 
   // Check max guests
-  const activePassesCount = getActivePassesForUnit(unitId).length;
+  const activePassesCount = (await getActivePassesForUnit(unitId)).length;
   if (activePassesCount >= policy.maxGuestsPerUnit) {
     violations.push(`Maximum guests per unit (${policy.maxGuestsPerUnit}) reached`);
   }
@@ -200,7 +157,7 @@ export function checkPolicyCompliance(
   }
 
   // Check blackout dates
-  if (policy.blackoutDates) {
+  if (policy.blackoutDates.length > 0) {
     const fromStr = validFrom.toISOString().split('T')[0];
     const untilStr = validUntil.toISOString().split('T')[0];
     if (policy.blackoutDates.includes(fromStr) || policy.blackoutDates.includes(untilStr)) {
@@ -210,64 +167,66 @@ export function checkPolicyCompliance(
 
   return {
     compliant: violations.length === 0,
-    violations
+    violations,
   };
 }
 
-export function expireOldPasses(): number {
+export async function expireOldPasses(): Promise<number> {
   const now = new Date();
-  let expiredCount = 0;
 
-  for (const [id, pass] of guestPasses) {
-    if (pass.status === 'active' && pass.validUntil < now) {
-      pass.status = 'expired';
-      pass.updatedAt = now;
-      guestPasses.set(id, pass);
-      expiredCount++;
-    }
-  }
+  const result = await prisma.guestPass.updateMany({
+    where: {
+      status: 'active',
+      validUntil: { lt: now },
+    },
+    data: {
+      status: 'expired',
+    },
+  });
 
-  return expiredCount;
+  return result.count;
 }
 
 // Schemas
 const guestPassSchema = z.object({
-  propertyId: z.string(),
-  unitId: z.string(),
-  residentId: z.string(),
+  propertyId: z.string().uuid(),
+  unitId: z.string().uuid(),
+  residentId: z.string().uuid(),
   guestName: z.string(),
   guestEmail: z.string().email().optional(),
   guestPhone: z.string().optional(),
   passType: z.enum(['one_time', 'recurring', 'extended_stay']),
   purpose: z.enum(['visitor', 'service', 'delivery', 'contractor', 'caregiver']),
-  validFrom: z.string().transform(s => new Date(s)),
-  validUntil: z.string().transform(s => new Date(s)),
+  validFrom: z.string().transform((s) => new Date(s)),
+  validUntil: z.string().transform((s) => new Date(s)),
   recurringDays: z.array(z.number().min(0).max(6)).optional(),
-  vehicleInfo: z.object({
-    licensePlate: z.string(),
-    make: z.string().optional(),
-    model: z.string().optional(),
-    color: z.string().optional()
-  }).optional(),
-  notes: z.string().optional()
+  vehicleInfo: z
+    .object({
+      licensePlate: z.string(),
+      make: z.string().optional(),
+      model: z.string().optional(),
+      color: z.string().optional(),
+    })
+    .optional(),
+  notes: z.string().optional(),
 });
 
 const checkInSchema = z.object({
-  passId: z.string(),
+  passId: z.string().uuid(),
   verificationMethod: z.enum(['access_code', 'id_scan', 'manual', 'intercom']),
-  verifiedBy: z.string().optional(),
-  notes: z.string().optional()
+  verifiedBy: z.string().uuid().optional(),
+  notes: z.string().optional(),
 });
 
 const parkingSpotSchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   spotNumber: z.string(),
   location: z.string(),
-  type: z.enum(['visitor', 'reserved_guest', 'temporary'])
+  type: z.enum(['visitor', 'reserved_guest', 'temporary']),
 });
 
 const policySchema = z.object({
-  propertyId: z.string(),
+  propertyId: z.string().uuid(),
   maxGuestsPerUnit: z.number().min(1),
   maxConsecutiveDays: z.number().min(1),
   requiresPreRegistration: z.boolean(),
@@ -276,17 +235,17 @@ const policySchema = z.object({
   quietHoursEnd: z.string().optional(),
   parkingRequired: z.boolean(),
   allowedPurposes: z.array(z.string()),
-  blackoutDates: z.array(z.string()).optional()
+  blackoutDates: z.array(z.string()).optional(),
 });
 
 const incidentSchema = z.object({
-  propertyId: z.string(),
-  passId: z.string().optional(),
+  propertyId: z.string().uuid(),
+  passId: z.string().uuid().optional(),
   guestName: z.string(),
   incidentType: z.enum(['unauthorized_access', 'noise_complaint', 'parking_violation', 'property_damage', 'policy_violation', 'other']),
   description: z.string(),
-  reportedBy: z.string(),
-  severity: z.enum(['low', 'medium', 'high'])
+  reportedBy: z.string().uuid(),
+  severity: z.enum(['low', 'medium', 'high']),
 });
 
 export async function guestRoutes(app: FastifyInstance): Promise<void> {
@@ -295,7 +254,7 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
     const data = guestPassSchema.parse(request.body);
 
     // Check policy compliance
-    const compliance = checkPolicyCompliance(
+    const compliance = await checkPolicyCompliance(
       data.propertyId,
       data.unitId,
       data.validFrom,
@@ -306,92 +265,141 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
     if (!compliance.compliant) {
       return reply.status(400).send({
         error: 'Policy violation',
-        violations: compliance.violations
+        violations: compliance.violations,
       });
     }
 
-    const id = `pass_${Date.now()}`;
-    const pass: GuestPass = {
-      id,
-      ...data,
-      accessCode: generateAccessCode(),
-      status: 'active',
-      checkIns: [],
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
+    let parkingAssigned: string | undefined;
 
     // Assign parking if vehicle info provided
     if (data.vehicleInfo) {
-      const availableSpots = getAvailableParkingSpots(data.propertyId);
+      const availableSpots = await getAvailableParkingSpots(data.propertyId);
       if (availableSpots.length > 0) {
         const spot = availableSpots[0];
-        spot.status = 'reserved';
-        spot.currentPassId = id;
-        spot.reservedUntil = data.validUntil;
-        guestParkingSpots.set(spot.id, spot);
-        pass.parkingAssigned = spot.spotNumber;
+        parkingAssigned = spot.spotNumber;
       }
     }
 
-    guestPasses.set(id, pass);
+    const pass = await prisma.guestPass.create({
+      data: {
+        propertyId: data.propertyId,
+        unitId: data.unitId,
+        residentId: data.residentId,
+        guestName: data.guestName,
+        guestEmail: data.guestEmail,
+        guestPhone: data.guestPhone,
+        passType: data.passType as GuestPassType,
+        purpose: data.purpose as GuestPassPurpose,
+        validFrom: data.validFrom,
+        validUntil: data.validUntil,
+        recurringDays: data.recurringDays || [],
+        accessCode: generateAccessCode(),
+        vehiclePlate: data.vehicleInfo?.licensePlate,
+        vehicleMake: data.vehicleInfo?.make,
+        vehicleModel: data.vehicleInfo?.model,
+        vehicleColor: data.vehicleInfo?.color,
+        parkingAssigned,
+        notes: data.notes,
+        status: 'active',
+      },
+      include: { checkIns: true },
+    });
+
+    // Update parking spot if assigned
+    if (parkingAssigned && data.vehicleInfo) {
+      await prisma.guestParking.updateMany({
+        where: {
+          propertyId: data.propertyId,
+          spotNumber: parkingAssigned,
+        },
+        data: {
+          status: 'reserved',
+          currentPassId: pass.id,
+          reservedUntil: data.validUntil,
+        },
+      });
+    }
+
     return reply.status(201).send(pass);
   });
 
   app.get('/passes', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { propertyId, unitId, status } = request.query as { propertyId?: string; unitId?: string; status?: string };
-    let passes = Array.from(guestPasses.values());
+    const { propertyId, unitId, status } = request.query as {
+      propertyId?: string;
+      unitId?: string;
+      status?: string;
+    };
 
-    if (propertyId) passes = passes.filter(p => p.propertyId === propertyId);
-    if (unitId) passes = passes.filter(p => p.unitId === unitId);
-    if (status) passes = passes.filter(p => p.status === status);
+    const where: Parameters<typeof prisma.guestPass.findMany>[0]['where'] = {};
+
+    if (propertyId) where.propertyId = propertyId;
+    if (unitId) where.unitId = unitId;
+    if (status) where.status = status as GuestPassStatus;
+
+    const passes = await prisma.guestPass.findMany({
+      where,
+      include: { checkIns: true },
+    });
 
     return reply.send(passes);
   });
 
   app.get('/passes/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const pass = guestPasses.get(id);
+
+    const pass = await prisma.guestPass.findUnique({
+      where: { id },
+      include: { checkIns: true },
+    });
+
     if (!pass) return reply.status(404).send({ error: 'Guest pass not found' });
     return reply.send(pass);
   });
 
   app.post('/passes/:id/revoke', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const pass = guestPasses.get(id);
-    if (!pass) return reply.status(404).send({ error: 'Guest pass not found' });
 
-    pass.status = 'revoked';
-    pass.updatedAt = new Date();
+    const pass = await prisma.guestPass.findUnique({
+      where: { id },
+    });
+
+    if (!pass) return reply.status(404).send({ error: 'Guest pass not found' });
 
     // Release parking spot
     if (pass.parkingAssigned) {
-      const spot = Array.from(guestParkingSpots.values()).find(
-        s => s.currentPassId === id
-      );
-      if (spot) {
-        spot.status = 'available';
-        spot.currentPassId = undefined;
-        spot.reservedUntil = undefined;
-        guestParkingSpots.set(spot.id, spot);
-      }
+      await prisma.guestParking.updateMany({
+        where: { currentPassId: id },
+        data: {
+          status: 'available',
+          currentPassId: null,
+          reservedUntil: null,
+        },
+      });
     }
 
-    guestPasses.set(id, pass);
-    return reply.send(pass);
+    const updated = await prisma.guestPass.update({
+      where: { id },
+      data: { status: 'revoked' },
+      include: { checkIns: true },
+    });
+
+    return reply.send(updated);
   });
 
   app.post('/passes/:id/extend', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const { newValidUntil } = request.body as { newValidUntil: string };
 
-    const pass = guestPasses.get(id);
+    const pass = await prisma.guestPass.findUnique({
+      where: { id },
+    });
+
     if (!pass) return reply.status(404).send({ error: 'Guest pass not found' });
 
     const newDate = new Date(newValidUntil);
 
     // Check policy compliance for extension
-    const compliance = checkPolicyCompliance(
+    const compliance = await checkPolicyCompliance(
       pass.propertyId,
       pass.unitId,
       pass.validFrom,
@@ -402,23 +410,26 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
     if (!compliance.compliant) {
       return reply.status(400).send({
         error: 'Policy violation',
-        violations: compliance.violations
+        violations: compliance.violations,
       });
     }
 
-    pass.validUntil = newDate;
-    pass.updatedAt = new Date();
-    guestPasses.set(id, pass);
+    const updated = await prisma.guestPass.update({
+      where: { id },
+      data: { validUntil: newDate },
+      include: { checkIns: true },
+    });
 
-    return reply.send(pass);
+    return reply.send(updated);
   });
 
   app.post('/passes/verify', async (request: FastifyRequest, reply: FastifyReply) => {
     const { accessCode } = request.body as { accessCode: string };
 
-    const pass = Array.from(guestPasses.values()).find(
-      p => p.accessCode === accessCode
-    );
+    const pass = await prisma.guestPass.findFirst({
+      where: { accessCode },
+      include: { checkIns: true },
+    });
 
     if (!pass) {
       return reply.status(404).send({ valid: false, error: 'Invalid access code' });
@@ -428,7 +439,7 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       valid,
       pass: valid ? pass : undefined,
-      error: valid ? undefined : 'Pass is not valid at this time'
+      error: valid ? undefined : 'Pass is not valid at this time',
     });
   });
 
@@ -436,69 +447,79 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
   app.post('/check-ins', async (request: FastifyRequest, reply: FastifyReply) => {
     const data = checkInSchema.parse(request.body);
 
-    const pass = guestPasses.get(data.passId);
+    const pass = await prisma.guestPass.findUnique({
+      where: { id: data.passId },
+      include: { checkIns: true },
+    });
+
     if (!pass) return reply.status(404).send({ error: 'Guest pass not found' });
 
     if (!isPassValid(pass)) {
       return reply.status(400).send({ error: 'Guest pass is not valid' });
     }
 
-    const id = `checkin_${Date.now()}`;
-    const checkIn: GuestCheckIn = {
-      id,
-      passId: data.passId,
-      checkInTime: new Date(),
-      verificationMethod: data.verificationMethod,
-      verifiedBy: data.verifiedBy,
-      notes: data.notes
-    };
-
-    guestCheckIns.set(id, checkIn);
-    pass.checkIns.push(checkIn);
+    const checkIn = await prisma.guestCheckIn.create({
+      data: {
+        passId: data.passId,
+        checkInTime: new Date(),
+        verificationMethod: data.verificationMethod as VerificationMethod,
+        verifiedBy: data.verifiedBy,
+        notes: data.notes,
+      },
+    });
 
     // Mark one-time pass as used
     if (pass.passType === 'one_time') {
-      pass.status = 'used';
+      await prisma.guestPass.update({
+        where: { id: pass.id },
+        data: { status: 'used' },
+      });
     }
-
-    pass.updatedAt = new Date();
-    guestPasses.set(pass.id, pass);
 
     return reply.status(201).send(checkIn);
   });
 
   app.post('/check-ins/:id/checkout', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const checkIn = guestCheckIns.get(id);
+
+    const checkIn = await prisma.guestCheckIn.findUnique({
+      where: { id },
+    });
+
     if (!checkIn) return reply.status(404).send({ error: 'Check-in not found' });
 
     if (checkIn.checkOutTime) {
       return reply.status(400).send({ error: 'Already checked out' });
     }
 
-    checkIn.checkOutTime = new Date();
-    guestCheckIns.set(id, checkIn);
+    const updated = await prisma.guestCheckIn.update({
+      where: { id },
+      data: { checkOutTime: new Date() },
+    });
 
-    return reply.send(checkIn);
+    return reply.send(updated);
   });
 
   app.get('/check-ins', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId, date } = request.query as { propertyId?: string; date?: string };
-    let checkIns = Array.from(guestCheckIns.values());
+
+    const where: Parameters<typeof prisma.guestCheckIn.findMany>[0]['where'] = {};
 
     if (propertyId) {
-      checkIns = checkIns.filter(c => {
-        const pass = guestPasses.get(c.passId);
-        return pass?.propertyId === propertyId;
-      });
+      where.pass = { propertyId };
     }
 
     if (date) {
       const targetDate = new Date(date);
       const startOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
       const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
-      checkIns = checkIns.filter(c => c.checkInTime >= startOfDay && c.checkInTime < endOfDay);
+      where.checkInTime = { gte: startOfDay, lt: endOfDay };
     }
+
+    const checkIns = await prisma.guestCheckIn.findMany({
+      where,
+      include: { pass: true },
+    });
 
     return reply.send(checkIns);
   });
@@ -507,31 +528,34 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
   app.post('/parking', async (request: FastifyRequest, reply: FastifyReply) => {
     const data = parkingSpotSchema.parse(request.body);
 
-    const id = `gparking_${Date.now()}`;
-    const spot: GuestParking = {
-      id,
-      ...data,
-      status: 'available',
-      createdAt: new Date()
-    };
+    const spot = await prisma.guestParking.create({
+      data: {
+        propertyId: data.propertyId,
+        spotNumber: data.spotNumber,
+        location: data.location,
+        type: data.type as GuestParkingType,
+        status: 'available',
+      },
+    });
 
-    guestParkingSpots.set(id, spot);
     return reply.status(201).send(spot);
   });
 
   app.get('/parking', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId, status } = request.query as { propertyId?: string; status?: string };
-    let spots = Array.from(guestParkingSpots.values());
 
-    if (propertyId) spots = spots.filter(s => s.propertyId === propertyId);
-    if (status) spots = spots.filter(s => s.status === status);
+    const where: Parameters<typeof prisma.guestParking.findMany>[0]['where'] = {};
 
+    if (propertyId) where.propertyId = propertyId;
+    if (status) where.status = status as GuestParkingStatus;
+
+    const spots = await prisma.guestParking.findMany({ where });
     return reply.send(spots);
   });
 
   app.get('/parking/available/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const spots = getAvailableParkingSpots(propertyId);
+    const spots = await getAvailableParkingSpots(propertyId);
     return reply.send(spots);
   });
 
@@ -539,38 +563,70 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const { status } = request.body as { status: string };
 
-    const spot = guestParkingSpots.get(id);
+    const spot = await prisma.guestParking.findUnique({
+      where: { id },
+    });
+
     if (!spot) return reply.status(404).send({ error: 'Parking spot not found' });
 
-    spot.status = status as GuestParking['status'];
+    const updateData: Parameters<typeof prisma.guestParking.update>[0]['data'] = {
+      status: status as GuestParkingStatus,
+    };
+
     if (status === 'available') {
-      spot.currentPassId = undefined;
-      spot.reservedUntil = undefined;
+      updateData.currentPassId = null;
+      updateData.reservedUntil = null;
     }
 
-    guestParkingSpots.set(id, spot);
-    return reply.send(spot);
+    const updated = await prisma.guestParking.update({
+      where: { id },
+      data: updateData,
+    });
+
+    return reply.send(updated);
   });
 
   // Policies
   app.post('/policies', async (request: FastifyRequest, reply: FastifyReply) => {
     const data = policySchema.parse(request.body);
 
-    const id = `gpolicy_${Date.now()}`;
-    const policy: GuestPolicy = {
-      id,
-      ...data,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
+    const policy = await prisma.guestPolicy.upsert({
+      where: { propertyId: data.propertyId },
+      update: {
+        maxGuestsPerUnit: data.maxGuestsPerUnit,
+        maxConsecutiveDays: data.maxConsecutiveDays,
+        requiresPreRegistration: data.requiresPreRegistration,
+        requiresIdVerification: data.requiresIdVerification,
+        quietHoursStart: data.quietHoursStart,
+        quietHoursEnd: data.quietHoursEnd,
+        parkingRequired: data.parkingRequired,
+        allowedPurposes: data.allowedPurposes,
+        blackoutDates: data.blackoutDates || [],
+      },
+      create: {
+        propertyId: data.propertyId,
+        maxGuestsPerUnit: data.maxGuestsPerUnit,
+        maxConsecutiveDays: data.maxConsecutiveDays,
+        requiresPreRegistration: data.requiresPreRegistration,
+        requiresIdVerification: data.requiresIdVerification,
+        quietHoursStart: data.quietHoursStart,
+        quietHoursEnd: data.quietHoursEnd,
+        parkingRequired: data.parkingRequired,
+        allowedPurposes: data.allowedPurposes,
+        blackoutDates: data.blackoutDates || [],
+      },
+    });
 
-    guestPolicies.set(id, policy);
     return reply.status(201).send(policy);
   });
 
   app.get('/policies/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const policy = Array.from(guestPolicies.values()).find(p => p.propertyId === propertyId);
+
+    const policy = await prisma.guestPolicy.findUnique({
+      where: { propertyId },
+    });
+
     if (!policy) return reply.status(404).send({ error: 'Policy not found' });
     return reply.send(policy);
   });
@@ -579,37 +635,60 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const data = policySchema.parse(request.body);
 
-    const policy = guestPolicies.get(id);
+    const policy = await prisma.guestPolicy.findUnique({
+      where: { id },
+    });
+
     if (!policy) return reply.status(404).send({ error: 'Policy not found' });
 
-    Object.assign(policy, data, { updatedAt: new Date() });
-    guestPolicies.set(id, policy);
-    return reply.send(policy);
+    const updated = await prisma.guestPolicy.update({
+      where: { id },
+      data: {
+        maxGuestsPerUnit: data.maxGuestsPerUnit,
+        maxConsecutiveDays: data.maxConsecutiveDays,
+        requiresPreRegistration: data.requiresPreRegistration,
+        requiresIdVerification: data.requiresIdVerification,
+        quietHoursStart: data.quietHoursStart,
+        quietHoursEnd: data.quietHoursEnd,
+        parkingRequired: data.parkingRequired,
+        allowedPurposes: data.allowedPurposes,
+        blackoutDates: data.blackoutDates || [],
+      },
+    });
+
+    return reply.send(updated);
   });
 
   // Incidents
   app.post('/incidents', async (request: FastifyRequest, reply: FastifyReply) => {
     const data = incidentSchema.parse(request.body);
 
-    const id = `gincident_${Date.now()}`;
-    const incident: GuestIncident = {
-      id,
-      ...data,
-      reportedAt: new Date(),
-      status: 'open'
-    };
+    const incident = await prisma.guestIncident.create({
+      data: {
+        propertyId: data.propertyId,
+        passId: data.passId,
+        guestName: data.guestName,
+        incidentType: data.incidentType as GuestIncidentType,
+        description: data.description,
+        reportedBy: data.reportedBy,
+        reportedAt: new Date(),
+        severity: data.severity as GuestIncidentSeverity,
+        status: 'open',
+      },
+    });
 
-    guestIncidents.set(id, incident);
     return reply.status(201).send(incident);
   });
 
   app.get('/incidents', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId, status } = request.query as { propertyId?: string; status?: string };
-    let incidents = Array.from(guestIncidents.values());
 
-    if (propertyId) incidents = incidents.filter(i => i.propertyId === propertyId);
-    if (status) incidents = incidents.filter(i => i.status === status);
+    const where: Parameters<typeof prisma.guestIncident.findMany>[0]['where'] = {};
 
+    if (propertyId) where.propertyId = propertyId;
+    if (status) where.status = status as GuestIncidentStatus;
+
+    const incidents = await prisma.guestIncident.findMany({ where });
     return reply.send(incidents);
   });
 
@@ -617,28 +696,35 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const { resolution, resolvedBy } = request.body as { resolution: string; resolvedBy: string };
 
-    const incident = guestIncidents.get(id);
+    const incident = await prisma.guestIncident.findUnique({
+      where: { id },
+    });
+
     if (!incident) return reply.status(404).send({ error: 'Incident not found' });
 
-    incident.status = 'resolved';
-    incident.resolution = resolution;
-    incident.resolvedBy = resolvedBy;
-    incident.resolvedAt = new Date();
+    const updated = await prisma.guestIncident.update({
+      where: { id },
+      data: {
+        status: 'resolved',
+        resolution,
+        resolvedBy,
+        resolvedAt: new Date(),
+      },
+    });
 
-    guestIncidents.set(id, incident);
-    return reply.send(incident);
+    return reply.send(updated);
   });
 
   // Stats
   app.get('/stats/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const stats = getGuestStats(propertyId);
+    const stats = await getGuestStats(propertyId);
     return reply.send(stats);
   });
 
   // Expire old passes (maintenance endpoint)
   app.post('/maintenance/expire-passes', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const expiredCount = expireOldPasses();
+    const expiredCount = await expireOldPasses();
     return reply.send({ expiredCount });
   });
 }
