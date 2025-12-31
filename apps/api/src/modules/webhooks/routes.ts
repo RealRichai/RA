@@ -1,7 +1,7 @@
 /**
  * Webhook Routes
  *
- * Handles incoming webhooks from external services like Stripe.
+ * Handles incoming webhooks from external services like Stripe and partner providers.
  * These endpoints do NOT require authentication - they use signature verification instead.
  *
  * Payment Lifecycle State Machine:
@@ -14,27 +14,28 @@
  * - charge.dispute.created -> disputed
  * - charge.dispute.closed (won) -> completed
  * - charge.dispute.closed (lost) -> refunded
+ *
+ * Partner Policy Lifecycle:
+ * - policy.bound -> active
+ * - policy.cancelled -> cancelled
+ * - policy.renewed -> active (new term)
+ * - policy.expired -> expired
  */
 
 import { prisma } from '@realriches/database';
 import {
   createWebhookProcessor,
-  createTransaction,
-  postTransaction,
-  buildRentPaymentEntries,
-  buildRefundEntries,
-  buildDisputeHoldEntries,
-  buildDisputeResolutionEntries,
-  generateWebhookIdempotencyKey,
   RENT_PLATFORM_FEE_PERCENT,
   STRIPE_FEE_PERCENT,
   STRIPE_FEE_FIXED_CENTS,
   type WebhookHandlerResult,
-  type WebhookEvent,
-  type IdempotencyManager,
 } from '@realriches/revenue-engine';
-import { AppError, generatePrefixedId } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+
+// Import to get type augmentation for rawBody
+import '../../plugins/raw-body';
+
+import { partnerWebhookRoutes } from './partner-webhooks';
 
 import { getWebhookSecret, isStripeConfigured, redactStripeData } from '../../lib/stripe';
 
@@ -106,6 +107,9 @@ const STRIPE_STATUS_MAP: Record<string, PaymentStatus> = {
 // =============================================================================
 
 export async function webhookRoutes(app: FastifyInstance): Promise<void> {
+  // Register partner webhook routes (LeaseLock, Rhino, etc.)
+  await app.register(partnerWebhookRoutes, { prefix: '/partners' });
+
   /**
    * Stripe Webhook Endpoint
    *
