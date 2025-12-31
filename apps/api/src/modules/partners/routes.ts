@@ -17,6 +17,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import { AnalyticsAggregationJob } from '../../jobs/analytics-aggregation';
+import { ComplianceAuditJob } from '../../jobs/compliance-audit';
 import { DataCleanupJob } from '../../jobs/data-cleanup';
 import { PartnerHealthJob } from '../../jobs/partner-health';
 import { WebhookRetryJob } from '../../jobs/webhook-retry';
@@ -1066,6 +1067,162 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
           date,
           metrics,
           durationMs: Date.now() - startTime,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/compliance/latest - Get latest audit summary
+  // =========================================================================
+  app.get(
+    '/admin/compliance/latest',
+    {
+      schema: {
+        description: 'Get latest compliance audit summary',
+        tags: ['Admin', 'Compliance'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const summary = await ComplianceAuditJob.getLatestAuditSummary();
+
+      if (!summary) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'NO_AUDIT',
+            message: 'No compliance audit has been run yet',
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: summary,
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/compliance/history - Get audit history
+  // =========================================================================
+  app.get(
+    '/admin/compliance/history',
+    {
+      schema: {
+        description: 'Get compliance audit history',
+        tags: ['Admin', 'Compliance'],
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            days: { type: 'integer', default: 30 },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Querystring: { days?: number } }>,
+      reply: FastifyReply
+    ) => {
+      const { days = 30 } = request.query;
+      const history = await ComplianceAuditJob.getAuditHistory(days);
+
+      return reply.send({
+        success: true,
+        data: {
+          days,
+          count: history.length,
+          audits: history,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/compliance/entity/:entityType/:entityId - Get entity violations
+  // =========================================================================
+  app.get(
+    '/admin/compliance/entity/:entityType/:entityId',
+    {
+      schema: {
+        description: 'Get compliance violations for a specific entity',
+        tags: ['Admin', 'Compliance'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['entityType', 'entityId'],
+          properties: {
+            entityType: { type: 'string', enum: ['listing', 'lease', 'property'] },
+            entityId: { type: 'string' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { entityType: string; entityId: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { entityType, entityId } = request.params;
+      const violations = await ComplianceAuditJob.getEntityViolations(entityType, entityId);
+
+      return reply.send({
+        success: true,
+        data: {
+          entityType,
+          entityId,
+          violations,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // POST /admin/compliance/audit/:entityType/:entityId - Audit specific entity
+  // =========================================================================
+  app.post(
+    '/admin/compliance/audit/:entityType/:entityId',
+    {
+      schema: {
+        description: 'Run compliance audit for a specific entity',
+        tags: ['Admin', 'Compliance'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['entityType', 'entityId'],
+          properties: {
+            entityType: { type: 'string', enum: ['listing', 'lease', 'property'] },
+            entityId: { type: 'string' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { entityType: string; entityId: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { entityType, entityId } = request.params;
+
+      const result = await ComplianceAuditJob.auditEntity(
+        entityType as 'listing' | 'lease' | 'property',
+        entityId
+      );
+
+      return reply.send({
+        success: true,
+        data: {
+          entityType,
+          entityId,
+          marketPack: result.marketPack,
+          checksPerformed: result.checksPerformed,
+          violationCount: result.violations.length,
+          violations: result.violations,
+          passed: result.violations.length === 0,
         },
       });
     }
