@@ -26,8 +26,10 @@ import { complianceRoutes } from './compliance/routes';
 import { esignatureRoutes } from './documents/esignature';
 import { documentRoutes } from './documents/routes';
 import { healthRoutes } from './health/routes';
+import { inspectionRoutes } from './inspections/routes';
 import { renewalRoutes } from './leases/renewals';
 import { leaseRoutes } from './leases/routes';
+import { leaseTemplateRoutes } from './leases/templates';
 import { listingRoutes } from './listings/routes';
 import { maintenanceRoutes } from './maintenance/routes';
 import { workflowRoutes } from './maintenance/workflows';
@@ -36,6 +38,7 @@ import { pushNotificationRoutes } from './notifications/push';
 import { notificationRoutes } from './notifications/routes';
 import { partnerRoutes } from './partners/routes';
 import { reconciliationRoutes } from './payments/reconciliation';
+import { rentCollectionRoutes } from './payments/rent-collection';
 import { paymentRoutes } from './payments/routes';
 import { comparableRoutes } from './properties/comparables';
 import { propertyRoutes } from './properties/routes';
@@ -44,6 +47,7 @@ import { reportRoutes } from './reports/routes';
 import { searchRoutes } from './search/routes';
 import { tenantPortalRoutes } from './tenant-portal/routes';
 import { userRoutes } from './users/routes';
+import { vendorRoutes } from './vendors/routes';
 import { webhookRoutes } from './webhooks/routes';
 
 export async function registerModules(app: FastifyInstance): Promise<void> {
@@ -92,6 +96,10 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(pushNotificationRoutes, { prefix: '/push' });
       await api.register(tenantPortalRoutes, { prefix: '/tenant' });
       await api.register(comparableRoutes, { prefix: '/comparables' });
+      await api.register(rentCollectionRoutes, { prefix: '/rent-collection' });
+      await api.register(inspectionRoutes, { prefix: '/inspections' });
+      await api.register(vendorRoutes, { prefix: '/vendors' });
+      await api.register(leaseTemplateRoutes, { prefix: '/lease-templates' });
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
