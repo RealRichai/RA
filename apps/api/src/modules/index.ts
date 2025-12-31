@@ -1,6 +1,8 @@
 import { getConfig } from '@realriches/config';
 import type { FastifyInstance } from 'fastify';
 
+import { metricsRoutes } from '../plugins/metrics';
+
 import { aiRoutes } from './ai/routes';
 import { analyticsRoutes } from './analytics/routes';
 import { authRoutes } from './auth/routes';
@@ -9,7 +11,6 @@ import { commercialRoutes } from './commercial/routes';
 import { complianceRoutes } from './compliance/routes';
 import { documentRoutes } from './documents/routes';
 import { healthRoutes } from './health/routes';
-import { metricsRoutes } from '../plugins/metrics';
 import { leaseRoutes } from './leases/routes';
 import { listingRoutes } from './listings/routes';
 import { maintenanceRoutes } from './maintenance/routes';
