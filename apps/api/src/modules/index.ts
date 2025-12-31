@@ -20,6 +20,7 @@ import { aiRoutes } from './ai/routes';
 import { analyticsRoutes } from './analytics/routes';
 import { mfaRoutes } from './auth/mfa';
 import { authRoutes } from './auth/routes';
+import { budgetRoutes } from './budgets/routes';
 import { commerceRoutes } from './commerce/routes';
 import { commercialRoutes } from './commercial/routes';
 import { communicationRoutes } from './communications/routes';
@@ -38,6 +39,7 @@ import { workflowRoutes } from './maintenance/workflows';
 import { marketingRoutes } from './marketing/routes';
 import { pushNotificationRoutes } from './notifications/push';
 import { notificationRoutes } from './notifications/routes';
+import { ownerPortalRoutes } from './owner-portal/routes';
 import { partnerRoutes } from './partners/routes';
 import { reconciliationRoutes } from './payments/reconciliation';
 import { rentCollectionRoutes } from './payments/rent-collection';
@@ -49,8 +51,10 @@ import { websocketPlugin } from './realtime/websocket';
 import { reportRoutes } from './reports/routes';
 import { screeningRoutes } from './screening/routes';
 import { searchRoutes } from './search/routes';
+import { showingRoutes } from './showings/routes';
 import { tenantPortalRoutes } from './tenant-portal/routes';
 import { userRoutes } from './users/routes';
+import { utilitiesRoutes } from './utilities/routes';
 import { vendorRoutes } from './vendors/routes';
 import { webhookRoutes } from './webhooks/routes';
 
@@ -108,6 +112,10 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(screeningRoutes, { prefix: '/screening' });
       await api.register(communicationRoutes, { prefix: '/communications' });
       await api.register(insuranceRoutes, { prefix: '/insurance' });
+      await api.register(utilitiesRoutes, { prefix: '/utilities' });
+      await api.register(ownerPortalRoutes, { prefix: '/owner-portal' });
+      await api.register(budgetRoutes, { prefix: '/budgets' });
+      await api.register(showingRoutes, { prefix: '/showings' });
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });

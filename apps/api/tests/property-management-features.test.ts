@@ -88,6 +88,62 @@ import {
   type InsurancePolicy,
 } from '../src/modules/insurance/routes';
 
+// Utility Management imports
+import {
+  providers as utilityProviders,
+  accounts as utilityAccounts,
+  bills as utilityBills,
+  rubsConfigs,
+  calculateRUBSAllocation,
+  calculateUsage,
+  estimateMonthlyAverage,
+  type RUBSConfig,
+  type UtilityBill,
+} from '../src/modules/utilities/routes';
+
+// Owner Portal imports
+import {
+  owners,
+  ownerships,
+  statements as ownerStatements,
+  distributions,
+  calculateIncome,
+  calculateExpenses,
+  calculateStatementSummary,
+  calculateManagementFee,
+  type StatementLineItem,
+} from '../src/modules/owner-portal/routes';
+
+// Budget & Forecasting imports
+import {
+  budgets,
+  budgetActuals,
+  forecasts,
+  capExItems,
+  calculateVariance,
+  getVarianceStatus,
+  distributeAnnualToMonths,
+  aggregateMonthlyToQuarterly,
+  applyGrowthRate,
+  calculateNPV,
+  generateVarianceInsights,
+} from '../src/modules/budgets/routes';
+
+// Showing Scheduler imports
+import {
+  showings,
+  prospects,
+  agents as showingAgents,
+  listingAvailability,
+  generateTimeSlots,
+  getDayOfWeek,
+  timeToMinutes,
+  minutesToTime,
+  calculateShowingStats,
+  type ListingAvailability,
+  type Showing,
+} from '../src/modules/showings/routes';
+
 describe('Automated Rent Collection', () => {
   beforeEach(() => {
     schedules.clear();
@@ -2586,6 +2642,910 @@ describe('Insurance Tracking', () => {
 
       expect(alerts.get(alert.id)?.acknowledgedAt).not.toBeNull();
       expect(alerts.get(alert.id)?.acknowledgedBy).toBe('admin-1');
+    });
+  });
+});
+
+describe('Utility Management', () => {
+  beforeEach(() => {
+    utilityProviders.clear();
+    utilityAccounts.clear();
+    utilityBills.clear();
+    rubsConfigs.clear();
+  });
+
+  describe('Usage Calculations', () => {
+    describe('calculateUsage', () => {
+      it('should calculate usage difference', () => {
+        expect(calculateUsage(1500, 1200)).toBe(300);
+        expect(calculateUsage(2000, 1500)).toBe(500);
+      });
+
+      it('should handle zero usage', () => {
+        expect(calculateUsage(1000, 1000)).toBe(0);
+      });
+
+      it('should handle negative difference (meter reset)', () => {
+        expect(calculateUsage(100, 9900)).toBe(0);
+      });
+    });
+
+    describe('estimateMonthlyAverage', () => {
+      it('should calculate average from bills', () => {
+        const bills: Partial<UtilityBill>[] = [
+          { totalAmount: 100 },
+          { totalAmount: 120 },
+          { totalAmount: 80 },
+        ];
+        expect(estimateMonthlyAverage(bills as UtilityBill[])).toBe(100);
+      });
+
+      it('should return 0 for empty array', () => {
+        expect(estimateMonthlyAverage([])).toBe(0);
+      });
+    });
+  });
+
+  describe('RUBS Allocation', () => {
+    const testConfig: RUBSConfig = {
+      id: 'config-1',
+      propertyId: 'prop-1',
+      utilityType: 'water',
+      allocationMethod: 'equal',
+      adminFeeType: 'percentage',
+      adminFeeAmount: 5,
+      includeVacantUnits: false,
+      minimumCharge: null,
+      maximumCharge: null,
+      customWeights: null,
+      effectiveDate: new Date(),
+      endDate: null,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const testUnits = [
+      { id: 'u1', name: 'Unit 1', squareFootage: 800, bedrooms: 2, occupants: 2, tenantId: 't1', tenantName: 'John', isVacant: false },
+      { id: 'u2', name: 'Unit 2', squareFootage: 1000, bedrooms: 3, occupants: 3, tenantId: 't2', tenantName: 'Jane', isVacant: false },
+      { id: 'u3', name: 'Unit 3', squareFootage: 600, bedrooms: 1, occupants: 1, tenantId: null, tenantName: null, isVacant: true },
+    ];
+
+    describe('calculateRUBSAllocation', () => {
+      it('should allocate equally', () => {
+        const allocations = calculateRUBSAllocation(testConfig, 300, testUnits);
+
+        // Should only include occupied units (2)
+        expect(allocations.length).toBe(2);
+
+        // Each unit gets 50% of base + admin fee
+        const basePerUnit = 150; // 300 / 2
+        const adminFee = 15; // 300 * 5%
+        const adminPerUnit = 7.5;
+        const expectedTotal = basePerUnit + adminPerUnit;
+
+        expect(allocations[0].baseAmount).toBe(basePerUnit);
+        expect(allocations[0].totalAmount).toBeCloseTo(expectedTotal, 1);
+      });
+
+      it('should allocate by square footage', () => {
+        const sqftConfig = { ...testConfig, allocationMethod: 'square_footage' as const };
+        const allocations = calculateRUBSAllocation(sqftConfig, 180, testUnits);
+
+        // Total sqft = 800 + 1000 = 1800
+        // Unit 1: 800/1800 = 44.44%
+        // Unit 2: 1000/1800 = 55.56%
+        expect(allocations[0].allocationPercentage).toBeCloseTo(44.44, 1);
+        expect(allocations[1].allocationPercentage).toBeCloseTo(55.56, 1);
+      });
+
+      it('should allocate by bedroom count', () => {
+        const bedroomConfig = { ...testConfig, allocationMethod: 'bedroom_count' as const };
+        const allocations = calculateRUBSAllocation(bedroomConfig, 100, testUnits);
+
+        // Total bedrooms = 2 + 3 = 5
+        // Unit 1: 2/5 = 40%
+        // Unit 2: 3/5 = 60%
+        expect(allocations[0].allocationPercentage).toBe(40);
+        expect(allocations[1].allocationPercentage).toBe(60);
+      });
+
+      it('should allocate by occupancy', () => {
+        const occupancyConfig = { ...testConfig, allocationMethod: 'occupancy' as const };
+        const allocations = calculateRUBSAllocation(occupancyConfig, 100, testUnits);
+
+        // Total occupants = 2 + 3 = 5
+        expect(allocations[0].allocationPercentage).toBe(40);
+        expect(allocations[1].allocationPercentage).toBe(60);
+      });
+
+      it('should include vacant units when configured', () => {
+        const includeVacantConfig = { ...testConfig, includeVacantUnits: true };
+        const allocations = calculateRUBSAllocation(includeVacantConfig, 300, testUnits);
+
+        expect(allocations.length).toBe(3);
+        const vacantUnit = allocations.find((a) => a.isVacant);
+        expect(vacantUnit).toBeDefined();
+      });
+
+      it('should apply minimum charge', () => {
+        const minConfig = { ...testConfig, minimumCharge: 100 };
+        const allocations = calculateRUBSAllocation(minConfig, 100, testUnits);
+
+        // Even though 100/2 = 50, minimum is 100
+        expect(allocations[0].totalAmount).toBeGreaterThanOrEqual(100);
+      });
+
+      it('should apply maximum charge', () => {
+        const maxConfig = { ...testConfig, maximumCharge: 50 };
+        const allocations = calculateRUBSAllocation(maxConfig, 1000, testUnits);
+
+        // Even though 1000/2 = 500, maximum is 50
+        expect(allocations[0].totalAmount).toBeLessThanOrEqual(50);
+      });
+
+      it('should handle flat admin fee', () => {
+        const flatFeeConfig = { ...testConfig, adminFeeType: 'flat' as const, adminFeeAmount: 20 };
+        const allocations = calculateRUBSAllocation(flatFeeConfig, 100, testUnits);
+
+        const totalAdminFee = allocations.reduce((sum, a) => sum + a.adminFee, 0);
+        expect(totalAdminFee).toBe(20);
+      });
+    });
+  });
+
+  describe('Bill Tracking', () => {
+    it('should store utility bill', () => {
+      const now = new Date();
+      const dueDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      utilityBills.set('bill-1', {
+        id: 'bill-1',
+        accountId: 'acct-1',
+        propertyId: 'prop-1',
+        unitId: null,
+        providerId: 'prov-1',
+        utilityType: 'electric',
+        billNumber: 'BILL-001',
+        statementDate: now,
+        dueDate,
+        periodStart: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+        periodEnd: new Date(now.getFullYear(), now.getMonth(), 0),
+        previousReading: 1000,
+        currentReading: 1200,
+        usage: 200,
+        usageUnit: 'kWh',
+        amount: 45.00,
+        taxes: 3.50,
+        fees: 1.50,
+        totalAmount: 50.00,
+        status: 'pending',
+        paidDate: null,
+        paidAmount: null,
+        paymentMethod: null,
+        paymentReference: null,
+        documentUrl: null,
+        notes: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const bill = utilityBills.get('bill-1');
+      expect(bill?.totalAmount).toBe(50);
+      expect(bill?.usage).toBe(200);
+    });
+  });
+});
+
+describe('Owner Portal', () => {
+  beforeEach(() => {
+    owners.clear();
+    ownerships.clear();
+    ownerStatements.clear();
+    distributions.clear();
+  });
+
+  describe('Statement Calculations', () => {
+    describe('calculateIncome', () => {
+      it('should categorize income correctly', () => {
+        const lineItems: StatementLineItem[] = [
+          { id: '1', date: new Date(), category: 'rent', description: 'Rent', unit: null, amount: 2000, type: 'income', referenceId: null, referenceType: null },
+          { id: '2', date: new Date(), category: 'late_fee', description: 'Late Fee', unit: null, amount: 50, type: 'income', referenceId: null, referenceType: null },
+          { id: '3', date: new Date(), category: 'pet_fee', description: 'Pet Fee', unit: null, amount: 25, type: 'income', referenceId: null, referenceType: null },
+        ];
+
+        const income = calculateIncome(lineItems);
+
+        expect(income.rent).toBe(2000);
+        expect(income.lateFees).toBe(50);
+        expect(income.petFees).toBe(25);
+        expect(income.totalIncome).toBe(2075);
+      });
+
+      it('should exclude expense items', () => {
+        const lineItems: StatementLineItem[] = [
+          { id: '1', date: new Date(), category: 'rent', description: 'Rent', unit: null, amount: 1500, type: 'income', referenceId: null, referenceType: null },
+          { id: '2', date: new Date(), category: 'maintenance', description: 'Repair', unit: null, amount: 200, type: 'expense', referenceId: null, referenceType: null },
+        ];
+
+        const income = calculateIncome(lineItems);
+        expect(income.totalIncome).toBe(1500);
+      });
+    });
+
+    describe('calculateExpenses', () => {
+      it('should categorize expenses correctly', () => {
+        const lineItems: StatementLineItem[] = [
+          { id: '1', date: new Date(), category: 'maintenance', description: 'Repair', unit: null, amount: 200, type: 'expense', referenceId: null, referenceType: null },
+          { id: '2', date: new Date(), category: 'utilities', description: 'Water', unit: null, amount: 75, type: 'expense', referenceId: null, referenceType: null },
+          { id: '3', date: new Date(), category: 'insurance', description: 'Insurance', unit: null, amount: 150, type: 'expense', referenceId: null, referenceType: null },
+        ];
+
+        const expenses = calculateExpenses(lineItems);
+
+        expect(expenses.maintenance).toBe(200);
+        expect(expenses.utilities).toBe(75);
+        expect(expenses.insurance).toBe(150);
+        expect(expenses.totalExpenses).toBe(425);
+      });
+    });
+
+    describe('calculateManagementFee', () => {
+      it('should calculate percentage fee', () => {
+        expect(calculateManagementFee(10000, 'percentage', 8)).toBe(800);
+        expect(calculateManagementFee(5000, 'percentage', 10)).toBe(500);
+      });
+
+      it('should return flat fee', () => {
+        expect(calculateManagementFee(10000, 'flat', 500)).toBe(500);
+        expect(calculateManagementFee(5000, 'flat', 500)).toBe(500);
+      });
+    });
+
+    describe('calculateStatementSummary', () => {
+      it('should calculate owner share correctly', () => {
+        const income = { rent: 3000, lateFees: 0, applicationFees: 0, petFees: 0, parkingFees: 0, utilityReimbursements: 0, otherIncome: 0, totalIncome: 3000 };
+        const expenses = { managementFee: 240, maintenance: 200, utilities: 0, insurance: 0, propertyTax: 0, hoa: 0, mortgage: 0, reserves: 0, otherExpenses: 0, totalExpenses: 440 };
+
+        const summary = calculateStatementSummary(income, expenses, 50, 5);
+
+        expect(summary.netOperatingIncome).toBe(2560);
+        expect(summary.ownershipPercentage).toBe(50);
+        expect(summary.ownerShare).toBe(1280); // 50% of NOI
+        expect(summary.reserveContribution).toBe(64); // 5% of owner share
+        expect(summary.distributionAmount).toBe(1216); // owner share - reserves
+      });
+
+      it('should handle 100% ownership', () => {
+        const income = { rent: 2000, lateFees: 0, applicationFees: 0, petFees: 0, parkingFees: 0, utilityReimbursements: 0, otherIncome: 0, totalIncome: 2000 };
+        const expenses = { managementFee: 160, maintenance: 0, utilities: 0, insurance: 0, propertyTax: 0, hoa: 0, mortgage: 0, reserves: 0, otherExpenses: 0, totalExpenses: 160 };
+
+        const summary = calculateStatementSummary(income, expenses, 100, 0);
+
+        expect(summary.ownerShare).toBe(1840);
+        expect(summary.distributionAmount).toBe(1840);
+      });
+    });
+  });
+
+  describe('Owner Management', () => {
+    it('should store owner', () => {
+      const now = new Date();
+      owners.set('owner-1', {
+        id: 'owner-1',
+        userId: 'user-1',
+        name: 'John Smith',
+        email: 'john@example.com',
+        phone: '555-1234',
+        address: '123 Main St',
+        taxId: '***-**-1234',
+        taxIdType: 'ssn',
+        ownershipType: 'individual',
+        distributionMethod: 'ach',
+        bankAccountId: null,
+        holdDistributions: false,
+        minimumDistributionAmount: 100,
+        statementDelivery: 'email',
+        portalEnabled: true,
+        lastLoginAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      expect(owners.size).toBe(1);
+      const owner = owners.get('owner-1');
+      expect(owner?.name).toBe('John Smith');
+      expect(owner?.distributionMethod).toBe('ach');
+    });
+  });
+
+  describe('Distribution Management', () => {
+    it('should track distribution status', () => {
+      const now = new Date();
+      const distribution = {
+        id: 'dist-1',
+        ownerId: 'owner-1',
+        statementId: 'stmt-1',
+        propertyId: 'prop-1',
+        amount: 1500,
+        method: 'ach' as const,
+        status: 'pending' as const,
+        scheduledDate: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+        processedDate: null,
+        bankAccountId: 'bank-1',
+        checkNumber: null,
+        wireReference: null,
+        achTransactionId: null,
+        failureReason: null,
+        notes: null,
+        createdById: 'admin-1',
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      distributions.set(distribution.id, distribution);
+      expect(distributions.get(distribution.id)?.status).toBe('pending');
+
+      // Process distribution
+      distribution.status = 'completed';
+      distribution.processedDate = now;
+      distribution.achTransactionId = 'ach_12345';
+      distributions.set(distribution.id, distribution);
+
+      expect(distributions.get(distribution.id)?.status).toBe('completed');
+      expect(distributions.get(distribution.id)?.achTransactionId).toBe('ach_12345');
+    });
+  });
+});
+
+describe('Budget & Forecasting', () => {
+  beforeEach(() => {
+    budgets.clear();
+    budgetActuals.clear();
+    forecasts.clear();
+    capExItems.clear();
+  });
+
+  describe('Variance Calculations', () => {
+    describe('calculateVariance', () => {
+      it('should calculate positive variance', () => {
+        const result = calculateVariance(1000, 1100);
+        expect(result.variance).toBe(100);
+        expect(result.percentage).toBe(10);
+      });
+
+      it('should calculate negative variance', () => {
+        const result = calculateVariance(1000, 900);
+        expect(result.variance).toBe(-100);
+        expect(result.percentage).toBe(-10);
+      });
+
+      it('should handle zero budget', () => {
+        const result = calculateVariance(0, 100);
+        expect(result.variance).toBe(100);
+        expect(result.percentage).toBe(100);
+      });
+
+      it('should handle both zero', () => {
+        const result = calculateVariance(0, 0);
+        expect(result.variance).toBe(0);
+        expect(result.percentage).toBe(0);
+      });
+    });
+
+    describe('getVarianceStatus', () => {
+      it('should return on_track for small variances', () => {
+        expect(getVarianceStatus('income', 3)).toBe('on_track');
+        expect(getVarianceStatus('expense', -3)).toBe('on_track');
+      });
+
+      it('should classify income variances correctly', () => {
+        expect(getVarianceStatus('income', 15)).toBe('significantly_over');
+        expect(getVarianceStatus('income', 7)).toBe('over');
+        expect(getVarianceStatus('income', -7)).toBe('under');
+        expect(getVarianceStatus('income', -15)).toBe('significantly_under');
+      });
+
+      it('should classify expense variances correctly', () => {
+        expect(getVarianceStatus('expense', 15)).toBe('significantly_over');
+        expect(getVarianceStatus('expense', 7)).toBe('over');
+        expect(getVarianceStatus('expense', -7)).toBe('under');
+        expect(getVarianceStatus('expense', -15)).toBe('significantly_under');
+      });
+    });
+  });
+
+  describe('Budget Distribution', () => {
+    describe('distributeAnnualToMonths', () => {
+      it('should distribute monthly evenly', () => {
+        const months = distributeAnnualToMonths(12000, 'monthly');
+        expect(months.length).toBe(12);
+        expect(months.every((m) => m === 1000)).toBe(true);
+      });
+
+      it('should distribute quarterly', () => {
+        const months = distributeAnnualToMonths(4000, 'quarterly');
+        expect(months.filter((m) => m === 1000).length).toBe(4);
+        expect(months.filter((m) => m === 0).length).toBe(8);
+      });
+
+      it('should handle annual payment', () => {
+        const months = distributeAnnualToMonths(5000, 'annual');
+        expect(months[11]).toBe(5000);
+        expect(months.slice(0, 11).every((m) => m === 0)).toBe(true);
+      });
+
+      it('should handle one-time payment', () => {
+        const months = distributeAnnualToMonths(1000, 'one_time', 6);
+        expect(months[5]).toBe(1000); // 0-indexed
+        expect(months.filter((m) => m === 0).length).toBe(11);
+      });
+    });
+
+    describe('aggregateMonthlyToQuarterly', () => {
+      it('should aggregate correctly', () => {
+        const monthly = [100, 100, 100, 200, 200, 200, 300, 300, 300, 400, 400, 400];
+        const quarterly = aggregateMonthlyToQuarterly(monthly);
+
+        expect(quarterly.length).toBe(4);
+        expect(quarterly[0]).toBe(300);
+        expect(quarterly[1]).toBe(600);
+        expect(quarterly[2]).toBe(900);
+        expect(quarterly[3]).toBe(1200);
+      });
+    });
+  });
+
+  describe('Financial Projections', () => {
+    describe('applyGrowthRate', () => {
+      it('should apply compound growth', () => {
+        const projections = applyGrowthRate(1000, 10, 3);
+
+        expect(projections.length).toBe(3);
+        expect(projections[0]).toBe(1000);
+        expect(projections[1]).toBe(1100);
+        expect(projections[2]).toBe(1210);
+      });
+
+      it('should handle zero growth', () => {
+        const projections = applyGrowthRate(1000, 0, 3);
+        expect(projections.every((p) => p === 1000)).toBe(true);
+      });
+
+      it('should handle negative growth', () => {
+        const projections = applyGrowthRate(1000, -10, 3);
+        expect(projections[1]).toBe(900);
+      });
+    });
+
+    describe('calculateNPV', () => {
+      it('should calculate NPV correctly', () => {
+        const cashFlows = [100, 100, 100];
+        const npv = calculateNPV(cashFlows, 10);
+
+        // NPV = 100/1.1 + 100/1.1^2 + 100/1.1^3
+        expect(npv).toBeCloseTo(248.69, 1);
+      });
+
+      it('should handle single cash flow', () => {
+        const npv = calculateNPV([1000], 10);
+        expect(npv).toBeCloseTo(909.09, 1);
+      });
+    });
+  });
+
+  describe('Variance Insights', () => {
+    describe('generateVarianceInsights', () => {
+      it('should generate insights for significant variances', () => {
+        const categories = [
+          { category: 'rental_income' as const, name: 'Rent', type: 'income' as const, budgeted: 1000, actual: 1200, variance: 200, variancePercent: 20, status: 'significantly_over' as const },
+          { category: 'maintenance' as const, name: 'Maintenance', type: 'expense' as const, budgeted: 500, actual: 600, variance: 100, variancePercent: 20, status: 'significantly_over' as const },
+        ];
+
+        const insights = generateVarianceInsights(categories);
+
+        expect(insights.length).toBeGreaterThan(0);
+        expect(insights.some((i) => i.includes('Rent'))).toBe(true);
+        expect(insights.some((i) => i.includes('Maintenance'))).toBe(true);
+      });
+
+      it('should report overall performance', () => {
+        const categories = [
+          { category: 'rental_income' as const, name: 'Rent', type: 'income' as const, budgeted: 1000, actual: 1020, variance: 20, variancePercent: 2, status: 'on_track' as const },
+          { category: 'maintenance' as const, name: 'Maintenance', type: 'expense' as const, budgeted: 500, actual: 510, variance: 10, variancePercent: 2, status: 'on_track' as const },
+        ];
+
+        const insights = generateVarianceInsights(categories);
+
+        expect(insights.some((i) => i.includes('100%') && i.includes('on track'))).toBe(true);
+      });
+    });
+  });
+
+  describe('CapEx Planning', () => {
+    it('should store CapEx item', () => {
+      const now = new Date();
+      const plannedDate = new Date(now.getFullYear() + 1, 6, 1);
+
+      capExItems.set('capex-1', {
+        id: 'capex-1',
+        propertyId: 'prop-1',
+        name: 'Roof Replacement',
+        description: 'Full roof replacement',
+        category: 'exterior',
+        estimatedCost: 15000,
+        actualCost: null,
+        status: 'planned',
+        priority: 'high',
+        plannedDate,
+        completedDate: null,
+        usefulLife: 25,
+        fundingSource: 'reserves',
+        notes: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const item = capExItems.get('capex-1');
+      expect(item?.name).toBe('Roof Replacement');
+      expect(item?.estimatedCost).toBe(15000);
+      expect(item?.usefulLife).toBe(25);
+    });
+
+    it('should track CapEx completion', () => {
+      const now = new Date();
+      const item = {
+        id: 'capex-2',
+        propertyId: 'prop-1',
+        name: 'HVAC Upgrade',
+        description: null,
+        category: 'mechanical',
+        estimatedCost: 8000,
+        actualCost: null,
+        status: 'budgeted' as const,
+        priority: 'medium' as const,
+        plannedDate: now,
+        completedDate: null,
+        usefulLife: 15,
+        fundingSource: 'operating' as const,
+        notes: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      capExItems.set(item.id, item);
+
+      // Complete it
+      item.status = 'completed';
+      item.completedDate = now;
+      item.actualCost = 7500;
+      capExItems.set(item.id, item);
+
+      expect(capExItems.get(item.id)?.status).toBe('completed');
+      expect(capExItems.get(item.id)?.actualCost).toBe(7500);
+    });
+  });
+});
+
+describe('Showing Scheduler', () => {
+  beforeEach(() => {
+    showings.clear();
+    prospects.clear();
+    showingAgents.clear();
+    listingAvailability.clear();
+  });
+
+  describe('Time Utilities', () => {
+    describe('getDayOfWeek', () => {
+      it('should return correct day of week', () => {
+        // Use local time constructor to avoid UTC timezone shift
+        expect(getDayOfWeek(new Date(2024, 0, 1))).toBe('monday'); // Jan 1, 2024 is Monday
+        expect(getDayOfWeek(new Date(2024, 0, 6))).toBe('saturday');
+        expect(getDayOfWeek(new Date(2024, 0, 7))).toBe('sunday');
+      });
+    });
+
+    describe('timeToMinutes', () => {
+      it('should convert time string to minutes', () => {
+        expect(timeToMinutes('00:00')).toBe(0);
+        expect(timeToMinutes('09:00')).toBe(540);
+        expect(timeToMinutes('12:30')).toBe(750);
+        expect(timeToMinutes('23:59')).toBe(1439);
+      });
+    });
+
+    describe('minutesToTime', () => {
+      it('should convert minutes to time string', () => {
+        expect(minutesToTime(0)).toBe('00:00');
+        expect(minutesToTime(540)).toBe('09:00');
+        expect(minutesToTime(750)).toBe('12:30');
+        expect(minutesToTime(1439)).toBe('23:59');
+      });
+    });
+  });
+
+  describe('Time Slot Generation', () => {
+    describe('generateTimeSlots', () => {
+      it('should generate slots based on availability', () => {
+        const availability: ListingAvailability = {
+          id: 'avail-1',
+          listingId: 'listing-1',
+          propertyId: 'prop-1',
+          defaultDuration: 30,
+          bufferTime: 15,
+          minNoticeHours: 2,
+          maxAdvanceDays: 14,
+          allowSelfSchedule: true,
+          allowSelfGuided: false,
+          requireApproval: false,
+          weeklySchedule: [
+            { dayOfWeek: 'monday', startTime: '09:00', endTime: '12:00', status: 'available' },
+          ],
+          blockedDates: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        // Find next Monday
+        const today = new Date();
+        const daysUntilMonday = (8 - today.getDay()) % 7 || 7;
+        const nextMonday = new Date(today);
+        nextMonday.setDate(today.getDate() + daysUntilMonday);
+
+        const slots = generateTimeSlots(availability, nextMonday, []);
+
+        // 09:00-12:00 with 30min slots and 15min buffer = 4 slots
+        // (09:00, 09:45, 10:30, 11:15)
+        expect(slots.length).toBeGreaterThan(0);
+        expect(slots[0].startTime).toBe('09:00');
+      });
+
+      it('should mark conflicting slots as unavailable', () => {
+        const availability: ListingAvailability = {
+          id: 'avail-2',
+          listingId: 'listing-2',
+          propertyId: 'prop-2',
+          defaultDuration: 30,
+          bufferTime: 0,
+          minNoticeHours: 0,
+          maxAdvanceDays: 14,
+          allowSelfSchedule: true,
+          allowSelfGuided: false,
+          requireApproval: false,
+          weeklySchedule: [
+            { dayOfWeek: 'tuesday', startTime: '10:00', endTime: '12:00', status: 'available' },
+          ],
+          blockedDates: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        // Find next Tuesday
+        const today = new Date();
+        const daysUntilTuesday = (9 - today.getDay()) % 7 || 7;
+        const nextTuesday = new Date(today);
+        nextTuesday.setDate(today.getDate() + daysUntilTuesday);
+
+        const existingShowing: Partial<Showing> = {
+          listingId: 'listing-2',
+          scheduledDate: nextTuesday,
+          startTime: '10:00',
+          endTime: '10:30',
+          status: 'confirmed',
+        };
+
+        const slots = generateTimeSlots(availability, nextTuesday, [existingShowing as Showing]);
+
+        const conflictingSlot = slots.find((s) => s.startTime === '10:00');
+        expect(conflictingSlot?.available).toBe(false);
+      });
+    });
+  });
+
+  describe('Showing Stats', () => {
+    describe('calculateShowingStats', () => {
+      it('should calculate stats correctly', () => {
+        const testShowings: Partial<Showing>[] = [
+          { status: 'completed', feedback: { rating: 4, interested: true, priceOpinion: null, conditionOpinion: null, locationOpinion: null, comments: null, followUpRequested: false, submittedAt: new Date() } },
+          { status: 'completed', feedback: { rating: 5, interested: true, priceOpinion: null, conditionOpinion: null, locationOpinion: null, comments: null, followUpRequested: false, submittedAt: new Date() } },
+          { status: 'completed', feedback: { rating: 3, interested: false, priceOpinion: null, conditionOpinion: null, locationOpinion: null, comments: null, followUpRequested: false, submittedAt: new Date() } },
+          { status: 'cancelled', feedback: null },
+          { status: 'no_show', feedback: null },
+        ];
+
+        const stats = calculateShowingStats(testShowings as Showing[]);
+
+        expect(stats.total).toBe(5);
+        expect(stats.completed).toBe(3);
+        expect(stats.cancelled).toBe(1);
+        expect(stats.noShow).toBe(1);
+        expect(stats.feedbackCount).toBe(3);
+        expect(stats.averageRating).toBe(4);
+        expect(stats.conversionRate).toBe(67); // 2/3 interested
+      });
+
+      it('should handle empty showings', () => {
+        const stats = calculateShowingStats([]);
+
+        expect(stats.total).toBe(0);
+        expect(stats.averageRating).toBe(0);
+        expect(stats.conversionRate).toBe(0);
+      });
+    });
+  });
+
+  describe('Prospect Management', () => {
+    it('should store prospect', () => {
+      const now = new Date();
+      prospects.set('prospect-1', {
+        id: 'prospect-1',
+        firstName: 'Alice',
+        lastName: 'Johnson',
+        email: 'alice@example.com',
+        phone: '555-9876',
+        preferredContactMethod: 'email',
+        source: 'Zillow',
+        prequalified: true,
+        budget: 2500,
+        desiredMoveIn: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+        desiredBedrooms: 2,
+        desiredBathrooms: 1,
+        pets: true,
+        notes: 'Has a small dog',
+        listingIds: ['listing-1'],
+        showingCount: 0,
+        lastContactAt: null,
+        status: 'new',
+        lostReason: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const prospect = prospects.get('prospect-1');
+      expect(prospect?.firstName).toBe('Alice');
+      expect(prospect?.budget).toBe(2500);
+      expect(prospect?.prequalified).toBe(true);
+    });
+
+    it('should track prospect status changes', () => {
+      const now = new Date();
+      const prospect = {
+        id: 'prospect-2',
+        firstName: 'Bob',
+        lastName: 'Smith',
+        email: 'bob@example.com',
+        phone: null,
+        preferredContactMethod: 'email' as const,
+        source: null,
+        prequalified: false,
+        budget: null,
+        desiredMoveIn: null,
+        desiredBedrooms: null,
+        desiredBathrooms: null,
+        pets: false,
+        notes: null,
+        listingIds: [],
+        showingCount: 0,
+        lastContactAt: null,
+        status: 'new' as const,
+        lostReason: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      prospects.set(prospect.id, prospect);
+      expect(prospects.get(prospect.id)?.status).toBe('new');
+
+      prospect.status = 'active';
+      prospect.showingCount = 1;
+      prospects.set(prospect.id, prospect);
+      expect(prospects.get(prospect.id)?.status).toBe('active');
+
+      prospect.status = 'qualified';
+      prospects.set(prospect.id, prospect);
+      expect(prospects.get(prospect.id)?.status).toBe('qualified');
+    });
+  });
+
+  describe('Showing Management', () => {
+    it('should store showing', () => {
+      const now = new Date();
+      const scheduledDate = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+
+      showings.set('showing-1', {
+        id: 'showing-1',
+        listingId: 'listing-1',
+        propertyId: 'prop-1',
+        unitId: 'unit-1',
+        prospectId: 'prospect-1',
+        agentId: 'agent-1',
+        type: 'in_person',
+        status: 'scheduled',
+        scheduledDate,
+        startTime: '14:00',
+        endTime: '14:30',
+        duration: 30,
+        timezone: 'America/New_York',
+        notes: null,
+        prospectNotes: null,
+        accessInstructions: 'Ring doorbell',
+        lockboxCode: null,
+        virtualMeetingUrl: null,
+        confirmationSentAt: null,
+        reminderSentAt: null,
+        feedback: null,
+        cancelledReason: null,
+        cancelledBy: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const showing = showings.get('showing-1');
+      expect(showing?.type).toBe('in_person');
+      expect(showing?.startTime).toBe('14:00');
+      expect(showing?.duration).toBe(30);
+    });
+
+    it('should track showing lifecycle', () => {
+      const now = new Date();
+      const showing = {
+        id: 'showing-2',
+        listingId: 'listing-1',
+        propertyId: 'prop-1',
+        unitId: null,
+        prospectId: 'prospect-1',
+        agentId: null,
+        type: 'virtual' as const,
+        status: 'scheduled' as const,
+        scheduledDate: now,
+        startTime: '10:00',
+        endTime: '10:30',
+        duration: 30,
+        timezone: 'America/New_York',
+        notes: null,
+        prospectNotes: null,
+        accessInstructions: null,
+        lockboxCode: null,
+        virtualMeetingUrl: 'https://meet.example.com/abc123',
+        confirmationSentAt: null,
+        reminderSentAt: null,
+        feedback: null,
+        cancelledReason: null,
+        cancelledBy: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      showings.set(showing.id, showing);
+
+      // Confirm
+      showing.status = 'confirmed';
+      showing.confirmationSentAt = now;
+      showings.set(showing.id, showing);
+      expect(showings.get(showing.id)?.status).toBe('confirmed');
+
+      // Start
+      showing.status = 'in_progress';
+      showings.set(showing.id, showing);
+      expect(showings.get(showing.id)?.status).toBe('in_progress');
+
+      // Complete with feedback
+      showing.status = 'completed';
+      showing.feedback = {
+        rating: 4,
+        interested: true,
+        priceOpinion: 'fair',
+        conditionOpinion: 'good',
+        locationOpinion: 'excellent',
+        comments: 'Great property',
+        followUpRequested: true,
+        submittedAt: now,
+      };
+      showings.set(showing.id, showing);
+
+      expect(showings.get(showing.id)?.status).toBe('completed');
+      expect(showings.get(showing.id)?.feedback?.rating).toBe(4);
+      expect(showings.get(showing.id)?.feedback?.interested).toBe(true);
     });
   });
 });
