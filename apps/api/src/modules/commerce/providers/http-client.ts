@@ -29,6 +29,12 @@ export interface HttpClientConfig {
   sandbox?: boolean;
 }
 
+export interface TraceContext {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+}
+
 export interface RequestOptions<TRequest = unknown, TResponse = unknown> {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
@@ -38,6 +44,8 @@ export interface RequestOptions<TRequest = unknown, TResponse = unknown> {
   headers?: Record<string, string>;
   idempotencyKey?: string;
   skipRetry?: boolean;
+  /** Trace context for distributed tracing */
+  trace?: TraceContext;
 }
 
 export interface HttpResult<T> {
@@ -174,11 +182,21 @@ export class TypedHttpClient {
       headers['Idempotency-Key'] = options.idempotencyKey;
     }
 
-    // Log request (with redacted body)
+    // Add trace context headers for distributed tracing
+    if (options.trace) {
+      headers['X-Trace-ID'] = options.trace.traceId;
+      headers['X-Span-ID'] = options.trace.spanId;
+      if (options.trace.parentSpanId) {
+        headers['X-Parent-Span-ID'] = options.trace.parentSpanId;
+      }
+    }
+
+    // Log request (with redacted body and trace context)
     logger.info({
       msg: 'provider_request',
       provider: this.providerName,
       requestId,
+      ...(options.trace && { traceId: options.trace.traceId, spanId: options.trace.spanId }),
       method: options.method,
       url: url.replace(this.config.apiKey, '[REDACTED]'),
       hasBody: !!options.body,

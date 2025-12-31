@@ -19,6 +19,7 @@ import { metricsPlugin } from './metrics';
 import { rateLimitPlugin } from './rate-limit';
 import rawBodyPlugin from './raw-body';
 import { redisPlugin } from './redis';
+import { tracingPlugin } from './tracing';
 
 export async function registerPlugins(app: FastifyInstance): Promise<void> {
   const config = getConfig();
@@ -26,6 +27,13 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
   // Raw body parser (for webhook signature verification)
   // Must be registered before other content type parsers
   await app.register(rawBodyPlugin);
+
+  // Request tracing (early registration for trace context availability)
+  await app.register(tracingPlugin, {
+    enabled: true,
+    serviceName: 'realriches-api',
+    includeResponseHeaders: true,
+  });
 
   // Security headers
   await app.register(helmet, {
@@ -44,7 +52,14 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
     origin: config.api.corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Request-ID',
+      'X-Trace-ID',
+      'X-Span-ID',
+      'X-Parent-Span-ID',
+    ],
     exposedHeaders: [
       'X-RateLimit-Limit',
       'X-RateLimit-Remaining',
@@ -53,6 +68,9 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
       'X-DailyQuota-Limit',
       'X-DailyQuota-Remaining',
       'Retry-After',
+      'X-Trace-ID',
+      'X-Span-ID',
+      'X-Parent-Span-ID',
     ],
   });
 
@@ -167,22 +185,28 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
   // Global error handler
   app.setErrorHandler(errorHandler);
 
-  // Request logging
+  // Request logging (trace context added by tracing plugin)
   app.addHook('onRequest', async (request) => {
+    const trace = (request as any).trace;
     request.log.info({
+      msg: 'request_start',
       method: request.method,
       url: request.url,
       requestId: request.id,
+      ...(trace && { traceId: trace.traceId, spanId: trace.spanId }),
     });
   });
 
   // Response logging
   app.addHook('onResponse', async (request, reply) => {
+    const trace = (request as any).trace;
     request.log.info({
+      msg: 'request_complete',
       method: request.method,
       url: request.url,
       statusCode: reply.statusCode,
       responseTime: reply.elapsedTime,
+      ...(trace && { traceId: trace.traceId, spanId: trace.spanId }),
     });
   });
 }

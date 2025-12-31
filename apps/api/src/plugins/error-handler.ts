@@ -19,6 +19,7 @@ interface ErrorResponse {
     stack?: string;
   };
   requestId: string;
+  traceId?: string;
   timestamp: string;
 }
 
@@ -28,6 +29,8 @@ export function errorHandler(
   reply: FastifyReply
 ): FastifyReply {
   const requestId = request.id || generateId();
+  const trace = (request as any).trace as { traceId: string; spanId: string } | undefined;
+  const traceId = trace?.traceId;
   const timestamp = new Date().toISOString();
   const isDev = process.env['NODE_ENV'] === 'development';
 
@@ -46,6 +49,7 @@ export function errorHandler(
         stack: isDev ? error.stack : undefined,
       },
       requestId,
+      ...(traceId && { traceId }),
       timestamp,
     };
   }
@@ -67,6 +71,7 @@ export function errorHandler(
         stack: isDev ? error.stack : undefined,
       },
       requestId,
+      ...(traceId && { traceId }),
       timestamp,
     };
   }
@@ -85,6 +90,7 @@ export function errorHandler(
             stack: isDev ? error.stack : undefined,
           },
           requestId,
+          ...(traceId && { traceId }),
           timestamp,
         };
         break;
@@ -99,6 +105,7 @@ export function errorHandler(
             stack: isDev ? error.stack : undefined,
           },
           requestId,
+          ...(traceId && { traceId }),
           timestamp,
         };
         break;
@@ -113,6 +120,7 @@ export function errorHandler(
             stack: isDev ? error.stack : undefined,
           },
           requestId,
+          ...(traceId && { traceId }),
           timestamp,
         };
         break;
@@ -127,6 +135,7 @@ export function errorHandler(
             stack: isDev ? error.stack : undefined,
           },
           requestId,
+          ...(traceId && { traceId }),
           timestamp,
         };
     }
@@ -143,6 +152,7 @@ export function errorHandler(
         stack: isDev ? error.stack : undefined,
       },
       requestId,
+      ...(traceId && { traceId }),
       timestamp,
     };
   }
@@ -157,6 +167,7 @@ export function errorHandler(
         stack: isDev ? error.stack : undefined,
       },
       requestId,
+      ...(traceId && { traceId }),
       timestamp,
     };
   }
@@ -172,13 +183,15 @@ export function errorHandler(
         stack: isDev ? error.stack : undefined,
       },
       requestId,
+      ...(traceId && { traceId }),
       timestamp,
     };
   }
 
-  // Log errors
+  // Log errors with trace context
   if (statusCode >= 500) {
     request.log.error({
+      msg: 'error_response',
       error: {
         message: error.message,
         stack: error.stack,
@@ -186,15 +199,18 @@ export function errorHandler(
       },
       statusCode,
       requestId,
+      ...(traceId && { traceId }),
     });
   } else if (statusCode >= 400) {
     request.log.warn({
+      msg: 'client_error',
       error: {
         message: error.message,
         code: 'code' in error ? error.code : undefined,
       },
       statusCode,
       requestId,
+      ...(traceId && { traceId }),
     });
   }
 
