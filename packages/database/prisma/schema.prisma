@@ -324,6 +324,9 @@ model Property {
   hoaAssessments     HOAAssessment[]
   hoaViolations      HOAViolation[]
   hoaArchitecturalRequests HOAArchitecturalRequest[]
+  propertyAmenities  Amenity[]
+  amenityBookings    AmenityBooking[]
+  amenityRecurringBookings AmenityRecurringBooking[]
 
   @@index([ownerId])
   @@index([managerId])
@@ -378,6 +381,8 @@ model Unit {
   hoaAssessments     HOAAssessment[]
   hoaViolations      HOAViolation[]
   hoaArchitecturalRequests HOAArchitecturalRequest[]
+  amenityBookings    AmenityBooking[]
+  amenityRecurringBookings AmenityRecurringBooking[]
 
   @@unique([propertyId, unitNumber])
   @@index([propertyId])
@@ -7424,4 +7429,205 @@ model HOADocument {
   @@index([associationId])
   @@index([type])
   @@map("hoa_documents")
+}
+
+// =============================================================================
+// Amenity Management Models
+// =============================================================================
+
+enum AmenityType {
+  pool
+  gym
+  clubhouse
+  tennis
+  basketball
+  bbq
+  theater
+  business_center
+  spa
+  rooftop
+  other
+
+  @@map("amenity_type")
+}
+
+enum AmenityStatus {
+  available
+  maintenance
+  closed
+  reserved
+
+  @@map("amenity_status")
+}
+
+enum AmenityBookingStatus {
+  pending
+  confirmed
+  checked_in
+  completed
+  cancelled
+  no_show
+
+  @@map("amenity_booking_status")
+}
+
+enum RecurrenceType {
+  daily
+  weekly
+  biweekly
+  monthly
+
+  @@map("recurrence_type")
+}
+
+enum AmenityWaitlistStatus {
+  waiting
+  notified
+  booked
+  expired
+
+  @@map("amenity_waitlist_status")
+}
+
+// Amenity Model
+model Amenity {
+  id                 String        @id @default(uuid()) @db.Uuid
+  propertyId         String        @map("property_id") @db.Uuid
+  name               String
+  type               AmenityType
+  description        String?
+  location           String?
+  capacity           Int           @default(10)
+  status             AmenityStatus @default(available)
+  requiresBooking    Boolean       @default(true) @map("requires_booking")
+  advanceBookingDays Int           @default(14) @map("advance_booking_days")
+  maxBookingDuration Int           @default(120) @map("max_booking_duration") // minutes
+  minBookingDuration Int           @default(30) @map("min_booking_duration") // minutes
+  maxBookingsPerDay  Int           @default(2) @map("max_bookings_per_day")
+  operatingHours     Json          @default("[]") @map("operating_hours") // OperatingHours[]
+  rules              Json          @default("[]") // string[]
+  photos             Json          @default("[]") // string[]
+  amenities          Json          @default("[]") // sub-amenities like "towels", "wifi"
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  property           Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  bookings           AmenityBooking[]
+  recurringBookings  AmenityRecurringBooking[]
+  waitlistEntries    AmenityWaitlist[]
+  usageLogs          AmenityUsageLog[]
+
+  @@index([propertyId])
+  @@index([type])
+  @@index([status])
+  @@map("amenities")
+}
+
+// AmenityBooking Model
+model AmenityBooking {
+  id               String               @id @default(uuid()) @db.Uuid
+  amenityId        String               @map("amenity_id") @db.Uuid
+  tenantId         String               @map("tenant_id") @db.Uuid
+  unitId           String               @map("unit_id") @db.Uuid
+  propertyId       String               @map("property_id") @db.Uuid
+  date             DateTime             @db.Date
+  startTime        String               @map("start_time") // HH:MM
+  endTime          String               @map("end_time") // HH:MM
+  guestCount       Int                  @default(1) @map("guest_count")
+  status           AmenityBookingStatus @default(pending)
+  confirmationCode String               @unique @map("confirmation_code")
+  checkInTime      DateTime?            @map("check_in_time")
+  checkOutTime     DateTime?            @map("check_out_time")
+  notes            String?
+  isRecurring      Boolean              @default(false) @map("is_recurring")
+  recurrenceId     String?              @map("recurrence_id") @db.Uuid
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+
+  amenity          Amenity              @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+  property         Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unit             Unit                 @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  recurringBooking AmenityRecurringBooking? @relation(fields: [recurrenceId], references: [id], onDelete: SetNull)
+  usageLogs        AmenityUsageLog[]
+
+  @@index([amenityId])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([date])
+  @@index([status])
+  @@map("amenity_bookings")
+}
+
+// AmenityRecurringBooking Model
+model AmenityRecurringBooking {
+  id             String         @id @default(uuid()) @db.Uuid
+  amenityId      String         @map("amenity_id") @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  unitId         String         @map("unit_id") @db.Uuid
+  propertyId     String         @map("property_id") @db.Uuid
+  recurrenceType RecurrenceType @map("recurrence_type")
+  dayOfWeek      Int?           @map("day_of_week") // 0-6
+  dayOfMonth     Int?           @map("day_of_month") // 1-31
+  startTime      String         @map("start_time") // HH:MM
+  endTime        String         @map("end_time") // HH:MM
+  guestCount     Int            @default(1) @map("guest_count")
+  startDate      DateTime       @map("start_date") @db.Date
+  endDate        DateTime?      @map("end_date") @db.Date
+  isActive       Boolean        @default(true) @map("is_active")
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  amenity        Amenity        @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+  property       Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unit           Unit           @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  bookings       AmenityBooking[]
+
+  @@index([amenityId])
+  @@index([tenantId])
+  @@index([isActive])
+  @@map("amenity_recurring_bookings")
+}
+
+// AmenityWaitlist Model
+model AmenityWaitlist {
+  id                 String         @id @default(uuid()) @db.Uuid
+  amenityId          String         @map("amenity_id") @db.Uuid
+  tenantId           String         @map("tenant_id") @db.Uuid
+  date               DateTime       @db.Date
+  preferredStartTime String?        @map("preferred_start_time") // HH:MM
+  preferredEndTime   String?        @map("preferred_end_time") // HH:MM
+  guestCount         Int                   @default(1) @map("guest_count")
+  status             AmenityWaitlistStatus @default(waiting)
+  notifiedAt         DateTime?             @map("notified_at")
+  expiresAt          DateTime?      @map("expires_at")
+  createdAt          DateTime       @default(now()) @map("created_at")
+
+  amenity            Amenity        @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+
+  @@index([amenityId])
+  @@index([tenantId])
+  @@index([date])
+  @@index([status])
+  @@map("amenity_waitlists")
+}
+
+// AmenityUsageLog Model
+model AmenityUsageLog {
+  id           String          @id @default(uuid()) @db.Uuid
+  amenityId    String          @map("amenity_id") @db.Uuid
+  bookingId    String?         @map("booking_id") @db.Uuid
+  tenantId     String          @map("tenant_id") @db.Uuid
+  date         DateTime        @db.Date
+  checkInTime  DateTime        @map("check_in_time")
+  checkOutTime DateTime?       @map("check_out_time")
+  duration     Int?            // minutes
+  guestCount   Int             @default(1) @map("guest_count")
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  amenity      Amenity         @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+  booking      AmenityBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([amenityId])
+  @@index([tenantId])
+  @@index([date])
+  @@map("amenity_usage_logs")
 }

@@ -1,3 +1,12 @@
+import {
+  prisma,
+  Prisma,
+  type AmenityType as PrismaAmenityType,
+  type AmenityStatus as PrismaAmenityStatus,
+  type AmenityBookingStatus,
+  type RecurrenceType as PrismaRecurrenceType,
+  type AmenityWaitlistStatus,
+} from '@realriches/database';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
@@ -322,6 +331,134 @@ export function getNextAvailableSlot(
 }
 
 // ============================================================================
+// ASYNC PRISMA FUNCTIONS
+// ============================================================================
+
+async function checkSlotAvailabilityAsync(
+  amenityId: string,
+  date: string,
+  startTime: string,
+  endTime: string,
+  guestCount: number
+): Promise<{ available: boolean; reason?: string; remainingCapacity?: number }> {
+  const amenity = await prisma.amenity.findUnique({
+    where: { id: amenityId },
+  });
+
+  if (!amenity) {
+    return { available: false, reason: 'Amenity not found' };
+  }
+
+  if (amenity.status !== 'available') {
+    return { available: false, reason: `Amenity is ${amenity.status}` };
+  }
+
+  // Check operating hours
+  const dayOfWeek = new Date(date).getDay();
+  const operatingHours = amenity.operatingHours as Array<{ dayOfWeek: number; openTime: string; closeTime: string; isClosed: boolean }>;
+  const hours = operatingHours?.find((h) => h.dayOfWeek === dayOfWeek);
+  if (!hours || hours.isClosed) {
+    return { available: false, reason: 'Amenity is closed on this day' };
+  }
+
+  // Check if time is within operating hours
+  if (startTime < hours.openTime || endTime > hours.closeTime) {
+    return { available: false, reason: 'Time is outside operating hours' };
+  }
+
+  // Count existing bookings for this slot
+  const existingBookings = await prisma.amenityBooking.findMany({
+    where: {
+      amenityId,
+      date: new Date(date),
+      status: { notIn: ['cancelled', 'no_show'] },
+    },
+  });
+
+  // Filter for overlapping times
+  const overlapping = existingBookings.filter(b =>
+    (b.startTime <= startTime && b.endTime > startTime) ||
+    (b.startTime < endTime && b.endTime >= endTime) ||
+    (b.startTime >= startTime && b.endTime <= endTime)
+  );
+
+  const bookedCount = overlapping.reduce((sum, b) => sum + b.guestCount, 0);
+  const remainingCapacity = amenity.capacity - bookedCount;
+
+  if (remainingCapacity < guestCount) {
+    return {
+      available: false,
+      reason: 'Not enough capacity',
+      remainingCapacity,
+    };
+  }
+
+  return { available: true, remainingCapacity };
+}
+
+async function calculateUsageStatsAsync(
+  amenityId: string,
+  startDate: string,
+  endDate: string
+): Promise<{
+  totalBookings: number;
+  totalGuests: number;
+  averageDuration: number;
+  peakHours: Array<{ hour: number; count: number }>;
+  utilizationRate: number;
+}> {
+  const logs = await prisma.amenityUsageLog.findMany({
+    where: {
+      amenityId,
+      date: {
+        gte: new Date(startDate),
+        lte: new Date(endDate),
+      },
+    },
+  });
+
+  const amenity = await prisma.amenity.findUnique({
+    where: { id: amenityId },
+  });
+
+  const totalBookings = logs.length;
+  const totalGuests = logs.reduce((sum, l) => sum + l.guestCount, 0);
+  const durations = logs.filter((l) => l.duration).map((l) => l.duration!);
+  const averageDuration = durations.length > 0
+    ? durations.reduce((a, b) => a + b, 0) / durations.length
+    : 0;
+
+  // Calculate peak hours
+  const hourCounts: Record<number, number> = {};
+  logs.forEach((l) => {
+    const hour = l.checkInTime.getHours();
+    hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+  });
+
+  const peakHours = Object.entries(hourCounts)
+    .map(([hour, count]) => ({ hour: parseInt(hour, 10), count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  // Calculate utilization rate
+  const dayCount = Math.ceil(
+    (new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)
+  ) + 1;
+  const maxBookingsPerPeriod = (amenity?.maxBookingsPerDay || 10) * dayCount;
+  const utilizationRate = maxBookingsPerPeriod > 0
+    ? Math.round((totalBookings / maxBookingsPerPeriod) * 100)
+    : 0;
+
+  return {
+    totalBookings,
+    totalGuests,
+    averageDuration: Math.round(averageDuration),
+    peakHours,
+    utilizationRate,
+  };
+}
+
+// ============================================================================
 // SCHEMAS
 // ============================================================================
 
@@ -403,36 +540,33 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       reply
     ) => {
       const data = AmenitySchema.parse(request.body);
-      const now = new Date().toISOString();
 
-      const amenity: Amenity = {
-        id: `amen_${Date.now()}`,
-        propertyId: data.propertyId,
-        name: data.name,
-        type: data.type,
-        description: data.description,
-        location: data.location,
-        capacity: data.capacity ?? 10,
-        requiresBooking: data.requiresBooking ?? true,
-        advanceBookingDays: data.advanceBookingDays ?? 14,
-        maxBookingDuration: data.maxBookingDuration ?? 120,
-        minBookingDuration: data.minBookingDuration ?? 30,
-        maxBookingsPerDay: data.maxBookingsPerDay ?? 2,
-        operatingHours: (data.operatingHours ?? []).map(h => ({
-          dayOfWeek: h.dayOfWeek,
-          openTime: h.openTime,
-          closeTime: h.closeTime,
-          isClosed: h.isClosed ?? false,
-        })),
-        rules: data.rules ?? [],
-        photos: data.photos ?? [],
-        amenities: data.amenities ?? [],
-        status: 'available',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const amenity = await prisma.amenity.create({
+        data: {
+          propertyId: data.propertyId,
+          name: data.name,
+          type: data.type as PrismaAmenityType,
+          description: data.description,
+          location: data.location,
+          capacity: data.capacity ?? 10,
+          requiresBooking: data.requiresBooking ?? true,
+          advanceBookingDays: data.advanceBookingDays ?? 14,
+          maxBookingDuration: data.maxBookingDuration ?? 120,
+          minBookingDuration: data.minBookingDuration ?? 30,
+          maxBookingsPerDay: data.maxBookingsPerDay ?? 2,
+          operatingHours: (data.operatingHours ?? []).map(h => ({
+            dayOfWeek: h.dayOfWeek,
+            openTime: h.openTime,
+            closeTime: h.closeTime,
+            isClosed: h.isClosed ?? false,
+          })),
+          rules: data.rules ?? [],
+          photos: data.photos ?? [],
+          amenities: data.amenities ?? [],
+          status: 'available',
+        },
+      });
 
-      amenities.set(amenity.id, amenity);
       return reply.status(201).send(amenity);
     }
   );
@@ -446,17 +580,19 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(amenities.values());
+      const where: Prisma.AmenityWhereInput = {};
 
       if (request.query.propertyId) {
-        results = results.filter((a) => a.propertyId === request.query.propertyId);
+        where.propertyId = request.query.propertyId;
       }
       if (request.query.type) {
-        results = results.filter((a) => a.type === request.query.type);
+        where.type = request.query.type as PrismaAmenityType;
       }
       if (request.query.status) {
-        results = results.filter((a) => a.status === request.query.status);
+        where.status = request.query.status as PrismaAmenityStatus;
       }
+
+      const results = await prisma.amenity.findMany({ where });
 
       return reply.send({ amenities: results });
     }
@@ -472,18 +608,27 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const amenity = amenities.get(request.params.id);
+      const amenity = await prisma.amenity.findUnique({
+        where: { id: request.params.id },
+      });
       if (!amenity) {
         return reply.status(404).send({ error: 'Amenity not found' });
       }
 
       const date = request.query.date || new Date().toISOString().split('T')[0];
-      const slots = generateTimeSlots(amenity, date, amenity.minBookingDuration);
+      const operatingHours = amenity.operatingHours as Array<{ dayOfWeek: number; openTime: string; closeTime: string; isClosed: boolean }>;
+      const amenityForSlots = {
+        ...amenity,
+        operatingHours: operatingHours || [],
+      };
+      const slots = generateTimeSlots(amenityForSlots as unknown as Amenity, date, amenity.minBookingDuration);
 
-      const slotsWithAvailability = slots.map((slot) => ({
-        ...slot,
-        ...checkSlotAvailability(amenity.id, date, slot.startTime, slot.endTime, 1),
-      }));
+      const slotsWithAvailability = await Promise.all(
+        slots.map(async (slot) => ({
+          ...slot,
+          ...(await checkSlotAvailabilityAsync(amenity.id, date, slot.startTime, slot.endTime, 1)),
+        }))
+      );
 
       return reply.send({
         ...amenity,
@@ -502,16 +647,17 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const amenity = amenities.get(request.params.id);
-      if (!amenity) {
+      try {
+        const amenity = await prisma.amenity.update({
+          where: { id: request.params.id },
+          data: {
+            status: request.body.status as PrismaAmenityStatus,
+          },
+        });
+        return reply.send(amenity);
+      } catch {
         return reply.status(404).send({ error: 'Amenity not found' });
       }
-
-      amenity.status = request.body.status;
-      amenity.updatedAt = new Date().toISOString();
-      amenities.set(amenity.id, amenity);
-
-      return reply.send(amenity);
     }
   );
 
@@ -525,7 +671,9 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const amenity = amenities.get(request.params.id);
+      const amenity = await prisma.amenity.findUnique({
+        where: { id: request.params.id },
+      });
       if (!amenity) {
         return reply.status(404).send({ error: 'Amenity not found' });
       }
@@ -537,7 +685,7 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
         return d.toISOString().split('T')[0];
       })();
 
-      const stats = calculateUsageStats(amenity.id, startDate, endDate);
+      const stats = await calculateUsageStatsAsync(amenity.id, startDate, endDate);
       return reply.send(stats);
     }
   );
@@ -556,7 +704,7 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       const data = BookingSchema.parse(request.body);
 
       // Check availability
-      const availability = checkSlotAvailability(
+      const availability = await checkSlotAvailabilityAsync(
         data.amenityId,
         data.date,
         data.startTime,
@@ -572,41 +720,41 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Check max bookings per day
-      const amenity = amenities.get(data.amenityId);
-      const todayBookings = Array.from(bookings.values()).filter(
-        (b) =>
-          b.amenityId === data.amenityId &&
-          b.tenantId === data.tenantId &&
-          b.date === data.date &&
-          b.status !== 'cancelled'
-      );
+      const amenity = await prisma.amenity.findUnique({
+        where: { id: data.amenityId },
+      });
+      const todayBookings = await prisma.amenityBooking.count({
+        where: {
+          amenityId: data.amenityId,
+          tenantId: data.tenantId,
+          date: new Date(data.date),
+          status: { not: 'cancelled' },
+        },
+      });
 
-      if (amenity && todayBookings.length >= amenity.maxBookingsPerDay) {
+      if (amenity && todayBookings >= amenity.maxBookingsPerDay) {
         return reply.status(400).send({
           error: `Maximum ${amenity.maxBookingsPerDay} bookings per day exceeded`,
         });
       }
 
-      const now = new Date().toISOString();
-      const booking: Booking = {
-        id: `book_${Date.now()}`,
-        amenityId: data.amenityId,
-        tenantId: data.tenantId,
-        unitId: data.unitId,
-        propertyId: data.propertyId,
-        date: data.date,
-        startTime: data.startTime,
-        endTime: data.endTime,
-        guestCount: data.guestCount ?? 1,
-        notes: data.notes,
-        status: 'confirmed',
-        confirmationCode: generateConfirmationCode(),
-        isRecurring: false,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const booking = await prisma.amenityBooking.create({
+        data: {
+          amenityId: data.amenityId,
+          tenantId: data.tenantId,
+          unitId: data.unitId,
+          propertyId: data.propertyId,
+          date: new Date(data.date),
+          startTime: data.startTime,
+          endTime: data.endTime,
+          guestCount: data.guestCount ?? 1,
+          notes: data.notes,
+          status: 'confirmed',
+          confirmationCode: generateConfirmationCode(),
+          isRecurring: false,
+        },
+      });
 
-      bookings.set(booking.id, booking);
       return reply.status(201).send(booking);
     }
   );
@@ -625,20 +773,22 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(bookings.values());
+      const where: Prisma.AmenityBookingWhereInput = {};
 
       if (request.query.amenityId) {
-        results = results.filter((b) => b.amenityId === request.query.amenityId);
+        where.amenityId = request.query.amenityId;
       }
       if (request.query.tenantId) {
-        results = results.filter((b) => b.tenantId === request.query.tenantId);
+        where.tenantId = request.query.tenantId;
       }
       if (request.query.date) {
-        results = results.filter((b) => b.date === request.query.date);
+        where.date = new Date(request.query.date);
       }
       if (request.query.status) {
-        results = results.filter((b) => b.status === request.query.status);
+        where.status = request.query.status as AmenityBookingStatus;
       }
+
+      const results = await prisma.amenityBooking.findMany({ where });
 
       return reply.send({ bookings: results });
     }
@@ -648,13 +798,15 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/bookings/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const booking = bookings.get(request.params.id);
+      const booking = await prisma.amenityBooking.findUnique({
+        where: { id: request.params.id },
+        include: { amenity: true },
+      });
       if (!booking) {
         return reply.status(404).send({ error: 'Booking not found' });
       }
 
-      const amenity = amenities.get(booking.amenityId);
-      return reply.send({ ...booking, amenity });
+      return reply.send(booking);
     }
   );
 
@@ -662,32 +814,40 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/bookings/:id/cancel',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const booking = bookings.get(request.params.id);
+      const booking = await prisma.amenityBooking.findUnique({
+        where: { id: request.params.id },
+      });
       if (!booking) {
         return reply.status(404).send({ error: 'Booking not found' });
       }
 
-      booking.status = 'cancelled';
-      booking.updatedAt = new Date().toISOString();
-      bookings.set(booking.id, booking);
+      const updatedBooking = await prisma.amenityBooking.update({
+        where: { id: request.params.id },
+        data: { status: 'cancelled' },
+      });
 
       // Notify waitlist
-      const waitlistEntries = Array.from(waitlists.values()).filter(
-        (w) =>
-          w.amenityId === booking.amenityId &&
-          w.date === booking.date &&
-          w.status === 'waiting'
-      );
+      const firstWaitlistEntry = await prisma.amenityWaitlist.findFirst({
+        where: {
+          amenityId: booking.amenityId,
+          date: booking.date,
+          status: 'waiting',
+        },
+        orderBy: { createdAt: 'asc' },
+      });
 
-      if (waitlistEntries.length > 0) {
-        const firstEntry = waitlistEntries[0];
-        firstEntry.status = 'notified';
-        firstEntry.notifiedAt = new Date().toISOString();
-        firstEntry.expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min
-        waitlists.set(firstEntry.id, firstEntry);
+      if (firstWaitlistEntry) {
+        await prisma.amenityWaitlist.update({
+          where: { id: firstWaitlistEntry.id },
+          data: {
+            status: 'notified',
+            notifiedAt: new Date(),
+            expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 min
+          },
+        });
       }
 
-      return reply.send({ message: 'Booking cancelled', booking });
+      return reply.send({ message: 'Booking cancelled', booking: updatedBooking });
     }
   );
 
@@ -695,31 +855,35 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/bookings/:id/check-in',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const booking = bookings.get(request.params.id);
+      const booking = await prisma.amenityBooking.findUnique({
+        where: { id: request.params.id },
+      });
       if (!booking) {
         return reply.status(404).send({ error: 'Booking not found' });
       }
 
-      const now = new Date().toISOString();
-      booking.status = 'checked_in';
-      booking.checkInTime = now;
-      booking.updatedAt = now;
-      bookings.set(booking.id, booking);
+      const now = new Date();
+      const updatedBooking = await prisma.amenityBooking.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'checked_in',
+          checkInTime: now,
+        },
+      });
 
       // Log usage
-      const usage: AmenityUsage = {
-        id: `usage_${Date.now()}`,
-        amenityId: booking.amenityId,
-        bookingId: booking.id,
-        tenantId: booking.tenantId,
-        date: booking.date,
-        checkInTime: now.split('T')[1].substring(0, 5),
-        guestCount: booking.guestCount,
-        createdAt: now,
-      };
-      usageLogs.set(usage.id, usage);
+      await prisma.amenityUsageLog.create({
+        data: {
+          amenityId: booking.amenityId,
+          bookingId: booking.id,
+          tenantId: booking.tenantId,
+          date: booking.date,
+          checkInTime: now,
+          guestCount: booking.guestCount,
+        },
+      });
 
-      return reply.send(booking);
+      return reply.send(updatedBooking);
     }
   );
 
@@ -727,30 +891,38 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/bookings/:id/check-out',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const booking = bookings.get(request.params.id);
+      const booking = await prisma.amenityBooking.findUnique({
+        where: { id: request.params.id },
+      });
       if (!booking) {
         return reply.status(404).send({ error: 'Booking not found' });
       }
 
-      const now = new Date().toISOString();
-      booking.status = 'completed';
-      booking.checkOutTime = now;
-      booking.updatedAt = now;
-      bookings.set(booking.id, booking);
+      const now = new Date();
+      const updatedBooking = await prisma.amenityBooking.update({
+        where: { id: request.params.id },
+        data: {
+          status: 'completed',
+          checkOutTime: now,
+        },
+      });
 
       // Update usage log
-      const usage = Array.from(usageLogs.values()).find(
-        (u) => u.bookingId === booking.id
-      );
+      const usage = await prisma.amenityUsageLog.findFirst({
+        where: { bookingId: booking.id },
+      });
       if (usage) {
-        usage.checkOutTime = now.split('T')[1].substring(0, 5);
-        const checkIn = new Date(`2000-01-01T${usage.checkInTime}`);
-        const checkOut = new Date(`2000-01-01T${usage.checkOutTime}`);
-        usage.duration = Math.round((checkOut.getTime() - checkIn.getTime()) / 60000);
-        usageLogs.set(usage.id, usage);
+        const duration = Math.round((now.getTime() - usage.checkInTime.getTime()) / 60000);
+        await prisma.amenityUsageLog.update({
+          where: { id: usage.id },
+          data: {
+            checkOutTime: now,
+            duration,
+          },
+        });
       }
 
-      return reply.send(booking);
+      return reply.send(updatedBooking);
     }
   );
 
@@ -791,28 +963,26 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
     ) => {
       const data = RecurringBookingSchema.parse(request.body);
 
-      const recurring: RecurringBooking = {
-        id: `rec_${Date.now()}`,
-        amenityId: data.amenityId,
-        tenantId: data.tenantId,
-        unitId: data.unitId,
-        propertyId: data.propertyId,
-        recurrenceType: data.recurrenceType,
-        dayOfWeek: data.dayOfWeek,
-        dayOfMonth: data.dayOfMonth,
-        startTime: data.startTime,
-        endTime: data.endTime,
-        guestCount: data.guestCount ?? 1,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-      };
-
-      recurringBookings.set(recurring.id, recurring);
+      const recurring = await prisma.amenityRecurringBooking.create({
+        data: {
+          amenityId: data.amenityId,
+          tenantId: data.tenantId,
+          unitId: data.unitId,
+          propertyId: data.propertyId,
+          recurrenceType: data.recurrenceType as PrismaRecurrenceType,
+          dayOfWeek: data.dayOfWeek,
+          dayOfMonth: data.dayOfMonth,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          guestCount: data.guestCount ?? 1,
+          startDate: new Date(data.startDate),
+          endDate: data.endDate ? new Date(data.endDate) : null,
+          isActive: true,
+        },
+      });
 
       // Generate initial bookings
-      const generatedBookings: Booking[] = [];
+      const generatedBookings: Awaited<ReturnType<typeof prisma.amenityBooking.create>>[] = [];
       const endDate = data.endDate || (() => {
         const d = new Date(data.startDate);
         d.setMonth(d.getMonth() + 3);
@@ -838,7 +1008,7 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
         }
 
         if (shouldBook) {
-          const availability = checkSlotAvailability(
+          const availability = await checkSlotAvailabilityAsync(
             data.amenityId,
             dateStr,
             data.startTime,
@@ -847,24 +1017,22 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
           );
 
           if (availability.available) {
-            const booking: Booking = {
-              id: `book_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-              amenityId: data.amenityId,
-              tenantId: data.tenantId,
-              unitId: data.unitId,
-              propertyId: data.propertyId,
-              date: dateStr,
-              startTime: data.startTime,
-              endTime: data.endTime,
-              guestCount: data.guestCount,
-              status: 'confirmed',
-              confirmationCode: generateConfirmationCode(),
-              isRecurring: true,
-              recurrenceId: recurring.id,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
-            bookings.set(booking.id, booking);
+            const booking = await prisma.amenityBooking.create({
+              data: {
+                amenityId: data.amenityId,
+                tenantId: data.tenantId,
+                unitId: data.unitId,
+                propertyId: data.propertyId,
+                date: new Date(dateStr),
+                startTime: data.startTime,
+                endTime: data.endTime,
+                guestCount: data.guestCount,
+                status: 'confirmed',
+                confirmationCode: generateConfirmationCode(),
+                isRecurring: true,
+                recurrenceId: recurring.id,
+              },
+            });
             generatedBookings.push(booking);
           }
         }
@@ -890,32 +1058,36 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      const recurring = recurringBookings.get(request.params.id);
+      const recurring = await prisma.amenityRecurringBooking.findUnique({
+        where: { id: request.params.id },
+      });
       if (!recurring) {
         return reply.status(404).send({ error: 'Recurring booking not found' });
       }
 
-      recurring.isActive = false;
-      recurringBookings.set(recurring.id, recurring);
+      await prisma.amenityRecurringBooking.update({
+        where: { id: recurring.id },
+        data: { isActive: false },
+      });
 
       // Cancel associated bookings
-      const today = new Date().toISOString().split('T')[0];
-      let cancelledCount = 0;
-
-      for (const [id, booking] of bookings) {
-        if (booking.recurrenceId === recurring.id && booking.status === 'confirmed') {
-          if (!request.body.cancelFutureOnly || booking.date >= today) {
-            booking.status = 'cancelled';
-            booking.updatedAt = new Date().toISOString();
-            bookings.set(id, booking);
-            cancelledCount++;
-          }
-        }
+      const today = new Date();
+      const whereClause: Prisma.AmenityBookingWhereInput = {
+        recurrenceId: recurring.id,
+        status: 'confirmed',
+      };
+      if (request.body.cancelFutureOnly) {
+        whereClause.date = { gte: today };
       }
+
+      const result = await prisma.amenityBooking.updateMany({
+        where: whereClause,
+        data: { status: 'cancelled' },
+      });
 
       return reply.send({
         message: 'Recurring booking cancelled',
-        cancelledBookings: cancelledCount,
+        cancelledBookings: result.count,
       });
     }
   );
@@ -933,19 +1105,18 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
     ) => {
       const data = WaitlistSchema.parse(request.body);
 
-      const entry: WaitlistEntry = {
-        id: `wait_${Date.now()}`,
-        amenityId: data.amenityId,
-        tenantId: data.tenantId,
-        date: data.date,
-        preferredStartTime: data.preferredStartTime,
-        preferredEndTime: data.preferredEndTime,
-        guestCount: data.guestCount ?? 1,
-        status: 'waiting',
-        createdAt: new Date().toISOString(),
-      };
+      const entry = await prisma.amenityWaitlist.create({
+        data: {
+          amenityId: data.amenityId,
+          tenantId: data.tenantId,
+          date: new Date(data.date),
+          preferredStartTime: data.preferredStartTime,
+          preferredEndTime: data.preferredEndTime,
+          guestCount: data.guestCount ?? 1,
+          status: 'waiting',
+        },
+      });
 
-      waitlists.set(entry.id, entry);
       return reply.status(201).send(entry);
     }
   );
@@ -959,23 +1130,24 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(waitlists.values());
+      const where: Prisma.AmenityWaitlistWhereInput = {};
 
       if (request.query.amenityId) {
-        results = results.filter((w) => w.amenityId === request.query.amenityId);
+        where.amenityId = request.query.amenityId;
       }
       if (request.query.date) {
-        results = results.filter((w) => w.date === request.query.date);
+        where.date = new Date(request.query.date);
       }
       if (request.query.tenantId) {
-        results = results.filter((w) => w.tenantId === request.query.tenantId);
+        where.tenantId = request.query.tenantId;
       }
 
-      return reply.send({
-        waitlist: results.sort(
-          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        ),
+      const results = await prisma.amenityWaitlist.findMany({
+        where,
+        orderBy: { createdAt: 'asc' },
       });
+
+      return reply.send({ waitlist: results });
     }
   );
 
@@ -983,13 +1155,14 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
   app.delete(
     '/waitlist/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const entry = waitlists.get(request.params.id);
-      if (!entry) {
+      try {
+        await prisma.amenityWaitlist.delete({
+          where: { id: request.params.id },
+        });
+        return reply.send({ message: 'Removed from waitlist' });
+      } catch {
         return reply.status(404).send({ error: 'Waitlist entry not found' });
       }
-
-      waitlists.delete(request.params.id);
-      return reply.send({ message: 'Removed from waitlist' });
     }
   );
 }
