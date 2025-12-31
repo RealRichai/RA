@@ -376,6 +376,89 @@ import {
   type CommunityEvent,
 } from '../src/modules/common-areas/routes';
 
+// Guest Management imports
+import {
+  guestPasses as guestPassStore2,
+  guestCheckIns,
+  guestParkingSpots,
+  guestPolicies,
+  guestIncidents,
+  guestNotifications,
+  generateAccessCode as generateGuestAccessCode,
+  isPassValid,
+  getAvailableParkingSpots,
+  getActivePassesForUnit,
+  getGuestStats,
+  checkPolicyCompliance,
+  expireOldPasses,
+  type GuestPass as GuestPassType,
+  type GuestCheckIn,
+  type GuestPolicy,
+} from '../src/modules/guests/routes';
+
+// Lease Violation Tracking imports
+import {
+  leaseViolations,
+  violationNotices,
+  violationFines,
+  violationHearings,
+  violationTemplates,
+  violationPolicies,
+  getViolationCount,
+  calculateFine,
+  shouldEscalate,
+  getCurePeriod,
+  getViolationStats,
+  getTenantViolationHistory,
+  generateNoticeContent,
+  type LeaseViolation,
+  type ViolationNotice,
+  type ViolationFine,
+  type ViolationPolicy,
+  type ViolationTemplate,
+} from '../src/modules/violations/routes';
+
+// Rent Roll Reporting imports
+import {
+  rentRollEntries,
+  rentRollSnapshots,
+  scheduledReports,
+  reportExecutions,
+  rentRollChanges,
+  calculateSummary,
+  getRentRollForProperty,
+  getVacancyAnalysis,
+  getCollectionsAnalysis,
+  getRenewalAnalysis,
+  compareSummaries,
+  calculateNextRunDate,
+  formatCurrency,
+  formatPercent,
+  type RentRollEntry,
+  type RentRollSnapshot,
+  type RentRollSummary,
+  type ScheduledReport,
+} from '../src/modules/rent-roll/routes';
+
+// Property Comparison imports
+import {
+  propertyMetrics,
+  comparisonReports,
+  benchmarks,
+  savedComparisons,
+  availableMetrics,
+  getMetricDefinition,
+  compareProperties,
+  calculatePortfolioAverages,
+  rankPropertyInPortfolio,
+  findSimilarProperties,
+  generateTrendData,
+  compareToBenchmark,
+  type PropertyMetrics,
+  type ComparisonReport,
+  type Benchmark,
+} from '../src/modules/property-comparison/routes';
+
 describe('Automated Rent Collection', () => {
   beforeEach(() => {
     schedules.clear();
@@ -6852,6 +6935,928 @@ describe('Common Area Scheduling', () => {
       expect(utilization.completedReservations).toBe(1);
       expect(utilization.cancelledReservations).toBe(1);
       expect(utilization.totalRevenue).toBe(200);
+    });
+  });
+});
+
+// ============================================================================
+// BATCH 9: Guest Management, Lease Violations, Rent Roll, Property Comparison
+// ============================================================================
+
+describe('Guest Management', () => {
+  beforeEach(() => {
+    guestPassStore2.clear();
+    guestCheckIns.clear();
+    guestParkingSpots.clear();
+    guestPolicies.clear();
+    guestIncidents.clear();
+    guestNotifications.clear();
+  });
+
+  describe('generateAccessCode', () => {
+    it('should generate code of specified length', () => {
+      const code = generateGuestAccessCode(6);
+      expect(code).toHaveLength(6);
+      expect(/^\d+$/.test(code)).toBe(true);
+    });
+
+    it('should generate 8 digit code when requested', () => {
+      const code = generateGuestAccessCode(8);
+      expect(code).toHaveLength(8);
+    });
+  });
+
+  describe('isPassValid', () => {
+    it('should return true for active pass within date range', () => {
+      const now = new Date();
+      const pass: GuestPassType = {
+        id: 'p1',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        residentId: 'r1',
+        guestName: 'John Doe',
+        passType: 'one_time',
+        purpose: 'visitor',
+        validFrom: new Date(now.getTime() - 1000 * 60 * 60),
+        validUntil: new Date(now.getTime() + 1000 * 60 * 60 * 24),
+        status: 'active',
+        checkIns: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      expect(isPassValid(pass)).toBe(true);
+    });
+
+    it('should return false for expired pass', () => {
+      const now = new Date();
+      const pass: GuestPassType = {
+        id: 'p1',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        residentId: 'r1',
+        guestName: 'John Doe',
+        passType: 'one_time',
+        purpose: 'visitor',
+        validFrom: new Date(now.getTime() - 1000 * 60 * 60 * 48),
+        validUntil: new Date(now.getTime() - 1000 * 60 * 60 * 24),
+        status: 'active',
+        checkIns: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      expect(isPassValid(pass)).toBe(false);
+    });
+
+    it('should return false for revoked pass', () => {
+      const now = new Date();
+      const pass: GuestPassType = {
+        id: 'p1',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        residentId: 'r1',
+        guestName: 'John Doe',
+        passType: 'one_time',
+        purpose: 'visitor',
+        validFrom: new Date(now.getTime() - 1000 * 60 * 60),
+        validUntil: new Date(now.getTime() + 1000 * 60 * 60 * 24),
+        status: 'revoked',
+        checkIns: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      expect(isPassValid(pass)).toBe(false);
+    });
+  });
+
+  describe('checkPolicyCompliance', () => {
+    it('should return compliant when no policy exists', () => {
+      const result = checkPolicyCompliance(
+        'prop1',
+        'u1',
+        new Date(),
+        new Date(Date.now() + 1000 * 60 * 60 * 24),
+        'visitor'
+      );
+
+      expect(result.compliant).toBe(true);
+      expect(result.violations).toHaveLength(0);
+    });
+
+    it('should flag violation for exceeding max consecutive days', () => {
+      guestPolicies.set('policy1', {
+        id: 'policy1',
+        propertyId: 'prop1',
+        maxGuestsPerUnit: 5,
+        maxConsecutiveDays: 3,
+        requiresPreRegistration: true,
+        requiresIdVerification: false,
+        parkingRequired: false,
+        allowedPurposes: ['visitor', 'service'],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const result = checkPolicyCompliance(
+        'prop1',
+        'u1',
+        new Date(),
+        new Date(Date.now() + 1000 * 60 * 60 * 24 * 10), // 10 days
+        'visitor'
+      );
+
+      expect(result.compliant).toBe(false);
+      expect(result.violations.some(v => v.includes('exceeds maximum'))).toBe(true);
+    });
+  });
+
+  describe('getGuestStats', () => {
+    it('should calculate guest statistics for property', () => {
+      const now = new Date();
+
+      guestPassStore2.set('p1', {
+        id: 'p1',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        residentId: 'r1',
+        guestName: 'Guest 1',
+        passType: 'one_time',
+        purpose: 'visitor',
+        validFrom: new Date(now.getTime() - 1000 * 60 * 60),
+        validUntil: new Date(now.getTime() + 1000 * 60 * 60 * 24),
+        status: 'active',
+        checkIns: [],
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      guestParkingSpots.set('spot1', {
+        id: 'spot1',
+        propertyId: 'prop1',
+        spotNumber: 'V1',
+        location: 'Lot A',
+        type: 'visitor',
+        status: 'available',
+        createdAt: now,
+      });
+
+      const stats = getGuestStats('prop1');
+
+      expect(stats.totalActivePasses).toBe(1);
+      expect(stats.parkingSpotsAvailable).toBe(1);
+      expect(stats.parkingSpotsTotal).toBe(1);
+    });
+  });
+
+  describe('expireOldPasses', () => {
+    it('should expire passes that are past their valid until date', () => {
+      const now = new Date();
+
+      guestPassStore2.set('p1', {
+        id: 'p1',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        residentId: 'r1',
+        guestName: 'Guest 1',
+        passType: 'one_time',
+        purpose: 'visitor',
+        validFrom: new Date(now.getTime() - 1000 * 60 * 60 * 48),
+        validUntil: new Date(now.getTime() - 1000 * 60 * 60 * 24),
+        status: 'active',
+        checkIns: [],
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const expiredCount = expireOldPasses();
+
+      expect(expiredCount).toBe(1);
+      expect(guestPassStore2.get('p1')?.status).toBe('expired');
+    });
+  });
+});
+
+describe('Lease Violation Tracking', () => {
+  beforeEach(() => {
+    leaseViolations.clear();
+    violationNotices.clear();
+    violationFines.clear();
+    violationHearings.clear();
+    violationTemplates.clear();
+    violationPolicies.clear();
+  });
+
+  describe('getViolationCount', () => {
+    it('should count violations for a tenant', () => {
+      leaseViolations.set('v1', {
+        id: 'v1',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        leaseId: 'l1',
+        tenantId: 't1',
+        violationType: 'noise',
+        severity: 'minor',
+        description: 'Loud music',
+        occurredAt: new Date(),
+        reportedAt: new Date(),
+        reportedBy: 'staff1',
+        status: 'reported',
+        notices: [],
+        fines: [],
+        hearings: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      leaseViolations.set('v2', {
+        id: 'v2',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        leaseId: 'l1',
+        tenantId: 't1',
+        violationType: 'noise',
+        severity: 'moderate',
+        description: 'Party noise',
+        occurredAt: new Date(),
+        reportedAt: new Date(),
+        reportedBy: 'staff1',
+        status: 'reported',
+        notices: [],
+        fines: [],
+        hearings: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      expect(getViolationCount('t1')).toBe(2);
+      expect(getViolationCount('t1', 'noise')).toBe(2);
+      expect(getViolationCount('t1', 'pet_violation')).toBe(0);
+    });
+  });
+
+  describe('calculateFine', () => {
+    it('should calculate first offense fine', () => {
+      violationPolicies.set('policy1', {
+        id: 'policy1',
+        propertyId: 'prop1',
+        violationType: 'noise',
+        firstOffenseFine: 50,
+        repeatOffenseFine: 100,
+        curePeriodDays: 7,
+        maxViolationsBeforeEviction: 3,
+        escalationPath: ['warning', 'fine', 'eviction'],
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const fine = calculateFine('prop1', 'noise', 'new_tenant');
+      expect(fine).toBe(50);
+    });
+
+    it('should calculate repeat offense fine', () => {
+      violationPolicies.set('policy1', {
+        id: 'policy1',
+        propertyId: 'prop1',
+        violationType: 'noise',
+        firstOffenseFine: 50,
+        repeatOffenseFine: 100,
+        curePeriodDays: 7,
+        maxViolationsBeforeEviction: 3,
+        escalationPath: ['warning', 'fine', 'eviction'],
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      leaseViolations.set('v1', {
+        id: 'v1',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        leaseId: 'l1',
+        tenantId: 't1',
+        violationType: 'noise',
+        severity: 'minor',
+        description: 'Previous violation',
+        occurredAt: new Date(),
+        reportedAt: new Date(),
+        reportedBy: 'staff1',
+        status: 'resolved',
+        notices: [],
+        fines: [],
+        hearings: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const fine = calculateFine('prop1', 'noise', 't1');
+      expect(fine).toBe(100);
+    });
+  });
+
+  describe('getCurePeriod', () => {
+    it('should return policy cure period', () => {
+      violationPolicies.set('policy1', {
+        id: 'policy1',
+        propertyId: 'prop1',
+        violationType: 'pet_violation',
+        curePeriodDays: 10,
+        maxViolationsBeforeEviction: 2,
+        escalationPath: ['warning', 'eviction'],
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      expect(getCurePeriod('prop1', 'pet_violation')).toBe(10);
+    });
+
+    it('should return default cure period when no policy', () => {
+      expect(getCurePeriod('prop1', 'noise')).toBe(14);
+    });
+  });
+
+  describe('getViolationStats', () => {
+    it('should aggregate violation statistics', () => {
+      leaseViolations.set('v1', {
+        id: 'v1',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        leaseId: 'l1',
+        tenantId: 't1',
+        violationType: 'noise',
+        severity: 'minor',
+        description: 'Test',
+        occurredAt: new Date(),
+        reportedAt: new Date(),
+        reportedBy: 'staff1',
+        status: 'reported',
+        notices: [],
+        fines: [],
+        hearings: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const stats = getViolationStats('prop1');
+
+      expect(stats.totalActive).toBe(1);
+      expect(stats.byType['noise']).toBe(1);
+      expect(stats.bySeverity['minor']).toBe(1);
+      expect(stats.byStatus['reported']).toBe(1);
+    });
+  });
+
+  describe('getTenantViolationHistory', () => {
+    it('should return violation history and fine totals', () => {
+      leaseViolations.set('v1', {
+        id: 'v1',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        leaseId: 'l1',
+        tenantId: 't1',
+        violationType: 'noise',
+        severity: 'minor',
+        description: 'Test',
+        occurredAt: new Date(),
+        reportedAt: new Date(),
+        reportedBy: 'staff1',
+        status: 'resolved',
+        notices: [],
+        fines: [],
+        hearings: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      violationFines.set('f1', {
+        id: 'f1',
+        violationId: 'v1',
+        amount: 50,
+        reason: 'Noise violation',
+        dueDate: new Date(),
+        status: 'paid',
+        paidAmount: 50,
+        createdAt: new Date(),
+      });
+
+      const history = getTenantViolationHistory('t1');
+
+      expect(history.violations).toHaveLength(1);
+      expect(history.totalFinesPaid).toBe(50);
+      expect(history.isRepeatOffender).toBe(false);
+    });
+  });
+});
+
+describe('Rent Roll Reporting', () => {
+  beforeEach(() => {
+    rentRollEntries.clear();
+    rentRollSnapshots.clear();
+    scheduledReports.clear();
+    reportExecutions.clear();
+    rentRollChanges.clear();
+  });
+
+  describe('calculateSummary', () => {
+    it('should calculate rent roll summary', () => {
+      const entries: RentRollEntry[] = [
+        {
+          id: 'e1',
+          propertyId: 'prop1',
+          unitId: 'u1',
+          unitNumber: '101',
+          unitType: '1BR',
+          squareFeet: 750,
+          bedrooms: 1,
+          bathrooms: 1,
+          status: 'occupied',
+          marketRent: 1500,
+          currentRent: 1400,
+          balance: 0,
+          depositHeld: 1400,
+        },
+        {
+          id: 'e2',
+          propertyId: 'prop1',
+          unitId: 'u2',
+          unitNumber: '102',
+          unitType: '2BR',
+          squareFeet: 1000,
+          bedrooms: 2,
+          bathrooms: 2,
+          status: 'vacant',
+          marketRent: 2000,
+          currentRent: 0,
+          balance: 0,
+          depositHeld: 0,
+        },
+      ];
+
+      const summary = calculateSummary(entries);
+
+      expect(summary.totalUnits).toBe(2);
+      expect(summary.occupiedUnits).toBe(1);
+      expect(summary.vacantUnits).toBe(1);
+      expect(summary.occupancyRate).toBe(50);
+      expect(summary.totalCurrentRent).toBe(1400);
+      expect(summary.lossToLease).toBe(100);
+      expect(summary.lossToVacancy).toBe(2000);
+    });
+  });
+
+  describe('formatCurrency', () => {
+    it('should format currency correctly', () => {
+      expect(formatCurrency(1500)).toBe('$1,500.00');
+      expect(formatCurrency(0)).toBe('$0.00');
+    });
+  });
+
+  describe('formatPercent', () => {
+    it('should format percentage correctly', () => {
+      expect(formatPercent(95.5)).toBe('95.5%');
+      expect(formatPercent(100)).toBe('100.0%');
+    });
+  });
+
+  describe('calculateNextRunDate', () => {
+    it('should calculate next run for daily schedule', () => {
+      const schedule: ScheduledReport = {
+        id: 's1',
+        propertyId: 'prop1',
+        name: 'Daily Report',
+        reportType: 'rent_roll',
+        frequency: 'daily',
+        recipients: ['test@example.com'],
+        format: 'pdf',
+        includeComparison: false,
+        nextRunAt: new Date(),
+        isActive: true,
+        createdAt: new Date(),
+      };
+
+      const nextRun = calculateNextRunDate(schedule);
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      expect(nextRun.getDate()).toBe(tomorrow.getDate());
+    });
+
+    it('should calculate next run for weekly schedule', () => {
+      const schedule: ScheduledReport = {
+        id: 's1',
+        propertyId: 'prop1',
+        name: 'Weekly Report',
+        reportType: 'rent_roll',
+        frequency: 'weekly',
+        dayOfWeek: 1, // Monday
+        recipients: ['test@example.com'],
+        format: 'pdf',
+        includeComparison: false,
+        nextRunAt: new Date(),
+        isActive: true,
+        createdAt: new Date(),
+      };
+
+      const nextRun = calculateNextRunDate(schedule);
+
+      expect(nextRun.getDay()).toBe(1);
+    });
+  });
+
+  describe('compareSummaries', () => {
+    it('should compare two summaries and show changes', () => {
+      const current: RentRollSummary = {
+        totalUnits: 100,
+        occupiedUnits: 95,
+        vacantUnits: 5,
+        noticeUnits: 2,
+        occupancyRate: 95,
+        totalSquareFeet: 100000,
+        occupiedSquareFeet: 95000,
+        totalMarketRent: 150000,
+        totalCurrentRent: 140000,
+        totalConcessions: 2000,
+        totalOtherIncome: 5000,
+        effectiveRent: 143000,
+        lossToLease: 10000,
+        lossToVacancy: 7500,
+        totalBalance: 5000,
+        totalDeposits: 140000,
+        averageRentPerUnit: 1473.68,
+        averageRentPerSqFt: 1.47,
+        expiringLeases30Days: 5,
+        expiringLeases60Days: 10,
+        expiringLeases90Days: 15,
+      };
+
+      const previous: RentRollSummary = {
+        totalUnits: 100,
+        occupiedUnits: 90,
+        vacantUnits: 10,
+        noticeUnits: 3,
+        occupancyRate: 90,
+        totalSquareFeet: 100000,
+        occupiedSquareFeet: 90000,
+        totalMarketRent: 145000,
+        totalCurrentRent: 130000,
+        totalConcessions: 3000,
+        totalOtherIncome: 4000,
+        effectiveRent: 131000,
+        lossToLease: 15000,
+        lossToVacancy: 14500,
+        totalBalance: 8000,
+        totalDeposits: 130000,
+        averageRentPerUnit: 1444.44,
+        averageRentPerSqFt: 1.44,
+        expiringLeases30Days: 8,
+        expiringLeases60Days: 15,
+        expiringLeases90Days: 20,
+      };
+
+      const comparison = compareSummaries(current, previous);
+
+      expect(comparison.occupiedUnits.change).toBe(5);
+      expect(comparison.occupancyRate.change).toBe(5);
+      expect(comparison.totalCurrentRent.change).toBe(10000);
+    });
+  });
+
+  describe('getRentRollForProperty', () => {
+    it('should return sorted entries for property', () => {
+      rentRollEntries.set('e1', {
+        id: 'e1',
+        propertyId: 'prop1',
+        unitId: 'u1',
+        unitNumber: '102',
+        unitType: '1BR',
+        squareFeet: 750,
+        bedrooms: 1,
+        bathrooms: 1,
+        status: 'occupied',
+        marketRent: 1500,
+        currentRent: 1400,
+        balance: 0,
+        depositHeld: 1400,
+      });
+
+      rentRollEntries.set('e2', {
+        id: 'e2',
+        propertyId: 'prop1',
+        unitId: 'u2',
+        unitNumber: '101',
+        unitType: '1BR',
+        squareFeet: 750,
+        bedrooms: 1,
+        bathrooms: 1,
+        status: 'occupied',
+        marketRent: 1500,
+        currentRent: 1450,
+        balance: 0,
+        depositHeld: 1450,
+      });
+
+      const entries = getRentRollForProperty('prop1');
+
+      expect(entries).toHaveLength(2);
+      expect(entries[0].unitNumber).toBe('101');
+      expect(entries[1].unitNumber).toBe('102');
+    });
+  });
+});
+
+describe('Property Comparison Tool', () => {
+  beforeEach(() => {
+    propertyMetrics.clear();
+    comparisonReports.clear();
+    benchmarks.clear();
+    savedComparisons.clear();
+  });
+
+  describe('availableMetrics', () => {
+    it('should have defined metrics with required fields', () => {
+      expect(availableMetrics.length).toBeGreaterThan(0);
+
+      for (const metric of availableMetrics) {
+        expect(metric.key).toBeDefined();
+        expect(metric.name).toBeDefined();
+        expect(metric.category).toBeDefined();
+        expect(metric.format).toBeDefined();
+        expect(typeof metric.higherIsBetter).toBe('boolean');
+      }
+    });
+  });
+
+  describe('getMetricDefinition', () => {
+    it('should return metric definition by key', () => {
+      const metric = getMetricDefinition('occupancyRate');
+
+      expect(metric).toBeDefined();
+      expect(metric?.name).toBe('Occupancy Rate');
+      expect(metric?.higherIsBetter).toBe(true);
+    });
+
+    it('should return undefined for unknown key', () => {
+      const metric = getMetricDefinition('unknownMetric');
+      expect(metric).toBeUndefined();
+    });
+  });
+
+  describe('compareProperties', () => {
+    it('should compare properties and generate rankings', () => {
+      propertyMetrics.set('prop1', {
+        propertyId: 'prop1',
+        propertyName: 'Property A',
+        recordedAt: new Date(),
+        totalUnits: 100,
+        totalSquareFeet: 100000,
+        propertyType: 'multifamily',
+        amenities: ['pool', 'gym'],
+        grossPotentialRent: 150000,
+        effectiveGrossIncome: 140000,
+        operatingExpenses: 60000,
+        netOperatingIncome: 80000,
+        capRate: 6.5,
+        occupancyRate: 95,
+        physicalOccupancy: 95,
+        economicOccupancy: 93,
+        averageDaysVacant: 15,
+        turnoverRate: 40,
+        averageRentPerUnit: 1400,
+        averageRentPerSqFt: 1.4,
+        marketRentPerUnit: 1500,
+        lossToLease: 10000,
+        lossToLeasePercent: 6.7,
+        collectionRate: 98,
+        delinquencyRate: 2,
+        badDebtWriteOff: 1000,
+        maintenanceExpensePerUnit: 500,
+        workOrdersPerUnit: 3,
+        averageWorkOrderCompletionDays: 2,
+        renewalRate: 65,
+        averageLeaseTerm: 12,
+        concessionRate: 3,
+      });
+
+      propertyMetrics.set('prop2', {
+        propertyId: 'prop2',
+        propertyName: 'Property B',
+        recordedAt: new Date(),
+        totalUnits: 80,
+        totalSquareFeet: 80000,
+        propertyType: 'multifamily',
+        amenities: ['pool'],
+        grossPotentialRent: 120000,
+        effectiveGrossIncome: 110000,
+        operatingExpenses: 50000,
+        netOperatingIncome: 60000,
+        capRate: 5.5,
+        occupancyRate: 92,
+        physicalOccupancy: 92,
+        economicOccupancy: 90,
+        averageDaysVacant: 20,
+        turnoverRate: 45,
+        averageRentPerUnit: 1375,
+        averageRentPerSqFt: 1.375,
+        marketRentPerUnit: 1450,
+        lossToLease: 6000,
+        lossToLeasePercent: 5.2,
+        collectionRate: 96,
+        delinquencyRate: 4,
+        badDebtWriteOff: 2000,
+        maintenanceExpensePerUnit: 550,
+        workOrdersPerUnit: 4,
+        averageWorkOrderCompletionDays: 3,
+        renewalRate: 60,
+        averageLeaseTerm: 12,
+        concessionRate: 4,
+      });
+
+      const results = compareProperties(['prop1', 'prop2'], ['occupancyRate', 'collectionRate']);
+
+      expect(results.properties).toHaveLength(2);
+      expect(results.rankings).toHaveLength(2);
+      expect(results.averages['occupancyRate']).toBe(93.5);
+    });
+  });
+
+  describe('calculatePortfolioAverages', () => {
+    it('should calculate averages across properties', () => {
+      propertyMetrics.set('prop1', {
+        propertyId: 'prop1',
+        propertyName: 'Property A',
+        recordedAt: new Date(),
+        totalUnits: 100,
+        totalSquareFeet: 100000,
+        propertyType: 'multifamily',
+        amenities: [],
+        grossPotentialRent: 150000,
+        effectiveGrossIncome: 140000,
+        operatingExpenses: 60000,
+        netOperatingIncome: 80000,
+        capRate: 6,
+        occupancyRate: 95,
+        physicalOccupancy: 95,
+        economicOccupancy: 93,
+        averageDaysVacant: 15,
+        turnoverRate: 40,
+        averageRentPerUnit: 1400,
+        averageRentPerSqFt: 1.4,
+        marketRentPerUnit: 1500,
+        lossToLease: 10000,
+        lossToLeasePercent: 6.7,
+        collectionRate: 98,
+        delinquencyRate: 2,
+        badDebtWriteOff: 1000,
+        maintenanceExpensePerUnit: 500,
+        workOrdersPerUnit: 3,
+        averageWorkOrderCompletionDays: 2,
+        renewalRate: 65,
+        averageLeaseTerm: 12,
+        concessionRate: 3,
+      });
+
+      propertyMetrics.set('prop2', {
+        propertyId: 'prop2',
+        propertyName: 'Property B',
+        recordedAt: new Date(),
+        totalUnits: 100,
+        totalSquareFeet: 100000,
+        propertyType: 'multifamily',
+        amenities: [],
+        grossPotentialRent: 150000,
+        effectiveGrossIncome: 140000,
+        operatingExpenses: 60000,
+        netOperatingIncome: 80000,
+        capRate: 6,
+        occupancyRate: 90,
+        physicalOccupancy: 90,
+        economicOccupancy: 88,
+        averageDaysVacant: 20,
+        turnoverRate: 45,
+        averageRentPerUnit: 1400,
+        averageRentPerSqFt: 1.4,
+        marketRentPerUnit: 1500,
+        lossToLease: 10000,
+        lossToLeasePercent: 6.7,
+        collectionRate: 96,
+        delinquencyRate: 4,
+        badDebtWriteOff: 2000,
+        maintenanceExpensePerUnit: 550,
+        workOrdersPerUnit: 4,
+        averageWorkOrderCompletionDays: 3,
+        renewalRate: 60,
+        averageLeaseTerm: 12,
+        concessionRate: 4,
+      });
+
+      const averages = calculatePortfolioAverages(['prop1', 'prop2']);
+
+      expect(averages.occupancyRate).toBe(92.5);
+      expect(averages.collectionRate).toBe(97);
+    });
+  });
+
+  describe('generateTrendData', () => {
+    it('should generate trend data points', () => {
+      propertyMetrics.set('prop1', {
+        propertyId: 'prop1',
+        propertyName: 'Property A',
+        recordedAt: new Date(),
+        totalUnits: 100,
+        totalSquareFeet: 100000,
+        propertyType: 'multifamily',
+        amenities: [],
+        grossPotentialRent: 150000,
+        effectiveGrossIncome: 140000,
+        operatingExpenses: 60000,
+        netOperatingIncome: 80000,
+        capRate: 6,
+        occupancyRate: 95,
+        physicalOccupancy: 95,
+        economicOccupancy: 93,
+        averageDaysVacant: 15,
+        turnoverRate: 40,
+        averageRentPerUnit: 1400,
+        averageRentPerSqFt: 1.4,
+        marketRentPerUnit: 1500,
+        lossToLease: 10000,
+        lossToLeasePercent: 6.7,
+        collectionRate: 98,
+        delinquencyRate: 2,
+        badDebtWriteOff: 1000,
+        maintenanceExpensePerUnit: 500,
+        workOrdersPerUnit: 3,
+        averageWorkOrderCompletionDays: 2,
+        renewalRate: 65,
+        averageLeaseTerm: 12,
+        concessionRate: 3,
+      });
+
+      const trend = generateTrendData('prop1', 'occupancyRate', 6);
+
+      expect(trend.propertyId).toBe('prop1');
+      expect(trend.metric).toBe('occupancyRate');
+      expect(trend.dataPoints).toHaveLength(6);
+    });
+  });
+
+  describe('compareToBenchmark', () => {
+    it('should compare property to benchmark', () => {
+      propertyMetrics.set('prop1', {
+        propertyId: 'prop1',
+        propertyName: 'Property A',
+        recordedAt: new Date(),
+        totalUnits: 100,
+        totalSquareFeet: 100000,
+        propertyType: 'multifamily',
+        amenities: [],
+        grossPotentialRent: 150000,
+        effectiveGrossIncome: 140000,
+        operatingExpenses: 60000,
+        netOperatingIncome: 80000,
+        capRate: 6,
+        occupancyRate: 95,
+        physicalOccupancy: 95,
+        economicOccupancy: 93,
+        averageDaysVacant: 15,
+        turnoverRate: 40,
+        averageRentPerUnit: 1400,
+        averageRentPerSqFt: 1.4,
+        marketRentPerUnit: 1500,
+        lossToLease: 10000,
+        lossToLeasePercent: 6.7,
+        collectionRate: 98,
+        delinquencyRate: 2,
+        badDebtWriteOff: 1000,
+        maintenanceExpensePerUnit: 500,
+        workOrdersPerUnit: 3,
+        averageWorkOrderCompletionDays: 2,
+        renewalRate: 65,
+        averageLeaseTerm: 12,
+        concessionRate: 3,
+      });
+
+      benchmarks.set('b1', {
+        id: 'b1',
+        name: 'Market Benchmark',
+        propertyType: 'multifamily',
+        source: 'market',
+        metrics: {
+          occupancyRate: { value: 85 }, // 95 vs 85 = 11.8% variance > 5% threshold
+          collectionRate: { value: 95 },
+        },
+        effectiveDate: new Date(),
+        createdAt: new Date(),
+      });
+
+      const comparison = compareToBenchmark('prop1', 'b1');
+
+      expect(comparison.occupancyRate.value).toBe(95);
+      expect(comparison.occupancyRate.benchmark).toBe(85);
+      expect(comparison.occupancyRate.status).toBe('above');
     });
   });
 });

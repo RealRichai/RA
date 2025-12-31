@@ -30,6 +30,7 @@ import { communicationRoutes } from './communications/routes';
 import { complianceRoutes } from './compliance/routes';
 import { esignatureRoutes } from './documents/esignature';
 import { documentRoutes } from './documents/routes';
+import { guestRoutes } from './guests/routes';
 import { healthRoutes } from './health/routes';
 import { hoaRoutes } from './hoa/routes';
 import { inspectionRoutes } from './inspections/routes';
@@ -56,7 +57,9 @@ import { petRoutes } from './pets/routes';
 import { portfolioRoutes } from './portfolio/routes';
 import { comparableRoutes } from './properties/comparables';
 import { propertyRoutes } from './properties/routes';
+import { propertyComparisonRoutes } from './property-comparison/routes';
 import { websocketPlugin } from './realtime/websocket';
+import { rentRollRoutes } from './rent-roll/routes';
 import { rentalAssistanceRoutes } from './rental-assistance/routes';
 import { reportRoutes } from './reports/routes';
 import { screeningRoutes } from './screening/routes';
@@ -68,6 +71,7 @@ import { tenantPortalRoutes } from './tenant-portal/routes';
 import { userRoutes } from './users/routes';
 import { utilitiesRoutes } from './utilities/routes';
 import { vendorRoutes } from './vendors/routes';
+import { violationRoutes } from './violations/routes';
 import { webhookRoutes } from './webhooks/routes';
 
 export async function registerModules(app: FastifyInstance): Promise<void> {
@@ -140,6 +144,10 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(keyRoutes, { prefix: '/keys' });
       await api.register(buildingSystemRoutes, { prefix: '/building-systems' });
       await api.register(commonAreaRoutes, { prefix: '/common-areas' });
+      await api.register(guestRoutes, { prefix: '/guests' });
+      await api.register(violationRoutes, { prefix: '/violations' });
+      await api.register(rentRollRoutes, { prefix: '/rent-roll' });
+      await api.register(propertyComparisonRoutes, { prefix: '/property-comparison' });
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
