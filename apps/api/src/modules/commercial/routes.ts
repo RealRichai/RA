@@ -1,5 +1,5 @@
 import { prisma } from '@realriches/database';
-import { NotFoundError, ForbiddenError, AppError } from '@realriches/utils';
+import { NotFoundError, ForbiddenError, AppError, generatePrefixedId } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -169,9 +169,13 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
           id: generatePrefixedId('prp'),
           name: data.name,
           type: 'commercial',
-          address: data.address,
+          street1: data.address.street,
+          city: data.address.city,
+          state: data.address.state,
+          postalCode: data.address.zipCode,
+          country: data.address.country,
+          marketId: 'US_STANDARD',
           totalUnits: 1, // Commercial properties use square footage instead
-          squareFeet: data.totalSquareFeet,
           yearBuilt: data.yearBuilt,
           amenities: data.amenities,
           ownerId: request.user.id,
@@ -179,6 +183,7 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
             commercialType: data.type,
             floors: data.floors,
             parkingSpaces: data.parkingSpaces,
+            totalSquareFeet: data.totalSquareFeet,
           },
         },
       });
@@ -394,6 +399,7 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
       reply: FastifyReply
     ) => {
       // Get fractional offerings using commercial service
+      const { status, minInvestment } = request.query;
       const offerings = listFractionalOfferings({ status, minInvestment });
 
       return reply.send({ success: true, data: offerings });
@@ -444,7 +450,11 @@ export async function commercialRoutes(app: FastifyInstance): Promise<void> {
           totalValue: data.totalShares * data.pricePerShare,
           pricePerShare: data.pricePerShare,
           minimumInvestment: data.minimumInvestment,
-          projectedReturns: data.projectedReturns,
+          projectedReturns: {
+            annualCashYield: data.projectedReturns.annualCashYield,
+            targetIRR: data.projectedReturns.targetIRR,
+            holdPeriod: data.projectedReturns.holdPeriod,
+          },
           deadline: data.offeringDeadline,
         },
         {

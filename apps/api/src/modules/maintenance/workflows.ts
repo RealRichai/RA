@@ -315,8 +315,24 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
         name: data.name,
         isActive: true,
         priority: data.priority,
-        conditions: data.conditions,
-        actions: data.actions,
+        conditions: {
+          categories: data.conditions.categories || [],
+          priorities: data.conditions.priorities,
+          propertyIds: data.conditions.propertyIds,
+          timeWindow: data.conditions.timeWindow ? {
+            startHour: data.conditions.timeWindow.startHour ?? 9,
+            endHour: data.conditions.timeWindow.endHour ?? 17,
+            daysOfWeek: data.conditions.timeWindow.daysOfWeek ?? [1, 2, 3, 4, 5],
+          } : undefined,
+        },
+        actions: {
+          vendorId: data.actions.vendorId || '',
+          vendorName: data.actions.vendorName || '',
+          autoAssign: data.actions.autoAssign ?? false,
+          notifyVendor: data.actions.notifyVendor ?? true,
+          notifyTenant: data.actions.notifyTenant ?? true,
+          maxBudget: data.actions.maxBudget,
+        },
         createdAt: now,
         updatedAt: now,
       };
@@ -369,8 +385,28 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       const updates = request.body;
       if (updates.name) rule.name = updates.name;
       if (updates.priority !== undefined) rule.priority = updates.priority;
-      if (updates.conditions) rule.conditions = { ...rule.conditions, ...updates.conditions };
-      if (updates.actions) rule.actions = { ...rule.actions, ...updates.actions };
+      if (updates.conditions) {
+        rule.conditions = {
+          categories: updates.conditions.categories ?? rule.conditions.categories,
+          priorities: updates.conditions.priorities ?? rule.conditions.priorities,
+          propertyIds: updates.conditions.propertyIds ?? rule.conditions.propertyIds,
+          timeWindow: updates.conditions.timeWindow ? {
+            startHour: updates.conditions.timeWindow.startHour ?? rule.conditions.timeWindow?.startHour ?? 9,
+            endHour: updates.conditions.timeWindow.endHour ?? rule.conditions.timeWindow?.endHour ?? 17,
+            daysOfWeek: updates.conditions.timeWindow.daysOfWeek ?? rule.conditions.timeWindow?.daysOfWeek ?? [1, 2, 3, 4, 5],
+          } : rule.conditions.timeWindow,
+        };
+      }
+      if (updates.actions) {
+        rule.actions = {
+          vendorId: updates.actions.vendorId ?? rule.actions.vendorId,
+          vendorName: updates.actions.vendorName ?? rule.actions.vendorName,
+          autoAssign: updates.actions.autoAssign ?? rule.actions.autoAssign,
+          notifyVendor: updates.actions.notifyVendor ?? rule.actions.notifyVendor,
+          notifyTenant: updates.actions.notifyTenant ?? rule.actions.notifyTenant,
+          maxBudget: updates.actions.maxBudget ?? rule.actions.maxBudget,
+        };
+      }
       if (updates.isActive !== undefined) rule.isActive = updates.isActive;
       rule.updatedAt = new Date();
 
@@ -535,9 +571,20 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
         userId: request.user.id,
         name: data.name,
         isActive: true,
-        conditions: data.conditions,
-        targets: data.targets,
-        escalation: data.escalation,
+        conditions: {
+          category: data.conditions.category,
+          priority: data.conditions.priority,
+        },
+        targets: {
+          acknowledgeWithinHours: data.targets.acknowledgeWithinHours,
+          resolveWithinHours: data.targets.resolveWithinHours,
+          escalateAfterHours: data.targets.escalateAfterHours,
+        },
+        escalation: {
+          notifyEmail: data.escalation.notifyEmail,
+          notifySms: data.escalation.notifySms,
+          autoReassign: data.escalation.autoReassign ?? false,
+        },
         createdAt: now,
         updatedAt: now,
       };
@@ -767,7 +814,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
         if (!vendorStats.has(key)) {
           vendorStats.set(key, {
             vendorId: wo.vendorId,
-            vendorName: wo.vendor?.name || 'Unknown',
+            vendorName: wo.vendor?.companyName || 'Unknown',
             workOrders: [],
           });
         }
@@ -780,10 +827,10 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
         const completed = stats.workOrders.filter(wo => wo.status === 'completed');
         const totalCost = completed.reduce((sum, wo) => sum + (wo.actualCost || 0), 0);
 
-        // Calculate response times
+        // Calculate response times (using scheduledDate as proxy since acknowledgedAt doesn't exist)
         const responseTimes = stats.workOrders
-          .filter(wo => wo.acknowledgedAt)
-          .map(wo => (new Date(wo.acknowledgedAt!).getTime() - new Date(wo.createdAt).getTime()) / (1000 * 60 * 60));
+          .filter(wo => wo.scheduledDate)
+          .map(wo => (new Date(wo.scheduledDate!).getTime() - new Date(wo.createdAt).getTime()) / (1000 * 60 * 60));
 
         const resolutionTimes = completed
           .filter(wo => wo.completedAt)
@@ -902,7 +949,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
               property: true,
               leases: {
                 where: { status: 'active' },
-                include: { tenant: true },
+                include: { primaryTenant: true },
               },
             },
           },
@@ -917,7 +964,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       let recipient = '';
       if (recipientType === 'tenant') {
         const activeLease = workOrder.unit.leases[0];
-        recipient = activeLease?.tenant?.email || '';
+        recipient = activeLease?.primaryTenant?.email || '';
       } else {
         recipient = workOrder.vendor?.email || '';
       }

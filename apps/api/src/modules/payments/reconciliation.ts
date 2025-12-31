@@ -106,7 +106,7 @@ async function findMatchingPayment(
       },
       amount: transaction.amount,
       status: 'pending',
-      dueDate: {
+      scheduledDate: {
         gte: new Date(transaction.date.getTime() - 7 * 24 * 60 * 60 * 1000),
         lte: new Date(transaction.date.getTime() + 7 * 24 * 60 * 60 * 1000),
       },
@@ -156,7 +156,7 @@ async function findMatchingPayment(
                 ...(rule.actions.matchToPropertyId && { id: rule.actions.matchToPropertyId }),
               },
             },
-            ...(rule.actions.matchToTenantId && { tenantId: rule.actions.matchToTenantId }),
+            ...(rule.actions.matchToTenantId && { primaryTenantId: rule.actions.matchToTenantId }),
           },
           status: 'pending',
           amount: {
@@ -189,7 +189,7 @@ async function findMatchingPayment(
         gte: transaction.amount * 0.95,
         lte: transaction.amount * 1.05,
       },
-      dueDate: {
+      scheduledDate: {
         gte: new Date(transaction.date.getTime() - 14 * 24 * 60 * 60 * 1000),
         lte: new Date(transaction.date.getTime() + 14 * 24 * 60 * 60 * 1000),
       },
@@ -380,12 +380,12 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
           // Check for discrepancies
           const payment = await prisma.payment.findUnique({
             where: { id: match.paymentId },
-            select: { amount: true, dueDate: true },
+            select: { amount: true, scheduledDate: true },
           });
           const discrepancy = detectDiscrepancy(
             tx.amount,
             transactionData.date,
-            payment ? { amount: toNumber(payment.amount), dueDate: payment.dueDate } : null
+            payment ? { amount: toNumber(payment.amount), dueDate: payment.scheduledDate } : null
           );
           if (discrepancy) {
             discrepancyType = discrepancy.type;
@@ -576,7 +576,7 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
                   property: true,
                 },
               },
-              tenant: true,
+              primaryTenant: true,
             },
           },
         },
@@ -585,14 +585,14 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
 
       const suggestions = potentialMatches.map(p => {
         const amountDiff = Math.abs(toNumber(p.amount) - toNumber(transaction.amount));
-        const dateDiff = Math.abs(p.dueDate.getTime() - transaction.date.getTime()) / (1000 * 60 * 60 * 24);
+        const dateDiff = p.scheduledDate ? Math.abs(p.scheduledDate.getTime() - transaction.date.getTime()) / (1000 * 60 * 60 * 24) : 30;
         const confidence = Math.max(0, 100 - (amountDiff / toNumber(p.amount)) * 50 - dateDiff * 2);
 
         return {
           paymentId: p.id,
           amount: toNumber(p.amount),
-          dueDate: p.dueDate,
-          tenantName: p.lease.tenant ? `${p.lease.tenant.firstName} ${p.lease.tenant.lastName}` : 'Unknown',
+          scheduledDate: p.scheduledDate,
+          tenantName: p.lease?.primaryTenant ? `${p.lease.primaryTenant.firstName} ${p.lease.primaryTenant.lastName}` : 'Unknown',
           propertyName: p.lease.unit.property.name,
           unitNumber: p.lease.unit.unitNumber,
           confidence: Math.round(confidence),
@@ -679,7 +679,7 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
       const discrepancy = detectDiscrepancy(
         toNumber(transaction.amount),
         transaction.date,
-        { amount: toNumber(payment.amount), dueDate: payment.dueDate }
+        { amount: toNumber(payment.amount), dueDate: payment.scheduledDate }
       );
 
       // Update transaction
@@ -1128,7 +1128,7 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
             },
           },
           status: 'pending',
-          dueDate: { lt: cutoffDate },
+          scheduledDate: { lt: cutoffDate },
         },
         include: {
           lease: {
@@ -1138,22 +1138,22 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
                   property: true,
                 },
               },
-              tenant: true,
+              primaryTenant: true,
             },
           },
         },
-        orderBy: { dueDate: 'asc' },
+        orderBy: { scheduledDate: 'asc' },
       });
 
       const missing = missingPayments.map(p => ({
         paymentId: p.id,
         amount: toNumber(p.amount),
-        dueDate: p.dueDate,
-        daysOverdue: Math.floor((Date.now() - p.dueDate.getTime()) / (1000 * 60 * 60 * 24)),
-        tenantName: p.lease.tenant ? `${p.lease.tenant.firstName} ${p.lease.tenant.lastName}` : 'Unknown',
-        tenantEmail: p.lease.tenant?.email,
-        propertyName: p.lease.unit.property.name,
-        unitNumber: p.lease.unit.unitNumber,
+        scheduledDate: p.scheduledDate,
+        daysOverdue: p.scheduledDate ? Math.floor((Date.now() - p.scheduledDate.getTime()) / (1000 * 60 * 60 * 24)) : 0,
+        tenantName: p.lease?.primaryTenant ? `${p.lease.primaryTenant.firstName} ${p.lease.primaryTenant.lastName}` : 'Unknown',
+        tenantEmail: p.lease?.primaryTenant?.email,
+        propertyName: p.lease?.unit?.property?.name || 'Unknown',
+        unitNumber: p.lease?.unit?.unitNumber || 'Unknown',
         type: p.type,
       }));
 
@@ -1221,7 +1221,7 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
               },
             },
           },
-          dueDate: { gte: start, lte: end },
+          scheduledDate: { gte: start, lte: end },
         },
       });
 

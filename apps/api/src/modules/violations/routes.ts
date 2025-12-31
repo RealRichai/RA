@@ -23,6 +23,93 @@ function toNumber(value: unknown): number {
   return Number(value) || 0;
 }
 
+// Helper function to check if a violation should be escalated
+async function shouldEscalate(
+  propertyId: string,
+  tenantId: string,
+  violationType: ViolationType
+): Promise<boolean> {
+  // Check if tenant has previous violations of the same type
+  const previousViolations = await prisma.leaseViolation.count({
+    where: {
+      tenantId,
+      propertyId,
+      violationType,
+      status: 'resolved',
+    },
+  });
+  // Escalate if 2+ previous violations
+  return previousViolations >= 2;
+}
+
+// Helper function to get cure period for violation type
+async function getCurePeriod(_propertyId: string, violationType: ViolationType): Promise<number> {
+  const curePeriods: Record<string, number> = {
+    noise: 24,
+    unauthorized_pet: 72,
+    unauthorized_guest: 48,
+    property_damage: 168,
+    lease_violation: 72,
+    illegal_activity: 0,
+    health_safety: 24,
+    parking: 24,
+    other: 72,
+  };
+  return curePeriods[violationType] || 72;
+}
+
+// Helper function to get violation statistics
+async function getViolationStats(propertyId: string): Promise<Record<string, number>> {
+  const violations = await prisma.leaseViolation.groupBy({
+    by: ['status'],
+    where: { propertyId },
+    _count: true,
+  });
+  return violations.reduce((acc, v) => {
+    acc[v.status] = v._count;
+    return acc;
+  }, {} as Record<string, number>);
+}
+
+// Helper function to get tenant violation history
+async function getTenantViolationHistory(tenantId: string): Promise<unknown[]> {
+  return prisma.leaseViolation.findMany({
+    where: { tenantId },
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+  });
+}
+
+// Helper function to calculate fine amount
+async function calculateFine(_propertyId: string, violationType: ViolationType, tenantId: string): Promise<number> {
+  // Get violation count for this tenant and type
+  const violationCount = await prisma.leaseViolation.count({
+    where: { tenantId, violationType },
+  });
+
+  const baseFines: Record<string, number> = {
+    noise: 50,
+    unauthorized_pet: 150,
+    unauthorized_guest: 100,
+    property_damage: 500,
+    lease_violation: 200,
+    illegal_activity: 1000,
+    health_safety: 300,
+    parking: 50,
+    other: 100,
+  };
+  const baseFine = baseFines[violationType] || 100;
+  // Increase fine by 50% for each repeat offense
+  return Math.round(baseFine * Math.pow(1.5, violationCount));
+}
+
+// Helper function to get violation count for tenant
+async function getViolationCount(tenantId: string, violationType: ViolationType): Promise<number> {
+  return prisma.leaseViolation.count({
+    where: { tenantId, violationType },
+  });
+}
+
 // Exported types for testing
 export interface LeaseViolation {
   id: string;

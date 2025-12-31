@@ -186,8 +186,8 @@ function toAssociation(record: Awaited<ReturnType<typeof prisma.hOAAssociation.f
     portalCredentials: record.portalCredentials ?? undefined,
     regularAssessment: toNumber(record.regularAssessment),
     assessmentFrequency: record.assessmentFrequency as AssessmentFrequency,
-    specialAssessments: record.specialAssessments as SpecialAssessment[],
-    rules: record.rules as AssociationRule[],
+    specialAssessments: record.specialAssessments as unknown as SpecialAssessment[],
+    rules: record.rules as unknown as AssociationRule[],
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   };
@@ -234,7 +234,7 @@ function toViolation(record: Awaited<ReturnType<typeof prisma.hOAViolation.findF
     fineDueDate: record.fineDueDate?.toISOString().split('T')[0],
     finePaid: record.finePaid,
     photos: record.photos as string[],
-    timeline: record.timeline as ViolationEvent[],
+    timeline: record.timeline as unknown as ViolationEvent[],
     resolvedDate: record.resolvedDate?.toISOString(),
     resolutionNotes: record.resolutionNotes ?? undefined,
     createdAt: record.createdAt.toISOString(),
@@ -707,10 +707,14 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       const data = SpecialAssessmentSchema.parse(request.body);
       const specialAssessment: SpecialAssessment = {
         id: `sa_${Date.now()}`,
-        ...data,
+        description: data.description || data.reason || '',
+        amount: data.amount || 0,
+        dueDate: data.dueDate || new Date().toISOString().split('T')[0],
+        reason: data.reason,
+        isOneTime: data.isOneTime ?? true,
       };
 
-      const currentSpecialAssessments = existing.specialAssessments as SpecialAssessment[];
+      const currentSpecialAssessments = existing.specialAssessments as unknown as SpecialAssessment[];
       const updated = await prisma.hOAAssociation.update({
         where: { id: request.params.id },
         data: {
@@ -742,10 +746,12 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       const data = RuleSchema.parse(request.body);
       const rule: AssociationRule = {
         id: `rule_${Date.now()}`,
-        ...data,
+        category: data.category || 'general',
+        description: data.description || '',
+        fineAmount: data.fineAmount,
       };
 
-      const currentRules = existing.rules as AssociationRule[];
+      const currentRules = existing.rules as unknown as AssociationRule[];
       const updated = await prisma.hOAAssociation.update({
         where: { id: request.params.id },
         data: {
@@ -1025,7 +1031,7 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
         notes: data.notes,
       };
 
-      const currentTimeline = existing.timeline as ViolationEvent[];
+      const currentTimeline = existing.timeline as unknown as ViolationEvent[];
       const updateData: Prisma.HOAViolationUpdateInput = {
         timeline: [...currentTimeline, event] as unknown as Prisma.JsonValue,
       };
@@ -1066,7 +1072,7 @@ export async function hoaRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const now = new Date();
-      const currentTimeline = existing.timeline as ViolationEvent[];
+      const currentTimeline = existing.timeline as unknown as ViolationEvent[];
       const newEvent: ViolationEvent = {
         id: `ve_${Date.now()}`,
         date: now.toISOString(),

@@ -128,10 +128,10 @@ async function generateVacancyReport(userId: string, filters: Record<string, unk
     vacantUnits += propVacant;
 
     for (const unit of property.units) {
-      if (unit.leases.length === 0 && unit.vacantSince) {
-        const daysVacant = Math.floor((Date.now() - new Date(unit.vacantSince).getTime()) / (1000 * 60 * 60 * 24));
+      if (unit.leases.length === 0 && unit.availableDate) {
+        const daysVacant = Math.floor((Date.now() - new Date(unit.availableDate).getTime()) / (1000 * 60 * 60 * 24));
         totalDaysVacant += daysVacant;
-        potentialLostRevenue += (unit.marketRent || 0) * (daysVacant / 30);
+        potentialLostRevenue += (unit.marketRentAmount || 0) * (daysVacant / 30) / 100; // Convert from cents
       }
     }
 
@@ -184,7 +184,7 @@ async function generateRentRollReport(userId: string, filters: Record<string, un
           property: true,
         },
       },
-      tenant: true,
+      primaryTenant: true,
     },
   });
 
@@ -193,14 +193,14 @@ async function generateRentRollReport(userId: string, filters: Record<string, un
       leaseId: { in: leases.map(l => l.id) },
       type: 'rent',
       status: 'completed',
-      dueDate: {
+      scheduledDate: {
         gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
         lt: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1),
       },
     },
   });
 
-  const totalMonthlyRent = leases.reduce((sum, l) => sum + (l.monthlyRent || 0), 0);
+  const totalMonthlyRent = leases.reduce((sum, l) => sum + (Number(l.monthlyRent) || 0), 0);
   const totalCollected = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
 
   return {
@@ -209,10 +209,10 @@ async function generateRentRollReport(userId: string, filters: Record<string, un
     collectionRate: totalMonthlyRent > 0 ? (totalCollected / totalMonthlyRent) * 100 : 0,
     leases: leases.map(l => ({
       leaseId: l.id,
-      propertyName: l.unit.property.name,
-      unitNumber: l.unit.unitNumber,
-      tenantName: l.tenant ? `${l.tenant.firstName} ${l.tenant.lastName}` : 'Unknown',
-      monthlyRent: l.monthlyRent || 0,
+      propertyName: l.unit?.property?.name || 'Unknown',
+      unitNumber: l.unit?.unitNumber || 'Unknown',
+      tenantName: l.primaryTenant ? `${l.primaryTenant.firstName} ${l.primaryTenant.lastName}` : 'Unknown',
+      monthlyRent: Number(l.monthlyRent) || 0,
       status: l.status,
       startDate: l.startDate.toISOString(),
       endDate: l.endDate.toISOString(),
@@ -324,7 +324,7 @@ async function generateLeaseExpiryReport(userId: string, filters: Record<string,
           property: true,
         },
       },
-      tenant: true,
+      primaryTenant: true,
     },
     orderBy: { endDate: 'asc' },
   });
@@ -338,10 +338,10 @@ async function generateLeaseExpiryReport(userId: string, filters: Record<string,
     expiringIn90Days: leases.length,
     leases: leases.map(l => ({
       leaseId: l.id,
-      propertyName: l.unit.property.name,
-      unitNumber: l.unit.unitNumber,
-      tenantName: l.tenant ? `${l.tenant.firstName} ${l.tenant.lastName}` : 'Unknown',
-      tenantEmail: l.tenant?.email || '',
+      propertyName: l.unit?.property?.name || 'Unknown',
+      unitNumber: l.unit?.unitNumber || 'Unknown',
+      tenantName: l.primaryTenant ? `${l.primaryTenant.firstName} ${l.primaryTenant.lastName}` : 'Unknown',
+      tenantEmail: l.primaryTenant?.email || '',
       expiryDate: l.endDate.toISOString(),
       daysUntilExpiry: Math.ceil((l.endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)),
       monthlyRent: l.monthlyRent || 0,
@@ -378,7 +378,8 @@ async function generatePaymentAgingReport(userId: string, filters: Record<string
           },
         },
       },
-      status: { in: ['pending', 'overdue'] },
+      status: 'pending',
+      scheduledDate: { lt: now }, // Only get payments that are due
     },
     include: {
       lease: {
@@ -388,11 +389,20 @@ async function generatePaymentAgingReport(userId: string, filters: Record<string
               property: true,
             },
           },
-          tenant: true,
+          primaryTenant: true,
         },
       },
     },
-  });
+  }) as Array<{
+    id: string;
+    leaseId: string | null;
+    amount: number;
+    scheduledDate: Date | null;
+    lease: {
+      primaryTenant: { firstName: string; lastName: string } | null;
+      unit: { unitNumber: string; property: { name: string } | null } | null;
+    } | null;
+  }>;
 
   let current = 0;
   let days1to30 = 0;
@@ -401,7 +411,7 @@ async function generatePaymentAgingReport(userId: string, filters: Record<string
   let over90Days = 0;
 
   const accounts = payments.map(p => {
-    const daysOverdue = Math.max(0, Math.floor((now.getTime() - new Date(p.dueDate).getTime()) / (1000 * 60 * 60 * 24)));
+    const daysOverdue = Math.max(0, Math.floor((now.getTime() - new Date(p.scheduledDate || now).getTime()) / (1000 * 60 * 60 * 24)));
     let bucket = 'current';
 
     if (daysOverdue === 0) {
@@ -422,10 +432,10 @@ async function generatePaymentAgingReport(userId: string, filters: Record<string
     }
 
     return {
-      leaseId: p.leaseId,
-      tenantName: p.lease.tenant ? `${p.lease.tenant.firstName} ${p.lease.tenant.lastName}` : 'Unknown',
-      propertyName: p.lease.unit.property.name,
-      unitNumber: p.lease.unit.unitNumber,
+      leaseId: p.leaseId || '',
+      tenantName: p.lease?.primaryTenant ? `${p.lease.primaryTenant.firstName} ${p.lease.primaryTenant.lastName}` : 'Unknown',
+      propertyName: p.lease?.unit?.property?.name || 'Unknown',
+      unitNumber: p.lease?.unit?.unitNumber || 'Unknown',
       amountDue: p.amount || 0,
       daysOverdue,
       bucket,

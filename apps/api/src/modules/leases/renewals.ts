@@ -266,7 +266,7 @@ export async function renewalRoutes(app: FastifyInstance): Promise<void> {
               property: true,
             },
           },
-          tenant: true,
+          primaryTenant: true,
         },
       });
 
@@ -274,7 +274,7 @@ export async function renewalRoutes(app: FastifyInstance): Promise<void> {
         throw new AppError('NOT_FOUND', 'Lease not found', 404);
       }
 
-      if (lease.unit.property.ownerId !== request.user.id) {
+      if (lease.unit?.property.ownerId !== request.user.id) {
         throw new AppError('FORBIDDEN', 'Not authorized to create offers for this lease', 403);
       }
 
@@ -588,19 +588,23 @@ export async function renewalRoutes(app: FastifyInstance): Promise<void> {
       const newLease = await prisma.lease.create({
         data: {
           id: generatePrefixedId('lea'),
-          unitId: originalLease.unitId,
-          tenantId: originalLease.tenantId,
+          leaseNumber: `${originalLease.leaseNumber}-R`,
+          property: { connect: { id: originalLease.propertyId } },
+          unit: { connect: { id: originalLease.unitId } },
+          primaryTenant: { connect: { id: originalLease.tenantId } },
+          landlord: { connect: { id: originalLease.landlordId } },
           startDate: new Date(selectedOption.startDate),
           endDate: new Date(selectedOption.endDate),
           monthlyRent: selectedOption.proposedRent,
-          securityDeposit: originalLease.securityDeposit,
-          status: 'pending_signature',
-          leaseType: originalLease.leaseType,
+          monthlyRentAmount: selectedOption.proposedRent,
+          maxOccupants: originalLease.maxOccupants,
+          securityDepositAmount: originalLease.securityDepositAmount,
+          status: 'pending_signatures',
+          type: originalLease.type,
           isRentStabilized: originalLease.isRentStabilized,
           legalRentAmount: offer.isRentStabilized ? selectedOption.proposedRent : null,
           preferentialRentAmount: originalLease.preferentialRentAmount,
           previousLeaseId: originalLease.id,
-          terms: originalLease.terms,
         },
       });
 
@@ -701,8 +705,20 @@ export async function renewalRoutes(app: FastifyInstance): Promise<void> {
         userId: request.user.id,
         name: data.name,
         isActive: true,
-        conditions: data.conditions,
-        actions: data.actions,
+        conditions: {
+          daysBeforeExpiry: data.conditions.daysBeforeExpiry,
+          propertyTypes: data.conditions.propertyTypes,
+          propertyIds: data.conditions.propertyIds,
+          minTenancy: data.conditions.minTenancy,
+        },
+        actions: {
+          autoGenerateOffer: data.actions.autoGenerateOffer ?? true,
+          defaultTermOptions: data.actions.defaultTermOptions,
+          rentIncreasePercent: data.actions.rentIncreasePercent,
+          offerValidDays: data.actions.offerValidDays ?? 30,
+          sendReminders: data.actions.sendReminders ?? true,
+          reminderDays: data.actions.reminderDays ?? [14, 7, 3],
+        },
         createdAt: now,
         updatedAt: now,
       };
@@ -853,7 +869,7 @@ export async function renewalRoutes(app: FastifyInstance): Promise<void> {
               property: true,
             },
           },
-          tenant: true,
+          primaryTenant: true,
         },
         orderBy: { endDate: 'asc' },
       });
@@ -867,8 +883,8 @@ export async function renewalRoutes(app: FastifyInstance): Promise<void> {
           leaseId: l.id,
           propertyName: l.unit.property.name,
           unitNumber: l.unit.unitNumber,
-          tenantName: l.tenant ? `${l.tenant.firstName} ${l.tenant.lastName}` : 'Unknown',
-          tenantEmail: l.tenant?.email,
+          tenantName: l.primaryTenant ? `${l.primaryTenant.firstName} ${l.primaryTenant.lastName}` : 'Unknown',
+          tenantEmail: l.primaryTenant?.email,
           currentRent: l.monthlyRent,
           expiryDate: l.endDate.toISOString(),
           daysUntilExpiry,

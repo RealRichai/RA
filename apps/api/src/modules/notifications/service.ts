@@ -84,7 +84,7 @@ export class NotificationPreferenceService {
         frequency: frequency ?? 'immediate',
         quietStart,
         quietEnd,
-        metadata: metadata ?? undefined,
+        metadata: metadata ? JSON.parse(JSON.stringify(metadata)) : undefined,
       },
       create: {
         userId,
@@ -94,7 +94,7 @@ export class NotificationPreferenceService {
         frequency: frequency ?? 'immediate',
         quietStart,
         quietEnd,
-        metadata: metadata ?? undefined,
+        metadata: metadata ? JSON.parse(JSON.stringify(metadata)) : undefined,
       },
     });
 

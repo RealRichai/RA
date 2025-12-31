@@ -1065,7 +1065,7 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const templateVariables = (template.variables || []) as TemplateVariable[];
+    const templateVariables = (template.variables || []) as unknown as TemplateVariable[];
 
     // Validate required variables
     const missingVars = templateVariables
@@ -1093,7 +1093,7 @@ export async function leaseTemplateRoutes(app: FastifyInstance): Promise<void> {
     const generatedClauses: Array<{ clauseId: string; title: string; content: string; order: number }> = [];
 
     for (const templateClause of template.templateClauses) {
-      const conditions = (templateClause.conditions || []) as ClauseCondition[];
+      const conditions = (templateClause.conditions || []) as unknown as ClauseCondition[];
       if (!shouldIncludeClause(conditions, variables)) {
         continue;
       }

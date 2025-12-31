@@ -302,28 +302,7 @@ export async function getAccessActivitySummary(
   };
 }
 
-export interface PhysicalKey {
-  id: string;
-  keyNumber: string;
-  type: string;
-  status: 'in_stock' | 'assigned' | 'lost' | 'damaged' | 'destroyed';
-}
-
-export interface AccessDevice {
-  id: string;
-  deviceId: string;
-  status: 'active' | 'inactive' | 'suspended' | 'lost' | 'expired';
-  accessZones: string[];
-  expiresAt?: Date | null;
-}
-
-export interface AccessZone {
-  id: string;
-  name: string;
-  type: string;
-}
-
-export interface TemporaryAccess {
+interface TemporaryAccessPrisma {
   id: string;
   propertyId: string;
   zoneIds: string[];
@@ -378,11 +357,11 @@ async function checkTemporaryAccessAsync(
   }
 
   const now = new Date();
-  if (now < access.validFrom || now > access.validUntil) {
+  if (now < access.validFrom || now > access.validTo) {
     return { valid: false, reason: 'Access code is outside valid time window' };
   }
 
-  const zones = access.zoneIds as string[];
+  const zones = access.accessZones as string[];
   if (!zones.includes(zoneId)) {
     return { valid: false, reason: 'Access code not valid for this zone' };
   }
@@ -396,7 +375,7 @@ async function checkTemporaryAccessAsync(
       grantedTo: access.grantedTo,
       accessCode: access.accessCode || undefined,
       validFrom: access.validFrom,
-      validUntil: access.validUntil,
+      validUntil: access.validTo,
       status: access.status as TemporaryAccess['status'],
     },
   };
@@ -559,7 +538,7 @@ export const keyRoutes: FastifyPluginAsync = async (app) => {
       request: FastifyRequest<{ Querystring: { propertyId: string } }>,
       reply
     ) => {
-      const stats = await getKeyInventory(request.query.propertyId);
+      const stats = await getKeyInventoryAsync(request.query.propertyId);
       return reply.send(stats);
     }
   );

@@ -452,14 +452,15 @@ async function importProperty(
     data: {
       id: generatePrefixedId('prop'),
       name: String(row.name),
-      address: String(row.address),
+      street1: String(row.address),
       city: String(row.city),
       state: String(row.state),
-      zipCode: String(row.zipCode),
+      postalCode: String(row.zipCode),
       country: String(row.country || 'US'),
       type: (row.type as 'single_family') || 'single_family',
       status: 'active',
       ownerId: userId,
+      marketId: 'US_STANDARD',
       description: row.description ? String(row.description) : '',
       yearBuilt: row.yearBuilt ? Number(row.yearBuilt) : null,
       totalUnits: row.totalUnits ? Number(row.totalUnits) : 1,
@@ -491,10 +492,12 @@ async function importUnit(
       id: generatePrefixedId('unit'),
       propertyId,
       unitNumber: String(row.unitNumber),
+      type: String(row.type || 'apartment'),
       bedrooms: row.bedrooms ? Number(row.bedrooms) : 0,
       bathrooms: row.bathrooms ? Number(row.bathrooms) : 1,
-      sqft: row.sqft ? Number(row.sqft) : null,
-      status: 'available',
+      squareFeet: row.sqft ? Number(row.sqft) : null,
+      marketRentAmount: row.marketRent ? Number(row.marketRent) : 0,
+      status: 'vacant',
       floor: row.floor ? Number(row.floor) : null,
     },
   });
@@ -562,13 +565,16 @@ async function importLease(
   await prisma.lease.create({
     data: {
       id: generatePrefixedId('lease'),
+      leaseNumber: generatePrefixedId('LSE'),
       propertyId: unit.propertyId,
       unitId,
-      ownerId: userId,
+      landlordId: userId,
+      primaryTenantId: row.tenantId ? String(row.tenantId) : userId,
       startDate: new Date(String(row.startDate)),
       endDate: new Date(String(row.endDate)),
-      rentAmount: Number(row.rentAmount),
-      securityDeposit: row.securityDeposit ? Number(row.securityDeposit) : Number(row.rentAmount),
+      monthlyRentAmount: Number(row.rentAmount),
+      securityDepositAmount: row.securityDeposit ? Number(row.securityDeposit) : Number(row.rentAmount),
+      maxOccupants: row.maxOccupants ? Number(row.maxOccupants) : 2,
       status: 'draft',
       type: 'standard',
     },
@@ -669,10 +675,10 @@ async function exportProperties(
     select: {
       id: true,
       name: true,
-      address: true,
+      street1: true,
       city: true,
       state: true,
-      zipCode: true,
+      postalCode: true,
       country: true,
       type: true,
       status: true,
@@ -711,7 +717,7 @@ async function exportUnits(
       unitNumber: true,
       bedrooms: true,
       bathrooms: true,
-      sqft: true,
+      squareFeet: true,
       floor: true,
       status: true,
       createdAt: true,
@@ -728,7 +734,7 @@ async function exportUnits(
     unitNumber: u.unitNumber,
     bedrooms: u.bedrooms,
     bathrooms: u.bathrooms,
-    sqft: u.sqft,
+    squareFeet: u.squareFeet,
     floor: u.floor,
     status: u.status,
     createdAt: u.createdAt.toISOString(),
@@ -738,20 +744,16 @@ async function exportUnits(
 async function exportTenants(userId: string): Promise<Record<string, unknown>[]> {
   // Get tenants who have leases on user's properties
   const leases = await prisma.lease.findMany({
-    where: { ownerId: userId },
+    where: { landlordId: userId },
     select: {
-      tenants: {
+      primaryTenant: {
         select: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-              phone: true,
-              createdAt: true,
-            },
-          },
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          createdAt: true,
         },
       },
     },
@@ -760,18 +762,17 @@ async function exportTenants(userId: string): Promise<Record<string, unknown>[]>
   const tenantMap = new Map<string, Record<string, unknown>>();
 
   leases.forEach((lease) => {
-    lease.tenants.forEach((t) => {
-      if (!tenantMap.has(t.user.id)) {
-        tenantMap.set(t.user.id, {
-          id: t.user.id,
-          email: t.user.email,
-          firstName: t.user.firstName,
-          lastName: t.user.lastName,
-          phone: t.user.phone,
-          createdAt: t.user.createdAt.toISOString(),
-        });
-      }
-    });
+    const t = lease.primaryTenant;
+    if (!tenantMap.has(t.id)) {
+      tenantMap.set(t.id, {
+        id: t.id,
+        email: t.email,
+        firstName: t.firstName,
+        lastName: t.lastName,
+        phone: t.phone,
+        createdAt: t.createdAt.toISOString(),
+      });
+    }
   });
 
   return Array.from(tenantMap.values());
@@ -781,7 +782,7 @@ async function exportLeases(
   userId: string,
   filters: { ids?: string[]; status?: string; createdAfter?: string; createdBefore?: string }
 ): Promise<Record<string, unknown>[]> {
-  const where: Record<string, unknown> = { ownerId: userId };
+  const where: Record<string, unknown> = { landlordId: userId };
 
   if (filters.ids?.length) {
     where.id = { in: filters.ids };
@@ -804,8 +805,8 @@ async function exportLeases(
       unitId: true,
       startDate: true,
       endDate: true,
-      rentAmount: true,
-      securityDeposit: true,
+      monthlyRentAmount: true,
+      securityDepositAmount: true,
       status: true,
       type: true,
       createdAt: true,
@@ -822,8 +823,8 @@ async function exportLeases(
     unitNumber: l.unit?.unitNumber,
     startDate: l.startDate.toISOString().split('T')[0],
     endDate: l.endDate.toISOString().split('T')[0],
-    rentAmount: l.rentAmount,
-    securityDeposit: l.securityDeposit,
+    rentAmount: l.monthlyRentAmount,
+    securityDeposit: l.securityDepositAmount,
     status: l.status,
     type: l.type,
     createdAt: l.createdAt.toISOString(),

@@ -300,7 +300,13 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
       status: 'active',
       nextChargeDate: calculateNextChargeDate(body.dayOfMonth),
       lastChargeDate: null,
-      lateFeeConfig: body.lateFeeConfig || null,
+      lateFeeConfig: body.lateFeeConfig ? {
+        type: body.lateFeeConfig.type,
+        amount: body.lateFeeConfig.amount,
+        maxAmount: body.lateFeeConfig.maxAmount ?? null,
+        startAfterDays: body.lateFeeConfig.startAfterDays,
+        tiers: body.lateFeeConfig.tiers?.map(t => ({ days: t.days!, amount: t.amount! })),
+      } : null,
       createdAt: now,
       updatedAt: now,
     };
@@ -375,9 +381,17 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
       });
     }
 
+    const { lateFeeConfig: bodyLateFeeConfig, ...bodyRest } = body;
     const updated: PaymentSchedule = {
       ...schedule,
-      ...body,
+      ...bodyRest,
+      lateFeeConfig: bodyLateFeeConfig ? {
+        type: bodyLateFeeConfig.type,
+        amount: bodyLateFeeConfig.amount,
+        maxAmount: bodyLateFeeConfig.maxAmount ?? null,
+        startAfterDays: bodyLateFeeConfig.startAfterDays,
+        tiers: bodyLateFeeConfig.tiers?.map(t => ({ days: t.days!, amount: t.amount! })),
+      } : schedule.lateFeeConfig,
       updatedAt: new Date(),
     };
 

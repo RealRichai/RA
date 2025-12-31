@@ -465,7 +465,7 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
           startDate: data.startDate ? new Date(data.startDate) : null,
           endDate: data.endDate ? new Date(data.endDate) : null,
           documents: [],
-          timeline: initialTimeline,
+          timeline: JSON.parse(JSON.stringify(initialTimeline)),
         },
       });
 
@@ -555,17 +555,19 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       const data = ApplicationDocumentSchema.parse(request.body);
       const doc: ApplicationDocument = {
         id: `doc_${Date.now()}`,
-        ...data,
+        name: data.name,
+        type: data.type,
+        fileUrl: data.fileUrl,
         uploadedAt: new Date().toISOString(),
         verified: false,
       };
 
-      const documents = (application.documents as ApplicationDocument[]) || [];
+      const documents = (application.documents as unknown as ApplicationDocument[]) || [];
       documents.push(doc);
 
       await prisma.assistanceApplication.update({
         where: { id: request.params.id },
-        data: { documents },
+        data: { documents: JSON.parse(JSON.stringify(documents)) },
       });
 
       return reply.status(201).send(doc);
@@ -592,7 +594,7 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
       const data = ApplicationStatusSchema.parse(request.body);
       const now = new Date();
 
-      const timeline = (application.timeline as ApplicationEvent[]) || [];
+      const timeline = (application.timeline as unknown as ApplicationEvent[]) || [];
       timeline.push({
         id: `ae_${Date.now()}`,
         date: now.toISOString(),
@@ -611,7 +613,7 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
             voucherNumber: data.voucherNumber,
           }),
           ...(data.status === 'denied' && { denialReason: data.denialReason }),
-          timeline,
+          timeline: JSON.parse(JSON.stringify(timeline)),
         },
       });
 
@@ -952,7 +954,7 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
         return reply.status(404).send({ error: 'Inspection not found' });
       }
 
-      const deficiencies = (inspection.deficiencies as InspectionDeficiency[]) || [];
+      const deficiencies = (inspection.deficiencies as unknown as InspectionDeficiency[]) || [];
       const deficiency = deficiencies.find((d) => d.id === request.params.defId);
       if (!deficiency) {
         return reply.status(404).send({ error: 'Deficiency not found' });
@@ -963,7 +965,7 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
 
       const updated = await prisma.assistanceInspection.update({
         where: { id: request.params.id },
-        data: { deficiencies },
+        data: { deficiencies: JSON.parse(JSON.stringify(deficiencies)) },
       });
 
       return reply.send(updated);
@@ -981,7 +983,7 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
         where: request.query.programId ? { programId: request.query.programId } : undefined,
       });
 
-      const allDeficiencies = results.flatMap((i) => (i.deficiencies as InspectionDeficiency[]) || []);
+      const allDeficiencies = results.flatMap((i) => (i.deficiencies as unknown as InspectionDeficiency[]) || []);
       const summary = getDeficiencySummary(allDeficiencies);
 
       return reply.send(summary);
@@ -1139,7 +1141,8 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
 
       const requirements: CertificationRequirement[] = data.requirements.map((r, i) => ({
         id: `req_${Date.now()}_${i}`,
-        ...r,
+        name: r.name,
+        description: r.description,
         completed: false,
       }));
 
@@ -1152,7 +1155,7 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
           certificationDate: now,
           expirationDate,
           status: 'active',
-          requirements,
+          requirements: JSON.parse(JSON.stringify(requirements)),
         },
       });
 
@@ -1198,7 +1201,7 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
         return reply.status(404).send({ error: 'Certification not found' });
       }
 
-      const requirements = (certification.requirements as CertificationRequirement[]) || [];
+      const requirements = (certification.requirements as unknown as CertificationRequirement[]) || [];
       const requirement = requirements.find((r) => r.id === request.params.reqId);
       if (!requirement) {
         return reply.status(404).send({ error: 'Requirement not found' });
@@ -1210,7 +1213,7 @@ export async function rentalAssistanceRoutes(app: FastifyInstance): Promise<void
 
       const updated = await prisma.landlordCertification.update({
         where: { id: request.params.id },
-        data: { requirements },
+        data: { requirements: JSON.parse(JSON.stringify(requirements)) },
       });
 
       return reply.send(updated);

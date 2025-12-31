@@ -222,16 +222,13 @@ export async function marketingRoutes(app: FastifyInstance): Promise<void> {
 
       const { listingId, type, status } = request.query;
 
-      const where: Record<string, unknown> = { createdById: request.user.id };
+      const where: Record<string, unknown> = { createdBy: request.user.id };
       if (listingId) where.listingId = listingId;
       if (type) where.type = type;
       if (status) where.status = status;
 
       const assets = await prisma.marketingAsset.findMany({
         where,
-        include: {
-          listing: { select: { id: true, title: true } },
-        },
         orderBy: { createdAt: 'desc' },
       });
 

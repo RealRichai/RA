@@ -346,11 +346,4 @@ declare module 'fastify' {
   }
 }
 
-// =============================================================================
-// Exports
-// =============================================================================
-
-export {
-  TraceContext as TraceContextType,
-  TracingPluginOptions,
-};
+// TracingPluginOptions and TraceContext are exported inline above

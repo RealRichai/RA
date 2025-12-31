@@ -123,7 +123,7 @@ async function searchProperties(query: string, filters: Record<string, unknown>,
       address: true,
       city: true,
       state: true,
-      propertyType: true,
+      type: true,
       totalUnits: true,
     },
     take: limit,
@@ -136,9 +136,9 @@ async function searchProperties(query: string, filters: Record<string, unknown>,
     id: p.id,
     title: p.name || p.address,
     subtitle: `${p.city}, ${p.state}`,
-    description: `${p.propertyType} - ${p.totalUnits} units`,
+    description: `${p.type} - ${p.totalUnits} units`,
     metadata: {
-      propertyType: p.propertyType,
+      propertyType: p.type,
       totalUnits: p.totalUnits,
     },
   }));
@@ -150,9 +150,9 @@ async function searchListings(query: string, filters: Record<string, unknown>, l
   };
 
   if (filters.minRent || filters.maxRent) {
-    where.monthlyRent = {};
-    if (filters.minRent) (where.monthlyRent as Record<string, number>).gte = filters.minRent as number;
-    if (filters.maxRent) (where.monthlyRent as Record<string, number>).lte = filters.maxRent as number;
+    where.priceAmount = {};
+    if (filters.minRent) (where.priceAmount as Record<string, number>).gte = filters.minRent as number;
+    if (filters.maxRent) (where.priceAmount as Record<string, number>).lte = filters.maxRent as number;
   }
 
   const listings = await prisma.listing.findMany({
@@ -160,29 +160,21 @@ async function searchListings(query: string, filters: Record<string, unknown>, l
       OR: [
         { title: { contains: query, mode: 'insensitive' } },
         { description: { contains: query, mode: 'insensitive' } },
-        { unit: { property: { address: { contains: query, mode: 'insensitive' } } } },
-        { unit: { property: { city: { contains: query, mode: 'insensitive' } } } },
+        { city: { contains: query, mode: 'insensitive' } },
+        { street1: { contains: query, mode: 'insensitive' } },
       ],
       ...where,
     },
     select: {
       id: true,
       title: true,
-      monthlyRent: true,
+      priceAmount: true,
+      rent: true,
       availableDate: true,
-      unit: {
-        select: {
-          bedrooms: true,
-          bathrooms: true,
-          property: {
-            select: {
-              address: true,
-              city: true,
-              state: true,
-            },
-          },
-        },
-      },
+      bedrooms: true,
+      bathrooms: true,
+      city: true,
+      state: true,
     },
     take: limit,
     skip: offset,
@@ -193,12 +185,12 @@ async function searchListings(query: string, filters: Record<string, unknown>, l
     entity: 'listings' as const,
     id: l.id,
     title: l.title,
-    subtitle: `${l.unit.property.city}, ${l.unit.property.state}`,
-    description: `$${l.monthlyRent}/mo - ${l.unit.bedrooms}BR/${l.unit.bathrooms}BA`,
+    subtitle: `${l.city}, ${l.state}`,
+    description: `$${l.rent || l.priceAmount}/mo - ${l.bedrooms}BR/${l.bathrooms}BA`,
     metadata: {
-      monthlyRent: l.monthlyRent,
-      bedrooms: l.unit.bedrooms,
-      bathrooms: l.unit.bathrooms,
+      monthlyRent: l.rent || l.priceAmount,
+      bedrooms: l.bedrooms,
+      bathrooms: l.bathrooms,
       availableDate: l.availableDate,
     },
   }));
@@ -210,9 +202,9 @@ async function searchLeases(query: string, _filters: Record<string, unknown>, li
       OR: [
         { unit: { property: { address: { contains: query, mode: 'insensitive' } } } },
         { unit: { property: { name: { contains: query, mode: 'insensitive' } } } },
-        { tenants: { some: { user: { email: { contains: query, mode: 'insensitive' } } } } },
-        { tenants: { some: { user: { firstName: { contains: query, mode: 'insensitive' } } } } },
-        { tenants: { some: { user: { lastName: { contains: query, mode: 'insensitive' } } } } },
+        { primaryTenant: { email: { contains: query, mode: 'insensitive' } } },
+        { primaryTenant: { firstName: { contains: query, mode: 'insensitive' } } },
+        { primaryTenant: { lastName: { contains: query, mode: 'insensitive' } } },
       ],
     },
     select: {
@@ -232,16 +224,11 @@ async function searchLeases(query: string, _filters: Record<string, unknown>, li
           },
         },
       },
-      tenants: {
+      primaryTenant: {
         select: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
+          firstName: true,
+          lastName: true,
         },
-        take: 1,
       },
     },
     take: limit,
@@ -252,8 +239,8 @@ async function searchLeases(query: string, _filters: Record<string, unknown>, li
   return leases.map((l) => ({
     entity: 'leases' as const,
     id: l.id,
-    title: `${l.unit.property.name || l.unit.property.address} - Unit ${l.unit.unitNumber}`,
-    subtitle: l.tenants[0] ? `${l.tenants[0].user.firstName} ${l.tenants[0].user.lastName}` : undefined,
+    title: `${l.unit?.property?.name || l.unit?.property?.address || 'Unknown'} - Unit ${l.unit?.unitNumber || 'N/A'}`,
+    subtitle: l.primaryTenant ? `${l.primaryTenant.firstName} ${l.primaryTenant.lastName}` : undefined,
     description: `${l.status} - $${l.monthlyRent}/mo`,
     metadata: {
       status: l.status,
@@ -305,14 +292,15 @@ async function searchDocuments(query: string, _filters: Record<string, unknown>,
     where: {
       OR: [
         { name: { contains: query, mode: 'insensitive' } },
-        { category: { contains: query, mode: 'insensitive' } },
+        { type: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
       ],
     },
     select: {
       id: true,
       name: true,
       type: true,
-      category: true,
+      description: true,
       createdAt: true,
     },
     take: limit,
@@ -324,11 +312,10 @@ async function searchDocuments(query: string, _filters: Record<string, unknown>,
     entity: 'documents' as const,
     id: d.id,
     title: d.name,
-    subtitle: d.category || undefined,
-    description: d.type,
+    subtitle: d.type || undefined,
+    description: d.description || d.type,
     metadata: {
       type: d.type,
-      category: d.category,
       createdAt: d.createdAt,
     },
   }));

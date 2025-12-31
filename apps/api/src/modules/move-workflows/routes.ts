@@ -403,7 +403,7 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
       });
 
       if (template) {
-        const templateItems = (template.items || []) as ChecklistTemplateItem[];
+        const templateItems = (template.items || []) as unknown as ChecklistTemplateItem[];
         const checklistData = templateItems.map((item, index) => ({
           workflowId: workflow.id,
           templateItemId: item.id,
@@ -681,7 +681,7 @@ export async function moveWorkflowRoutes(app: FastifyInstance): Promise<void> {
         name: t.name,
         type: t.type,
         propertyId: t.propertyId,
-        items: t.items as ChecklistTemplateItem[],
+        items: t.items as unknown as ChecklistTemplateItem[],
         isActive: t.isActive,
         createdAt: t.createdAt.toISOString(),
       }));

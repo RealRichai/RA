@@ -145,32 +145,49 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
         case 'landlord':
           profile = await prisma.landlordProfile.upsert({
             where: { userId: request.user.id },
-            update: data,
-            create: { userId: request.user.id, ...data },
+            update: data as unknown as Record<string, unknown>,
+            create: { user: { connect: { id: request.user.id } }, ...data },
           });
           break;
 
         case 'agent':
           profile = await prisma.agentProfile.upsert({
             where: { userId: request.user.id },
-            update: data,
-            create: { userId: request.user.id, ...data },
+            update: {
+              licenseNumber: data.licenseNumber,
+              bio: data.bio,
+              specializations: data.specialties,
+              serviceAreas: data.serviceAreas,
+            },
+            create: {
+              user: { connect: { id: request.user.id } },
+              licenseNumber: data.licenseNumber || '',
+              licenseState: '',
+              licenseExpiry: new Date(),
+              brokerageName: data.companyName || '',
+              bio: data.bio,
+              specializations: data.specialties || [],
+              serviceAreas: data.serviceAreas || [],
+            },
           });
           break;
 
         case 'tenant':
           profile = await prisma.tenantProfile.upsert({
             where: { userId: request.user.id },
-            update: data,
-            create: { userId: request.user.id },
+            update: {} as Record<string, unknown>,
+            create: { user: { connect: { id: request.user.id } } },
           });
           break;
 
         case 'investor':
           profile = await prisma.investorProfile.upsert({
             where: { userId: request.user.id },
-            update: data,
-            create: { userId: request.user.id },
+            update: {} as Record<string, unknown>,
+            create: {
+              user: { connect: { id: request.user.id } },
+              investorType: 'individual',
+            },
           });
           break;
 

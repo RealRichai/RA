@@ -46,7 +46,7 @@ const authPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
   // Authentication decorator
   fastify.decorate(
     'authenticate',
-    async function (request: FastifyRequest, reply: FastifyReply, options?: AuthenticateOptions) {
+    async function (request: FastifyRequest, reply: FastifyReply, options?: AuthenticateOptions): Promise<void> {
       try {
         const token = request.headers.authorization?.replace('Bearer ', '');
 
@@ -55,13 +55,14 @@ const authPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
             request.user = null;
             return;
           }
-          return reply.status(401).send({
+          reply.status(401).send({
             success: false,
             error: {
               code: 'AUTH_REQUIRED',
               message: 'Authentication required',
             },
           });
+          return;
         }
 
         const decoded = await request.jwtVerify<{
@@ -74,13 +75,14 @@ const authPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
         }>();
 
         if (decoded.type !== 'access') {
-          return reply.status(401).send({
+          reply.status(401).send({
             success: false,
             error: {
               code: 'AUTH_TOKEN_INVALID',
               message: 'Invalid token type',
             },
           });
+          return;
         }
 
         request.user = {
@@ -98,16 +100,17 @@ const authPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
 
         const err = error as Error & { code?: string };
         if (err.code === 'FST_JWT_AUTHORIZATION_TOKEN_EXPIRED') {
-          return reply.status(401).send({
+          reply.status(401).send({
             success: false,
             error: {
               code: 'AUTH_TOKEN_EXPIRED',
               message: 'Token has expired',
             },
           });
+          return;
         }
 
-        return reply.status(401).send({
+        reply.status(401).send({
           success: false,
           error: {
             code: 'AUTH_TOKEN_INVALID',

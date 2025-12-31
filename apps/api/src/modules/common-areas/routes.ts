@@ -102,7 +102,7 @@ export function getAreaUtilizationSync(areaId: string, startDate?: string, endDa
 
   const completed = reservations.filter(r => r.status === 'completed').length;
   const cancelled = reservations.filter(r => r.status === 'cancelled').length;
-  const totalRevenue = reservations.reduce((sum, r) => sum + (r.rentalFee || 0), 0);
+  const totalRevenue = reservations.reduce((sum, r) => sum + (r.fee || 0), 0);
 
   return {
     totalReservations: reservations.length,
@@ -227,7 +227,7 @@ async function isTimeSlotAvailableAsync(
 
   // Check operating hours
   const dayOfWeek = new Date(date).getDay();
-  const hours = getOperatingHoursForDay(area as CommonAreaWithOperatingHours, dayOfWeek);
+  const hours = getOperatingHoursForDay(area as unknown as CommonAreaWithOperatingHours, dayOfWeek);
   if (!hours || hours.isClosed) {
     return false;
   }
@@ -309,7 +309,7 @@ export async function getAvailableSlots(
   if (!area) return [];
 
   const dayOfWeek = new Date(date).getDay();
-  const hours = getOperatingHoursForDay(area as CommonAreaWithOperatingHours, dayOfWeek);
+  const hours = getOperatingHoursForDay(area as unknown as CommonAreaWithOperatingHours, dayOfWeek);
 
   if (!hours || hours.isClosed) {
     return [];
@@ -322,7 +322,7 @@ export async function getAvailableSlots(
     const endTime = addMinutesToTime(currentTime, slotDurationMinutes);
     if (endTime > hours.closeTime) break;
 
-    const isAvailable = await isTimeSlotAvailable(areaId, date, currentTime, endTime);
+    const isAvailable = await isTimeSlotAvailableAsync(areaId, date, currentTime, endTime);
     slots.push({
       startTime: currentTime,
       endTime,
@@ -358,7 +358,7 @@ async function getAreaUtilizationAsync(
     where.date = { gte: new Date(startDate) };
   }
   if (endDate) {
-    where.date = { ...where.date, lte: new Date(endDate) };
+    where.date = { ...(where.date as object || {}), lte: new Date(endDate) };
   }
 
   const reservations = await prisma.commonAreaBooking.findMany({ where });
@@ -704,7 +704,7 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }>,
       reply
     ) => {
-      const utilization = await getAreaUtilization(
+      const utilization = await getAreaUtilizationAsync(
         request.params.id,
         request.query.startDate,
         request.query.endDate
@@ -754,7 +754,7 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Check availability
-      const available = await isTimeSlotAvailable(data.areaId, data.date, data.startTime, data.endTime);
+      const available = await isTimeSlotAvailableAsync(data.areaId, data.date, data.startTime, data.endTime);
       if (!available) {
         return reply.status(400).send({ error: 'Time slot is not available' });
       }
@@ -774,7 +774,7 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Calculate fee
-      const { fee, hours } = calculateReservationFee(area as CommonAreaWithOperatingHours, data.startTime, data.endTime);
+      const { fee, hours } = calculateReservationFee(area as unknown as CommonAreaWithOperatingHours, data.startTime, data.endTime);
 
       // Check minimum/maximum hours
       if (area.minimumHours && hours < area.minimumHours) {
@@ -1002,7 +1002,7 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(404).send({ error: 'Reservation not found' });
       }
 
-      const eligibility = await checkCancellationEligibility(reservation);
+      const eligibility = checkCancellationEligibilitySync(reservation.id);
       if (!eligibility.eligible) {
         return reply.status(400).send({ error: eligibility.reason });
       }
@@ -1181,7 +1181,7 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
         });
 
         const { fee } = area
-          ? calculateReservationFee(area as CommonAreaWithOperatingHours, entry.preferredStartTime, entry.preferredEndTime)
+          ? calculateReservationFee(area as unknown as CommonAreaWithOperatingHours, entry.preferredStartTime, entry.preferredEndTime)
           : { fee: 0 };
 
         // Create reservation

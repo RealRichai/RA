@@ -138,7 +138,11 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
       );
 
       // Run comprehensive compliance check based on type
-      const result = await runComplianceCheck(data, marketId, pack);
+      const result = await runComplianceCheck({
+        entityType: data.entityType,
+        entityId: data.entityId,
+        checkType: data.checkType,
+      }, marketId, pack);
 
       // Create compliance check record with policyVersion + evidence
       const check = await prisma.complianceCheck.create({
@@ -152,7 +156,7 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
           severity: result.severity,
           title: result.title,
           description: result.description,
-          result: {
+          result: JSON.parse(JSON.stringify({
             passed: result.passed,
             violations: result.violations,
             recommendations: result.recommendations,
@@ -161,8 +165,8 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
             marketPackVersion: result.marketPackVersion,
             checksPerformed: result.checksPerformed,
             evidence: result.evidence,
-          },
-          details: result.evidence,
+          })),
+          details: JSON.parse(JSON.stringify(result.evidence)),
           checkedAt: new Date(),
           checkedById: request.user.id,
         },
@@ -269,20 +273,25 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
         .filter((r) => r.acknowledgedAt !== null)
         .map((r) => r.disclosure.type);
 
+      // Extract broker fee from metadata if present
+      const listingMetadata = (listing.metadata as Record<string, unknown>) || {};
+      const brokerFeeAmount = listingMetadata.brokerFeeAmount as number | undefined;
+      const securityDepositAmount = listingMetadata.securityDepositAmount as number | undefined;
+      const incomeRequirement = listingMetadata.incomeRequirementMultiplier as number | undefined;
+      const creditScoreRequirement = listingMetadata.creditScoreThreshold as number | undefined;
+
       // Run listing publish gate
       const gateResult = await gateListingPublish({
         listingId,
         marketId,
         status: listing.status,
         hasBrokerFee: listing.hasBrokerFee ?? false,
-        brokerFeeAmount: listing.brokerFee ? Number(listing.brokerFee) : undefined,
+        brokerFeeAmount: brokerFeeAmount,
         brokerFeePaidBy: 'tenant', // Assume tenant-paid until proven otherwise
-        monthlyRent: Number(listing.rent),
-        securityDepositAmount: listing.securityDeposit ? Number(listing.securityDeposit) : undefined,
-        incomeRequirementMultiplier: listing.incomeRequirement
-          ? Number(listing.incomeRequirement)
-          : undefined,
-        creditScoreThreshold: listing.creditScoreRequirement ?? undefined,
+        monthlyRent: Number(listing.rent ?? listing.priceAmount),
+        securityDepositAmount: securityDepositAmount,
+        incomeRequirementMultiplier: incomeRequirement,
+        creditScoreThreshold: creditScoreRequirement,
         deliveredDisclosures,
         acknowledgedDisclosures,
       });
@@ -313,7 +322,7 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
         if (criticalViolations.length > 0) {
           await prisma.listing.update({
             where: { id: listingId },
-            data: { status: 'suspended' },
+            data: { status: 'paused' },
           });
 
           await createAuditLog({
@@ -322,7 +331,7 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
             action: 'listing_suspended_compliance',
             entityType: 'listing',
             entityId: listingId,
-            changes: { status: { from: listing.status, to: 'suspended' } },
+            changes: { status: { from: listing.status, to: 'paused' } },
             metadata: {
               reason: gateResult.blockedReason,
               violations: criticalViolations.map((v) => v.code),
@@ -462,7 +471,7 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
       const requestId = generatePrefixedId('req');
 
       // Get application to find current stage
-      const application = await prisma.application.findUnique({
+      const application = await prisma.tenantApplication.findUnique({
         where: { id: applicationId },
       });
 
@@ -560,30 +569,36 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
       // Get disclosure records for this lease
       const disclosureRecords = await prisma.disclosureRecord.findMany({
         where: {
-          metadata: {
-            path: ['entityId'],
-            equals: leaseId,
-          },
+          entityType: 'lease',
+          entityId: leaseId,
+        },
+        include: {
+          disclosure: true,
         },
       });
 
       const deliveredDisclosures = disclosureRecords.map(
-        (r) => (r.metadata as Record<string, unknown>)?.disclosureType as string
+        (r) => r.disclosure?.type as string
       ).filter(Boolean);
 
       const acknowledgedDisclosures = disclosureRecords
         .filter((r) => r.acknowledgedAt)
-        .map((r) => (r.metadata as Record<string, unknown>)?.disclosureType as string)
+        .map((r) => r.disclosure?.type as string)
         .filter(Boolean);
+
+      // Extract rent stabilization info from lease metadata
+      const leaseMetadata = (lease.metadata as Record<string, unknown>) || {};
+      const legalRentAmount = leaseMetadata.legalRentAmount as number | undefined;
+      const preferentialRentAmount = leaseMetadata.preferentialRentAmount as number | undefined;
 
       const gateResult = await gateLeaseCreation({
         leaseId,
         marketId,
-        monthlyRent: Number(lease.monthlyRent),
-        securityDepositAmount: lease.securityDeposit ? Number(lease.securityDeposit) : undefined,
+        monthlyRent: Number(lease.monthlyRentAmount),
+        securityDepositAmount: lease.securityDepositAmount ? Number(lease.securityDepositAmount) : undefined,
         isRentStabilized: lease.unit?.isRentStabilized ?? false,
-        legalRentAmount: lease.legalRent ? Number(lease.legalRent) : undefined,
-        preferentialRentAmount: lease.preferentialRent ? Number(lease.preferentialRent) : undefined,
+        legalRentAmount: legalRentAmount,
+        preferentialRentAmount: preferentialRentAmount,
         deliveredDisclosures,
         acknowledgedDisclosures,
       } as Parameters<typeof gateLeaseCreation>[0]);
@@ -661,15 +676,18 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
 
       const { marketId, marketPackId, pack } = await getMarketConfigForEntity('listing', listingId);
 
+      // Extract FARE Act related fields from listing metadata
+      const fareMetadata = (listing.metadata as Record<string, unknown>) || {};
+      const incomeReqMultiplier = fareMetadata.incomeRequirementMultiplier as number | undefined;
+      const creditThreshold = fareMetadata.creditScoreThreshold as number | undefined;
+
       const result = checkFAREActRules(
         {
           hasBrokerFee: listing.hasBrokerFee ?? false,
-          brokerFeeAmount: listing.brokerFee ? Number(listing.brokerFee) : undefined,
-          monthlyRent: Number(listing.rent),
-          incomeRequirementMultiplier: listing.incomeRequirement
-            ? Number(listing.incomeRequirement)
-            : undefined,
-          creditScoreThreshold: listing.creditScoreRequirement ?? undefined,
+          brokerFeeAmount: listing.brokerFeeAmount ? Number(listing.brokerFeeAmount) : undefined,
+          monthlyRent: Number(listing.rent ?? listing.priceAmount),
+          incomeRequirementMultiplier: incomeReqMultiplier,
+          creditScoreThreshold: creditThreshold,
         },
         pack
       );
@@ -690,17 +708,17 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
           description: passed
             ? 'Listing complies with FARE Act requirements'
             : result.violations.map((v) => v.message).join('; '),
-          result: {
+          result: JSON.parse(JSON.stringify({
             violations: result.violations,
             fixes: result.fixes,
             policyVersion: '1.0.0',
             marketPack: marketPackId,
             marketPackVersion: getMarketPackVersion(pack),
-          },
-          details: {
+          })),
+          details: JSON.parse(JSON.stringify({
             policyVersion: '1.0.0',
             marketPack: marketPackId,
-          },
+          })),
           checkedAt: new Date(),
           checkedById: request.user?.id || 'system',
         },
@@ -804,20 +822,20 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
           description: passed
             ? 'Action complies with Good Cause Eviction requirements'
             : result.violations.filter((v) => v.severity === 'critical').map((v) => v.message).join('; '),
-          result: {
+          result: JSON.parse(JSON.stringify({
             actionType,
             violations: result.violations,
             fixes: result.fixes,
             policyVersion: '1.0.0',
             marketPack: marketPackId,
             marketPackVersion: getMarketPackVersion(pack),
-          },
-          details: {
+          })),
+          details: JSON.parse(JSON.stringify({
             policyVersion: '1.0.0',
             marketPack: marketPackId,
             dataSource: cpiEvidence?.evidence?.source || 'bls_api',
             cpiFallback: !!cpiEvidence,
-          },
+          })),
           checkedAt: new Date(),
           checkedById: request.user?.id || 'system',
         },
@@ -982,10 +1000,11 @@ export async function complianceRoutes(app: FastifyInstance): Promise<void> {
           disclosureId: data.disclosureId,
           recipientId: data.recipientId,
           recipientType: data.recipientType.toUpperCase(),
+          recipientEmail: request.user.email,
+          entityType: disclosure.type || 'unknown',
+          entityId: data.recipientId,
+          sentAt: new Date(),
           deliveredAt: new Date(),
-          deliveryMethod: data.deliveryMethod.toUpperCase(),
-          deliveredById: request.user.id,
-          metadata: data.metadata,
         },
       });
 
@@ -1086,7 +1105,7 @@ async function getMarketConfigForEntity(
       break;
     }
     case 'application': {
-      const application = await prisma.application.findUnique({
+      const application = await prisma.tenantApplication.findUnique({
         where: { id: entityId },
         include: { listing: { include: { unit: { include: { property: true } } } } },
       });
@@ -1162,15 +1181,17 @@ async function runComplianceCheck(
         where: { id: data.entityId },
       });
       if (listing) {
+        const listingMeta = (listing.metadata as Record<string, unknown>) || {};
+        const incomeReqMult = listingMeta.incomeRequirementMultiplier as number | undefined;
+        const creditThresh = listingMeta.creditScoreThreshold as number | undefined;
+
         const result = checkFAREActRules(
           {
             hasBrokerFee: listing.hasBrokerFee ?? false,
-            brokerFeeAmount: listing.brokerFee ? Number(listing.brokerFee) : undefined,
-            monthlyRent: Number(listing.rent),
-            incomeRequirementMultiplier: listing.incomeRequirement
-              ? Number(listing.incomeRequirement)
-              : undefined,
-            creditScoreThreshold: listing.creditScoreRequirement ?? undefined,
+            brokerFeeAmount: listing.brokerFeeAmount ? Number(listing.brokerFeeAmount) : undefined,
+            monthlyRent: Number(listing.rent ?? listing.priceAmount),
+            incomeRequirementMultiplier: incomeReqMult,
+            creditScoreThreshold: creditThresh,
           },
           pack
         );
@@ -1181,7 +1202,7 @@ async function runComplianceCheck(
     }
 
     case 'fcha': {
-      const application = await prisma.application.findUnique({
+      const application = await prisma.tenantApplication.findUnique({
         where: { id: data.entityId },
       });
       if (application) {
@@ -1233,13 +1254,15 @@ async function runComplianceCheck(
         include: { unit: true },
       });
       if (lease) {
+        const leaseMeta = (lease.metadata as Record<string, unknown>) || {};
+        const legalRentAmt = leaseMeta.legalRentAmount as number | undefined;
+        const prefRentAmt = leaseMeta.preferentialRentAmount as number | undefined;
+
         const result = checkRentStabilizationRules(
           {
             isRentStabilized: lease.unit?.isRentStabilized ?? false,
-            legalRentAmount: lease.legalRent ? Number(lease.legalRent) : undefined,
-            preferentialRentAmount: lease.preferentialRent
-              ? Number(lease.preferentialRent)
-              : undefined,
+            legalRentAmount: legalRentAmt,
+            preferentialRentAmount: prefRentAmt,
           },
           pack
         );
@@ -1257,8 +1280,8 @@ async function runComplianceCheck(
         const result = checkBrokerFeeRules(
           {
             hasBrokerFee: listing.hasBrokerFee ?? false,
-            brokerFeeAmount: listing.brokerFee ? Number(listing.brokerFee) : undefined,
-            monthlyRent: Number(listing.rent),
+            brokerFeeAmount: listing.brokerFeeAmount ? Number(listing.brokerFeeAmount) : undefined,
+            monthlyRent: Number(listing.rent ?? listing.priceAmount),
             paidBy: 'tenant',
           },
           pack
@@ -1273,11 +1296,11 @@ async function runComplianceCheck(
       const listing = await prisma.listing.findUnique({
         where: { id: data.entityId },
       });
-      if (listing && listing.securityDeposit) {
+      if (listing && listing.securityDepositAmount) {
         const result = checkSecurityDepositRules(
           {
-            securityDepositAmount: Number(listing.securityDeposit),
-            monthlyRent: Number(listing.rent),
+            securityDepositAmount: Number(listing.securityDepositAmount),
+            monthlyRent: Number(listing.rent ?? listing.priceAmount),
           },
           pack
         );
@@ -1366,14 +1389,14 @@ async function recordGateResult(
         ? `Gate passed: ${context.action}`
         : `Gate blocked: ${context.action}`,
       description: result.blockedReason || 'All compliance checks passed',
-      result: result.decision,
-      details: {
+      result: JSON.parse(JSON.stringify(result.decision)),
+      details: JSON.parse(JSON.stringify({
         violations: result.decision.violations,
         fixes: result.decision.recommendedFixes,
         policyVersion: result.decision.policyVersion,
         marketPack: result.decision.marketPack,
         marketPackVersion: result.decision.marketPackVersion,
-      },
+      })),
       checkedAt: new Date(),
       checkedById: actorId,
     },
@@ -1423,8 +1446,8 @@ async function createAuditLog(entry: {
       action: entry.action,
       entityType: entry.entityType,
       entityId: entry.entityId,
-      changes: entry.changes,
-      metadata: entry.metadata,
+      changes: JSON.parse(JSON.stringify(entry.changes || {})),
+      metadata: JSON.parse(JSON.stringify(entry.metadata || {})),
       requestId: entry.requestId,
       timestamp: new Date(),
     },

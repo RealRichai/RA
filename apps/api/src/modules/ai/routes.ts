@@ -254,7 +254,13 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       });
 
       // Perform AI triage using AIClient
-      const triageResult = await performMaintenanceTriage(app, data, property);
+      const triageResult = await performMaintenanceTriage(app, {
+        description: data.description,
+        propertyId: data.propertyId,
+        unitId: data.unitId,
+        images: data.images,
+        urgencyHint: data.urgencyHint,
+      }, property);
 
       // Store triage result in MaintenanceTriage
       const triage = await prisma.maintenanceTriage.create({

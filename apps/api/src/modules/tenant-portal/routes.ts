@@ -129,7 +129,7 @@ async function getTenantLease(userId: string) {
   return prisma.lease.findFirst({
     where: {
       tenantId: userId,
-      status: { in: ['active', 'pending_signature'] },
+      status: { in: ['active', 'pending_signatures'] },
     },
     include: {
       unit: {
@@ -154,25 +154,25 @@ async function getTenantBalance(leaseId: string): Promise<{
   const payments = await prisma.payment.findMany({
     where: {
       leaseId,
-      status: { in: ['pending', 'overdue'] },
+      status: 'pending',
     },
-    orderBy: { dueDate: 'asc' },
+    orderBy: { scheduledDate: 'asc' },
   });
 
   const pastDue = payments
-    .filter(p => new Date(p.dueDate) < startOfMonth)
+    .filter(p => p.scheduledDate && new Date(p.scheduledDate) < startOfMonth)
     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
   const currentDue = payments
-    .filter(p => new Date(p.dueDate) >= startOfMonth && new Date(p.dueDate) < new Date(now.getFullYear(), now.getMonth() + 1, 1))
+    .filter(p => p.scheduledDate && new Date(p.scheduledDate) >= startOfMonth && new Date(p.scheduledDate) < new Date(now.getFullYear(), now.getMonth() + 1, 1))
     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-  const nextPayment = payments.find(p => new Date(p.dueDate) > now);
+  const nextPayment = payments.find(p => p.scheduledDate && new Date(p.scheduledDate) > now);
 
   return {
     currentDue,
     pastDue,
-    nextPaymentDate: nextPayment?.dueDate.toISOString() || null,
+    nextPaymentDate: nextPayment?.scheduledDate?.toISOString() || null,
     nextPaymentAmount: nextPayment?.amount || 0,
   };
 }
@@ -216,8 +216,8 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
 
         const workOrders = await prisma.workOrder.findMany({
           where: {
-            unit: { id: lease.unitId },
-            reportedById: request.user.id,
+            unitId: lease.unitId,
+            reportedBy: request.user.id,
           },
           select: { status: true },
         });
@@ -225,8 +225,8 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
         const documents = await prisma.document.findMany({
           where: {
             OR: [
-              { leaseId: lease.id },
-              { propertyId: lease.unit.propertyId },
+              { entityType: 'lease', entityId: lease.id },
+              { entityType: 'property', entityId: lease.unit.propertyId },
             ],
           },
           select: { status: true },
@@ -346,7 +346,7 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
       const [payments, total] = await Promise.all([
         prisma.payment.findMany({
           where,
-          orderBy: { dueDate: 'desc' },
+          orderBy: { scheduledDate: 'desc' },
           skip: (page - 1) * limit,
           take: limit,
         }),
@@ -361,7 +361,7 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
             amount: p.amount,
             type: p.type,
             status: p.status,
-            dueDate: p.dueDate.toISOString(),
+            dueDate: p.scheduledDate?.toISOString(),
             paidAt: p.paidAt?.toISOString(),
             description: p.description,
           })),
@@ -414,9 +414,9 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
       const pendingPayment = await prisma.payment.findFirst({
         where: {
           leaseId: lease.id,
-          status: { in: ['pending', 'overdue'] },
+          status: 'pending',
         },
-        orderBy: { dueDate: 'asc' },
+        orderBy: { scheduledDate: 'asc' },
       });
 
       if (!pendingPayment) {
@@ -432,7 +432,7 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
         data: {
           status: 'completed',
           paidAt: new Date(),
-          processorId: `mock_pi_${Date.now()}`,
+          stripePaymentIntentId: `mock_pi_${Date.now()}`,
           metadata: {
             ...((pendingPayment.metadata as Record<string, unknown>) || {}),
             paymentMethodId: data.paymentMethodId,
@@ -689,7 +689,7 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
             createdAt: wo.createdAt.toISOString(),
             scheduledDate: wo.scheduledDate?.toISOString(),
             completedAt: wo.completedAt?.toISOString(),
-            resolution: wo.resolution,
+            resolution: wo.workPerformed,
           })),
         },
       });
@@ -731,18 +731,18 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
         data: {
           id: generatePrefixedId('wo'),
           unitId: lease.unitId,
+          propertyId: lease.unit.propertyId,
+          orderNumber: `WO-${Date.now()}`,
           title: data.title,
           description: data.description,
           category: data.category,
           priority: data.priority,
           status: 'submitted',
-          reportedById: request.user.id,
-          images: data.images || [],
-          preferredSchedule: data.preferredSchedule,
-          metadata: {
-            allowEntry: data.allowEntry,
-            petInfo: data.petInfo,
-          },
+          reportedBy: request.user.id,
+          photos: data.images || [],
+          preferredSchedule: data.preferredSchedule ? JSON.parse(JSON.stringify(data.preferredSchedule)) : [],
+          permissionToEnter: data.allowEntry ?? false,
+          petInstructions: data.petInfo,
         },
         include: {
           unit: {
@@ -815,7 +815,7 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
         },
       });
 
-      if (!workOrder || workOrder.reportedById !== request.user.id) {
+      if (!workOrder || workOrder.reportedBy !== request.user.id) {
         throw new AppError('NOT_FOUND', 'Request not found', 404);
       }
 
@@ -831,14 +831,13 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
             status: workOrder.status,
             propertyName: workOrder.unit.property.name,
             unitNumber: workOrder.unit.unitNumber,
-            images: workOrder.images,
+            images: workOrder.photos,
             createdAt: workOrder.createdAt.toISOString(),
-            acknowledgedAt: workOrder.acknowledgedAt?.toISOString(),
             scheduledDate: workOrder.scheduledDate?.toISOString(),
-            completedAt: workOrder.completedAt?.toISOString(),
-            resolution: workOrder.resolution,
+            completedAt: workOrder.actualEndTime?.toISOString(),
+            resolution: workOrder.workPerformed,
             vendor: workOrder.vendor ? {
-              name: workOrder.vendor.name,
+              name: workOrder.vendor.companyName,
               phone: workOrder.vendor.phone,
             } : null,
           },
@@ -915,7 +914,7 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
             name: d.name,
             type: d.type,
             status: d.status,
-            fileUrl: d.fileUrl,
+            fileUrl: `${d.bucket}/${d.key}`,
             createdAt: d.createdAt.toISOString(),
           })),
         },
@@ -958,8 +957,10 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
         throw new AppError('NOT_FOUND', 'Document not found', 404);
       }
 
-      // Verify access
-      if (document.leaseId !== lease?.id && !document.isPublic) {
+      // Verify access - check if document is for this lease or is public
+      const isOwnDocument = document.entityType === 'lease' && document.entityId === lease?.id;
+      const isPublicDocument = document.visibility === 'public';
+      if (!isOwnDocument && !isPublicDocument) {
         throw new AppError('FORBIDDEN', 'Access denied', 403);
       }
 
@@ -967,7 +968,7 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({
         success: true,
         data: {
-          downloadUrl: document.fileUrl,
+          downloadUrl: `${document.bucket}/${document.key}`,
           expiresIn: 3600,
         },
       });
@@ -1147,19 +1148,19 @@ export async function tenantPortalRoutes(app: FastifyInstance): Promise<void> {
               address: lease.unit.property.address,
               city: lease.unit.property.city,
               state: lease.unit.property.state,
-              zip: lease.unit.property.zip,
+              zip: lease.unit.property.postalCode,
             },
             unit: {
               number: lease.unit.unitNumber,
               bedrooms: lease.unit.bedrooms,
               bathrooms: lease.unit.bathrooms,
-              sqft: lease.unit.sqft,
+              sqft: lease.unit.squareFeet,
             },
             terms: {
               startDate: lease.startDate.toISOString(),
               endDate: lease.endDate.toISOString(),
-              monthlyRent: lease.monthlyRent,
-              securityDeposit: lease.securityDeposit,
+              monthlyRent: lease.monthlyRent ?? lease.monthlyRentAmount,
+              securityDeposit: lease.securityDepositAmount,
               isRentStabilized: lease.isRentStabilized,
             },
           },

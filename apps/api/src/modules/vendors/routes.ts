@@ -127,35 +127,31 @@ async function findBestVendorAsync(
       status: 'active',
       categories: { has: category },
     },
-    include: {
-      ratings: true,
-    },
   });
 
   if (vendorList.length === 0) return null;
 
   // Score vendors
   const scored = vendorList.map(v => {
-    const avgRating = v.ratings.length > 0
-      ? v.ratings.reduce((sum, r) => sum + r.rating, 0) / v.ratings.length
-      : 3;
+    const avgRating = v.averageRating ?? 3;
 
     let score = avgRating;
 
     // Prefer vendors with emergency rates for emergency calls
-    if (isEmergency && v.emergencyRate) {
+    if (isEmergency && v.emergencyRateAmount) {
       score += 0.5;
     }
 
-    // Prefer vendors with property preference
-    const preferredProps = v.preferredProperties as string[] || [];
+    // Prefer vendors with property preference (stored in metadata)
+    const metadata = v.metadata as Record<string, unknown> | null;
+    const preferredProps = (metadata?.preferredProperties as string[]) || [];
     if (propertyId && preferredProps.includes(propertyId)) {
       score += 0.3;
     }
 
     return {
       id: v.id,
-      name: v.name,
+      name: v.companyName,
       score,
     };
   });

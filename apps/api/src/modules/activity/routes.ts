@@ -232,8 +232,8 @@ export async function createActivity(
       data: {
         action: `activity:${params.type}`,
         actorId: params.actorId,
-        targetType: params.entityType,
-        targetId: params.entityId,
+        entityType: params.entityType,
+        entityId: params.entityId,
         metadata: {
           activityId: activity.id,
           entityName: params.entityName,
@@ -723,8 +723,8 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
         // Fetch from audit logs
         const logs = await prisma.auditLog.findMany({
           where: {
-            targetType: entityType,
-            targetId: entityId,
+            entityType: entityType,
+            entityId: entityId,
             action: { startsWith: 'activity:' },
           },
           orderBy: { timestamp: 'desc' },
@@ -741,8 +741,8 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
           type: log.action.replace('activity:', ''),
           actorId: log.actorId,
           actorName: log.actor ? `${log.actor.firstName} ${log.actor.lastName}` : undefined,
-          entityType: log.targetType,
-          entityId: log.targetId,
+          entityType: log.entityType,
+          entityId: log.entityId,
           entityName: (log.metadata as Record<string, string>)?.entityName,
           description: (log.metadata as Record<string, string>)?.description,
           metadata: log.metadata,
@@ -769,8 +769,3 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
   );
 }
 
-// =============================================================================
-// Exported Helper for Other Modules
-// =============================================================================
-
-export { createActivity };

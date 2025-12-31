@@ -589,7 +589,13 @@ export async function documentRoutes(app: FastifyInstance): Promise<void> {
       const requests = await signatureService.createRequests({
         documentId: document.id,
         documentName: document.name,
-        signers: data.signers,
+        signers: data.signers.map(s => ({
+          userId: s.userId,
+          email: s.email,
+          name: s.name,
+          role: s.role,
+          order: s.order,
+        })),
         message: data.message,
         dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
         expiresInDays: data.expiresInDays,

@@ -68,6 +68,9 @@ importers:
       '@fastify/swagger-ui':
         specifier: ^2.1.0
         version: 2.1.0
+      '@realriches/ai-sdk':
+        specifier: workspace:*
+        version: link:../../packages/ai-sdk
       '@realriches/compliance-engine':
         specifier: workspace:*
         version: link:../../packages/compliance-engine

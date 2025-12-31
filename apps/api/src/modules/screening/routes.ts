@@ -545,7 +545,7 @@ function dbToApplication(
   dbApp: Awaited<ReturnType<typeof prisma.tenantApplication.findUnique>> & { screeningReports?: unknown[] },
 ): RentalApplication | null {
   if (!dbApp) return null;
-  const applicantsData = (dbApp.applicantsData || []) as Applicant[];
+  const applicantsData = (dbApp.applicantsData as unknown as Applicant[]) || [];
 
   return {
     id: dbApp.id,
@@ -563,7 +563,7 @@ function dbToApplication(
     screeningConsentDate: dbApp.screeningConsentDate,
     overallScore: dbApp.overallScore,
     riskLevel: dbApp.riskLevel as RiskLevel | null,
-    decision: dbApp.decision as ApplicationDecision | null,
+    decision: dbApp.decision as unknown as ApplicationDecision | null,
     notes: dbApp.applicationNotes || [],
     createdAt: dbApp.createdAt,
     updatedAt: dbApp.updatedAt,
@@ -653,8 +653,12 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       dateOfBirth: new Date(a.dateOfBirth),
       ssn: a.ssn.replace(/-/g, ''),
       currentAddress: {
-        ...a.currentAddress,
+        street: a.currentAddress.street || '',
         unit: a.currentAddress.unit || null,
+        city: a.currentAddress.city || '',
+        state: a.currentAddress.state || '',
+        zip: a.currentAddress.zip || '',
+        country: a.currentAddress.country || 'US',
         residenceSince: new Date(a.currentAddress.residenceSince),
         monthlyRent: a.currentAddress.monthlyRent || null,
         landlordName: a.currentAddress.landlordName || null,
@@ -698,15 +702,37 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
     });
 
     if (!listing) {
-      // Create a placeholder listing if none exists
+      // Get property to fill in required listing fields
+      const property = await prisma.property.findUnique({
+        where: { id: body.propertyId },
+        include: { owner: true },
+      });
+
+      if (!property) {
+        return reply.status(404).send({ success: false, error: { code: 'NOT_FOUND', message: 'Property not found' } });
+      }
+
+      // Create a placeholder listing with all required fields
       listing = await prisma.listing.create({
         data: {
-          propertyId: body.propertyId,
-          price: body.monthlyRent,
+          property: { connect: { id: body.propertyId } },
+          landlordId: property.ownerId,
+          priceAmount: body.monthlyRent,
+          rent: body.monthlyRent,
           status: 'active',
-          type: 'rent',
-          title: 'Rental Application',
+          type: 'rental',
+          title: property.name || 'Rental Application',
           description: '',
+          street1: property.street1 || '',
+          city: property.city || '',
+          state: property.state || '',
+          postalCode: property.postalCode || '',
+          propertyType: property.type as 'single_family' | 'multi_family' | 'condo' | 'townhouse' | 'apartment' | 'commercial' | 'mixed_use',
+          bedrooms: 1,
+          bathrooms: 1,
+          availableDate: new Date(),
+          leaseTerm: '12 months',
+          marketId: property.marketId || 'default',
         },
       });
     }
@@ -718,13 +744,16 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
     });
 
     if (!applicantUser) {
+      // Create user with placeholder password hash (will be set when user activates account)
       applicantUser = await prisma.user.create({
         data: {
           email: primaryApplicant.email,
+          passwordHash: '', // Placeholder - user will set password when activating
           firstName: primaryApplicant.firstName,
           lastName: primaryApplicant.lastName,
           phone: primaryApplicant.phone,
           role: 'tenant',
+          status: 'pending_verification',
         },
       });
     }
@@ -743,7 +772,7 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
         applicationFeePaid: false,
         screeningConsent: body.screeningConsent,
         screeningConsentDate: body.screeningConsent ? now : null,
-        applicantsData: applicants as unknown as Prisma.JsonValue,
+        applicantsData: JSON.parse(JSON.stringify(applicants)),
         applicationNotes: [],
         expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
       },
@@ -753,10 +782,10 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
     const updatedApplicants = applicants.map((a) => ({ ...a, applicationId: dbApp.id }));
     await prisma.tenantApplication.update({
       where: { id: dbApp.id },
-      data: { applicantsData: updatedApplicants as unknown as Prisma.JsonValue },
+      data: { applicantsData: JSON.parse(JSON.stringify(updatedApplicants)) },
     });
 
-    const application = dbToApplication({ ...dbApp, applicantsData: updatedApplicants });
+    const application = dbToApplication({ ...dbApp, applicantsData: JSON.parse(JSON.stringify(updatedApplicants)) });
 
     return reply.status(201).send({
       success: true,
@@ -842,7 +871,7 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
 
     const types = body.types || ['credit', 'criminal', 'eviction'];
     const now = new Date();
-    const applicantsData = (dbApp.applicantsData || []) as Applicant[];
+    const applicantsData = (dbApp.applicantsData as unknown as Applicant[]) || [];
 
     // Update status to screening
     await prisma.tenantApplication.update({
@@ -1043,7 +1072,7 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const applicantsData = (dbApp.applicantsData || []) as Applicant[];
+    const applicantsData = (dbApp.applicantsData as unknown as Applicant[]) || [];
     const applicant = applicantsData.find((a) => a.id === applicantId);
     if (!applicant) {
       return reply.status(404).send({
@@ -1167,7 +1196,7 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const applicantsData = (dbApp.applicantsData || []) as Applicant[];
+    const applicantsData = (dbApp.applicantsData as unknown as Applicant[]) || [];
     const applicant = applicantsData.find((a) => a.id === body.applicantId);
     if (!applicant) {
       return reply.status(404).send({
@@ -1262,7 +1291,7 @@ export async function screeningRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const applicantsData = (dbApp.applicantsData || []) as Applicant[];
+    const applicantsData = (dbApp.applicantsData as unknown as Applicant[]) || [];
     const applicant = applicantsData.find((a) => a.id === body.applicantId);
     if (!applicant) {
       return reply.status(404).send({

@@ -519,8 +519,4 @@ declare module 'fastify' {
   }
 }
 
-// =============================================================================
-// Exports
-// =============================================================================
-
-export { CacheService, CacheStats, CacheOptions };
+// CacheService, CacheStats, and CacheOptions are exported inline above

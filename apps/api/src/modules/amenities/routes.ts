@@ -407,7 +407,26 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
 
       const amenity: Amenity = {
         id: `amen_${Date.now()}`,
-        ...data,
+        propertyId: data.propertyId,
+        name: data.name,
+        type: data.type,
+        description: data.description,
+        location: data.location,
+        capacity: data.capacity ?? 10,
+        requiresBooking: data.requiresBooking ?? true,
+        advanceBookingDays: data.advanceBookingDays ?? 14,
+        maxBookingDuration: data.maxBookingDuration ?? 120,
+        minBookingDuration: data.minBookingDuration ?? 30,
+        maxBookingsPerDay: data.maxBookingsPerDay ?? 2,
+        operatingHours: (data.operatingHours ?? []).map(h => ({
+          dayOfWeek: h.dayOfWeek,
+          openTime: h.openTime,
+          closeTime: h.closeTime,
+          isClosed: h.isClosed ?? false,
+        })),
+        rules: data.rules ?? [],
+        photos: data.photos ?? [],
+        amenities: data.amenities ?? [],
         status: 'available',
         createdAt: now,
         updatedAt: now,
@@ -571,7 +590,15 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       const now = new Date().toISOString();
       const booking: Booking = {
         id: `book_${Date.now()}`,
-        ...data,
+        amenityId: data.amenityId,
+        tenantId: data.tenantId,
+        unitId: data.unitId,
+        propertyId: data.propertyId,
+        date: data.date,
+        startTime: data.startTime,
+        endTime: data.endTime,
+        guestCount: data.guestCount ?? 1,
+        notes: data.notes,
         status: 'confirmed',
         confirmationCode: generateConfirmationCode(),
         isRecurring: false,
@@ -645,7 +672,7 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       bookings.set(booking.id, booking);
 
       // Notify waitlist
-      const waitlistEntries = Array.from(waitlist.values()).filter(
+      const waitlistEntries = Array.from(waitlists.values()).filter(
         (w) =>
           w.amenityId === booking.amenityId &&
           w.date === booking.date &&
@@ -657,7 +684,7 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
         firstEntry.status = 'notified';
         firstEntry.notifiedAt = new Date().toISOString();
         firstEntry.expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min
-        waitlist.set(firstEntry.id, firstEntry);
+        waitlists.set(firstEntry.id, firstEntry);
       }
 
       return reply.send({ message: 'Booking cancelled', booking });
@@ -766,7 +793,18 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
 
       const recurring: RecurringBooking = {
         id: `rec_${Date.now()}`,
-        ...data,
+        amenityId: data.amenityId,
+        tenantId: data.tenantId,
+        unitId: data.unitId,
+        propertyId: data.propertyId,
+        recurrenceType: data.recurrenceType,
+        dayOfWeek: data.dayOfWeek,
+        dayOfMonth: data.dayOfMonth,
+        startTime: data.startTime,
+        endTime: data.endTime,
+        guestCount: data.guestCount ?? 1,
+        startDate: data.startDate,
+        endDate: data.endDate,
         isActive: true,
         createdAt: new Date().toISOString(),
       };
@@ -897,12 +935,17 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
 
       const entry: WaitlistEntry = {
         id: `wait_${Date.now()}`,
-        ...data,
+        amenityId: data.amenityId,
+        tenantId: data.tenantId,
+        date: data.date,
+        preferredStartTime: data.preferredStartTime,
+        preferredEndTime: data.preferredEndTime,
+        guestCount: data.guestCount ?? 1,
         status: 'waiting',
         createdAt: new Date().toISOString(),
       };
 
-      waitlist.set(entry.id, entry);
+      waitlists.set(entry.id, entry);
       return reply.status(201).send(entry);
     }
   );
@@ -916,7 +959,7 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
       }>,
       reply
     ) => {
-      let results = Array.from(waitlist.values());
+      let results = Array.from(waitlists.values());
 
       if (request.query.amenityId) {
         results = results.filter((w) => w.amenityId === request.query.amenityId);
@@ -940,12 +983,12 @@ export async function amenityRoutes(app: FastifyInstance): Promise<void> {
   app.delete(
     '/waitlist/:id',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const entry = waitlist.get(request.params.id);
+      const entry = waitlists.get(request.params.id);
       if (!entry) {
         return reply.status(404).send({ error: 'Waitlist entry not found' });
       }
 
-      waitlist.delete(request.params.id);
+      waitlists.delete(request.params.id);
       return reply.send({ message: 'Removed from waitlist' });
     }
   );

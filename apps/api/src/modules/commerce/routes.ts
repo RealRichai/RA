@@ -504,7 +504,11 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const data: MovingBookInput = MovingBookSchema.parse(request.body);
-      const response = await commerceService.bookMovingService(request, data);
+      const response = await commerceService.bookMovingService(request, {
+        quoteId: data.quoteId,
+        paymentMethodId: data.paymentMethodId,
+        specialInstructions: data.specialInstructions,
+      });
       return sendServiceResponse(reply, response, 201);
     }
   );
@@ -756,7 +760,12 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const data: InsurancePurchaseInput = InsurancePurchaseSchema.parse(request.body);
-      const response = await commerceService.purchaseInsurance(request, data);
+      const response = await commerceService.purchaseInsurance(request, {
+        quoteId: data.quoteId,
+        leaseId: data.leaseId,
+        paymentMethodId: data.paymentMethodId,
+        autoRenew: data.autoRenew,
+      });
       return sendServiceResponse(reply, response, 201);
     }
   );
@@ -807,7 +816,13 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const data: GuarantorApplyInput = GuarantorApplySchema.parse(request.body);
-      const response = await commerceService.submitGuarantorApplication(request, data);
+      const response = await commerceService.submitGuarantorApplication(request, {
+        applicationId: data.applicationId,
+        leaseId: data.leaseId,
+        optionId: data.optionId,
+        monthlyRent: data.monthlyRent,
+        annualIncome: data.annualIncome,
+      });
       return sendServiceResponse(reply, response, 201);
     }
   );

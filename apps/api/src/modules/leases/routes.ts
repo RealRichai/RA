@@ -80,13 +80,13 @@ async function storeComplianceCheck(
         ? 'Compliance check passed'
         : `${decision.violations.length} compliance violation(s) found`,
       description: decision.violations.map((v) => v.message).join('; ') || 'All checks passed',
-      details: {
+      details: JSON.parse(JSON.stringify({
         policyVersion: decision.policyVersion,
         marketPack: decision.marketPack,
         marketPackVersion: decision.marketPackVersion,
         violations: decision.violations,
         recommendedFixes: decision.recommendedFixes,
-      },
+      })),
       recommendation: decision.recommendedFixes.map((f) => f.description).join('; ') || null,
     },
   });
@@ -117,12 +117,12 @@ async function storeComplianceAuditLog(
         passed: decision.passed,
         violationCount: decision.violations.length,
       },
-      metadata: {
+      metadata: JSON.parse(JSON.stringify({
         policyVersion: decision.policyVersion,
         marketPack: decision.marketPack,
         marketPackVersion: decision.marketPackVersion,
         violations: decision.violations,
-      },
+      })),
       requestId,
     },
   });
@@ -222,7 +222,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
           take: limit,
           include: {
             unit: { include: { property: { select: { id: true, name: true, address: true } } } },
-            tenant: { select: { id: true, firstName: true, lastName: true, email: true } },
+            primaryTenant: { select: { id: true, firstName: true, lastName: true, email: true } },
           },
           orderBy: { createdAt: 'desc' },
         }),
@@ -263,9 +263,8 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
         where: { id: request.params.id },
         include: {
           unit: { include: { property: true } },
-          tenant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+          primaryTenant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
           amendments: { orderBy: { effectiveDate: 'desc' } },
-          documents: true,
         },
       });
 
@@ -274,7 +273,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Check access
-      const isOwner = lease.unit.property.ownerId === request.user.id;
+      const isOwner = lease.unit?.property.ownerId === request.user.id;
       const isTenant = lease.tenantId === request.user.id;
       const isAdmin = request.user.role === 'admin';
 
@@ -350,17 +349,26 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       const lease = await prisma.lease.create({
         data: {
           id: generatePrefixedId('lse'),
-          ...data,
+          leaseNumber: generatePrefixedId('LSE'),
+          property: { connect: { id: unit.property.id } },
+          unit: { connect: { id: data.unitId } },
+          primaryTenant: { connect: { id: data.tenantId } },
+          landlord: { connect: { id: unit.property.ownerId } },
+          type: data.leaseType === 'standard' ? 'standard' : data.leaseType,
           monthlyRent: data.monthlyRent,
-          securityDeposit: data.securityDeposit,
+          monthlyRentAmount: data.monthlyRent,
+          maxOccupants: 2,
+          securityDepositAmount: data.securityDeposit || 0,
           startDate,
           endDate,
           status: 'pending_signatures',
-          createdById: request.user.id,
+          isRentStabilized: data.isRentStabilized,
+          legalRentAmount: data.legalRentAmount,
+          preferentialRentAmount: data.preferentialRentAmount,
         },
         include: {
           unit: { include: { property: true } },
-          tenant: { select: { id: true, firstName: true, lastName: true, email: true } },
+          primaryTenant: { select: { id: true, firstName: true, lastName: true, email: true } },
         },
       });
 
@@ -411,11 +419,20 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
 
       const data = CreateAmendmentSchema.parse(request.body);
 
+      // Get next amendment number
+      const lastAmendment = await prisma.leaseAmendment.findFirst({
+        where: { leaseId: lease.id },
+        orderBy: { amendmentNumber: 'desc' },
+      });
+      const nextNumber = (lastAmendment?.amendmentNumber || 0) + 1;
+
       const amendment = await prisma.leaseAmendment.create({
         data: {
           id: generatePrefixedId('amd'),
-          leaseId: lease.id,
-          ...data,
+          lease: { connect: { id: lease.id } },
+          amendmentNumber: nextNumber,
+          description: `[${data.type}] ${data.description}`,
+          changes: JSON.parse(JSON.stringify(data.changes)),
           effectiveDate: new Date(data.effectiveDate),
           status: 'pending',
         },
@@ -629,19 +646,27 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
+      // Get next amendment number
+      const lastRentAmendment = await prisma.leaseAmendment.findFirst({
+        where: { leaseId: lease.id },
+        orderBy: { amendmentNumber: 'desc' },
+      });
+      const nextRentNumber = (lastRentAmendment?.amendmentNumber || 0) + 1;
+
       // Create rent change amendment
       const amendment = await prisma.leaseAmendment.create({
         data: {
           id: generatePrefixedId('amd'),
-          leaseId: lease.id,
-          type: 'rent_change',
+          lease: { connect: { id: lease.id } },
+          amendmentNumber: nextRentNumber,
           description: data.reason || `Rent increase from $${lease.monthlyRent} to $${data.newMonthlyRent}`,
-          changes: {
+          changes: JSON.parse(JSON.stringify({
+            type: 'rent_change',
             previousRent: lease.monthlyRent,
             newRent: data.newMonthlyRent,
             increasePercent: ((data.newMonthlyRent - lease.monthlyRent) / lease.monthlyRent * 100).toFixed(2),
             noticeDays: data.noticeDays,
-          },
+          })),
           effectiveDate: new Date(data.effectiveDate),
           status: 'approved',
         },
@@ -837,6 +862,7 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
         where: { id: request.params.id },
         include: {
           listing: { include: { unit: { include: { property: true } } } },
+          applicant: true,
         },
       });
 
@@ -909,14 +935,14 @@ export async function leaseRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Initiate background check with provider
-      const applicant = application.applicant as Record<string, unknown> | null;
+      const applicantData = application.applicant;
       const checkResult = await initiateBackgroundCheck({
         applicationId: application.id,
         applicantInfo: {
-          firstName: (applicant?.firstName as string) || 'Unknown',
-          lastName: (applicant?.lastName as string) || 'Unknown',
-          dateOfBirth: applicant?.dateOfBirth as string | undefined,
-          email: (applicant?.email as string) || '',
+          firstName: applicantData?.firstName || 'Unknown',
+          lastName: applicantData?.lastName || 'Unknown',
+          dateOfBirth: undefined,
+          email: applicantData?.email || '',
         },
         checkType: data.checkType,
         propertyAddress: application.listing.unit.property.address as string | undefined,

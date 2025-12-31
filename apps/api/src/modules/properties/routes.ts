@@ -161,12 +161,25 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
 
       const data = CreatePropertySchema.parse(request.body);
 
+      const { address, ...restData } = data;
       const property = await prisma.property.create({
         data: {
           id: generatePrefixedId('prp'),
-          ...data,
-          address: data.address,
-          ownerId: request.user.id,
+          name: restData.name,
+          type: restData.type,
+          totalUnits: restData.totalUnits,
+          yearBuilt: restData.yearBuilt,
+          totalSquareFeet: restData.squareFeet,
+          amenities: restData.amenities,
+          street1: address.street,
+          street2: address.unit,
+          city: address.city,
+          state: address.state,
+          postalCode: address.zipCode,
+          country: address.country,
+          address: `${address.street}${address.unit ? ', ' + address.unit : ''}, ${address.city}, ${address.state} ${address.zipCode}`,
+          marketId: 'default',
+          owner: { connect: { id: request.user.id } },
         },
         include: { units: true },
       });
@@ -209,11 +222,23 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
         throw new ForbiddenError('Access denied');
       }
 
-      const data = CreatePropertySchema.partial().parse(request.body);
+      const parsedData = CreatePropertySchema.partial().parse(request.body);
+      const { address: updateAddress, ...updateRestData } = parsedData;
+
+      const updateData: Record<string, unknown> = { ...updateRestData };
+      if (updateAddress) {
+        updateData.street1 = updateAddress.street;
+        updateData.street2 = updateAddress.unit;
+        updateData.city = updateAddress.city;
+        updateData.state = updateAddress.state;
+        updateData.postalCode = updateAddress.zipCode;
+        updateData.country = updateAddress.country;
+        updateData.address = `${updateAddress.street}${updateAddress.unit ? ', ' + updateAddress.unit : ''}, ${updateAddress.city}, ${updateAddress.state} ${updateAddress.zipCode}`;
+      }
 
       const updated = await prisma.property.update({
         where: { id: request.params.id },
-        data,
+        data: updateData,
         include: { units: true },
       });
 
@@ -300,9 +325,17 @@ export async function propertyRoutes(app: FastifyInstance): Promise<void> {
       const unit = await prisma.unit.create({
         data: {
           id: generatePrefixedId('unt'),
-          ...data,
-          rent: data.rent,
-          legalRent: data.legalRent,
+          unitNumber: data.unitNumber,
+          type: 'residential',
+          bedrooms: data.bedrooms,
+          bathrooms: data.bathrooms,
+          squareFeet: data.squareFeet,
+          marketRentAmount: Math.round(data.rent * 100),
+          rent: Math.round(data.rent * 100),
+          status: data.status,
+          features: data.features || [],
+          isRentStabilized: data.isRentStabilized,
+          legalRentAmount: data.legalRent ? Math.round(data.legalRent * 100) : null,
           propertyId: request.params.id,
         },
       });

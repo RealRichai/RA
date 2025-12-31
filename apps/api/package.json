@@ -25,6 +25,7 @@
     "@fastify/sensible": "^5.5.0",
     "@fastify/swagger": "^8.12.1",
     "@fastify/swagger-ui": "^2.1.0",
+    "@realriches/ai-sdk": "workspace:*",
     "@realriches/compliance-engine": "workspace:*",
     "@realriches/config": "workspace:*",
     "@realriches/database": "workspace:*",

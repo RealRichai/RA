@@ -202,8 +202,8 @@ export async function impersonationAdminRoutes(app: FastifyInstance): Promise<vo
           data: {
             action: 'impersonation_started',
             actorId: adminId,
-            targetType: 'user',
-            targetId: targetUser.id,
+            entityType: 'user',
+            entityId: targetUser.id,
             metadata: {
               targetEmail: targetUser.email,
               reason: params.reason,
@@ -287,8 +287,8 @@ export async function impersonationAdminRoutes(app: FastifyInstance): Promise<vo
           data: {
             action: 'impersonation_ended',
             actorId: adminId,
-            targetType: 'user',
-            targetId: session.targetUserId,
+            entityType: 'user',
+            entityId: session.targetUserId,
             metadata: {
               targetEmail: session.targetUserEmail,
               duration: Math.floor(
@@ -467,8 +467,8 @@ export async function impersonationAdminRoutes(app: FastifyInstance): Promise<vo
           data: {
             action: 'impersonation_force_ended',
             actorId: request.user?.id,
-            targetType: 'user',
-            targetId: session.adminId,
+            entityType: 'user',
+            entityId: session.adminId,
             metadata: {
               forcedByAdminId: request.user?.id,
               originalAdmin: session.adminEmail,

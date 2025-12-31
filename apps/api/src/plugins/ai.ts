@@ -15,16 +15,16 @@ const aiPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
 
   // Create AI client with budget limits
   const aiClient = createAIClient({
-    defaultProvider: config.ANTHROPIC_API_KEY ? 'anthropic' : 'console',
-    fallbackProvider: config.OPENAI_API_KEY ? 'openai' : undefined,
+    defaultProvider: config.ai?.anthropicApiKey ? 'anthropic' : 'console',
+    fallbackProvider: config.ai?.openaiApiKey ? 'openai' : undefined,
     providers: {
       anthropic: {
-        apiKey: config.ANTHROPIC_API_KEY || '',
+        apiKey: config.ai?.anthropicApiKey || '',
         timeout: 60000,
         maxRetries: 3,
       },
       openai: {
-        apiKey: config.OPENAI_API_KEY || '',
+        apiKey: config.ai?.openaiApiKey || '',
         timeout: 60000,
         maxRetries: 3,
       },
@@ -41,7 +41,7 @@ const aiPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
   fastify.decorate('aiClient', aiClient);
 
   logger.info(
-    { provider: config.ANTHROPIC_API_KEY ? 'anthropic' : 'console' },
+    { provider: config.ai?.anthropicApiKey ? 'anthropic' : 'console' },
     'AI client initialized'
   );
 

@@ -59,13 +59,13 @@ async function storeComplianceCheck(
         ? 'Compliance check passed'
         : `${decision.violations.length} compliance violation(s) found`,
       description: decision.violations.map((v) => v.message).join('; ') || 'All checks passed',
-      details: {
+      details: JSON.parse(JSON.stringify({
         policyVersion: decision.policyVersion,
         marketPack: decision.marketPack,
         marketPackVersion: decision.marketPackVersion,
         violations: decision.violations,
         recommendedFixes: decision.recommendedFixes,
-      },
+      })),
       recommendation: decision.recommendedFixes.map((f) => f.description).join('; ') || null,
     },
   });
@@ -96,12 +96,12 @@ async function storeComplianceAuditLog(
         passed: decision.passed,
         violationCount: decision.violations.length,
       },
-      metadata: {
+      metadata: JSON.parse(JSON.stringify({
         policyVersion: decision.policyVersion,
         marketPack: decision.marketPack,
         marketPackVersion: decision.marketPackVersion,
         violations: decision.violations,
-      },
+      })),
       requestId,
     },
   });
@@ -296,14 +296,29 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
       const listing = await prisma.listing.create({
         data: {
           id: generatePrefixedId('lst'),
-          ...data,
+          propertyId: unit.property.id,
+          unitId: data.unitId,
+          landlordId: unit.property.ownerId,
+          title: data.title,
+          description: data.description || '',
+          type: 'rental',
+          priceAmount: data.rent,
           rent: data.rent,
-          securityDeposit: data.securityDeposit,
-          brokerFee: data.hasBrokerFee ? data.brokerFee : null,
+          securityDepositAmount: data.securityDeposit,
+          brokerFeeAmount: data.hasBrokerFee ? data.brokerFee : null,
+          hasBrokerFee: data.hasBrokerFee,
           availableDate: new Date(data.availableDate),
+          leaseTerm: `${data.leaseTermMonths || 12} months`,
           status: 'draft', // Start as draft, require publish gate to activate
           agentId: request.user.role === 'agent' ? request.user.id : null,
           marketId: unit.property.marketId || 'US_STANDARD',
+          street1: unit.property.street1 || '',
+          city: unit.property.city || '',
+          state: unit.property.state || '',
+          postalCode: unit.property.postalCode || '',
+          propertyType: unit.property.type,
+          bedrooms: unit.bedrooms || 0,
+          bathrooms: unit.bathrooms || 1,
         },
         include: { unit: { include: { property: true } } },
       });
@@ -368,10 +383,10 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
         marketId,
         status: listing.status,
         hasBrokerFee: listing.hasBrokerFee || false,
-        brokerFeeAmount: listing.brokerFee || undefined,
-        brokerFeePaidBy: (listing as any).brokerFeePaidBy || 'tenant',
-        monthlyRent: listing.rent,
-        securityDepositAmount: listing.securityDeposit || undefined,
+        brokerFeeAmount: listing.brokerFeeAmount || undefined,
+        brokerFeePaidBy: ((listing as unknown as { brokerFeePaidBy?: string }).brokerFeePaidBy || 'tenant') as 'tenant' | 'landlord',
+        monthlyRent: listing.rent || 0,
+        securityDepositAmount: listing.securityDepositAmount || undefined,
         incomeRequirementMultiplier: (listing as any).incomeRequirementMultiplier,
         creditScoreThreshold: (listing as any).creditScoreThreshold,
         deliveredDisclosures: publishData.deliveredDisclosures,
@@ -498,8 +513,8 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
         data: {
           ...data,
           rent: data.rent,
-          securityDeposit: data.securityDeposit,
-          brokerFee: data.brokerFee,
+          securityDepositAmount: data.securityDeposit,
+          brokerFeeAmount: data.brokerFee,
           availableDate: data.availableDate ? new Date(data.availableDate) : undefined,
         },
         include: { unit: { include: { property: true } } },
@@ -592,9 +607,11 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
         data: {
           id: generatePrefixedId('shw'),
           listingId: listing.id,
-          userId: request.user.id,
+          prospectName: (request.user as unknown as { firstName?: string; lastName?: string }).firstName && (request.user as unknown as { firstName?: string; lastName?: string }).lastName
+            ? `${(request.user as unknown as { firstName?: string }).firstName} ${(request.user as unknown as { lastName?: string }).lastName}`
+            : 'Unknown',
+          prospectEmail: request.user.email || 'unknown@example.com',
           scheduledAt: new Date(scheduledAt),
-          notes,
           status: 'scheduled',
         },
       });

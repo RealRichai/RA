@@ -427,7 +427,28 @@ export async function featureFlagAdminRoutes(app: FastifyInstance): Promise<void
 
         const now = new Date().toISOString();
         const flag: FeatureFlag = {
-          ...params,
+          key: params.key,
+          name: params.name,
+          type: params.type ?? 'boolean',
+          enabled: params.enabled ?? false,
+          rules: (params.rules ?? []).map(rule => ({
+            id: rule.id,
+            name: rule.name,
+            conditions: rule.conditions.map(c => ({
+              attribute: c.attribute,
+              operator: c.operator,
+              value: c.value,
+            })),
+            variation: rule.variation,
+            percentage: rule.percentage,
+          })),
+          targetedUsers: params.targetedUsers ?? [],
+          targetedOrganizations: params.targetedOrganizations ?? [],
+          targetedMarkets: params.targetedMarkets ?? [],
+          tags: params.tags ?? [],
+          description: params.description,
+          defaultValue: params.defaultValue,
+          category: params.category,
           createdAt: now,
           updatedAt: now,
           evaluationCount: 0,
@@ -552,9 +573,34 @@ export async function featureFlagAdminRoutes(app: FastifyInstance): Promise<void
         }
 
         const updated: FeatureFlag = {
-          ...flag,
-          ...params,
+          key: flag.key,
+          name: params.name ?? flag.name,
+          type: flag.type,
+          enabled: params.enabled ?? flag.enabled,
+          rules: params.rules
+            ? params.rules.map(rule => ({
+                id: rule.id,
+                name: rule.name,
+                conditions: rule.conditions.map(c => ({
+                  attribute: c.attribute,
+                  operator: c.operator,
+                  value: c.value,
+                })),
+                variation: rule.variation,
+                percentage: rule.percentage,
+              }))
+            : flag.rules,
+          targetedUsers: params.targetedUsers ?? flag.targetedUsers,
+          targetedOrganizations: params.targetedOrganizations ?? flag.targetedOrganizations,
+          targetedMarkets: params.targetedMarkets ?? flag.targetedMarkets,
+          tags: params.tags ?? flag.tags,
+          description: params.description ?? flag.description,
+          defaultValue: params.defaultValue ?? flag.defaultValue,
+          category: params.category ?? flag.category,
+          createdAt: flag.createdAt,
           updatedAt: new Date().toISOString(),
+          evaluationCount: flag.evaluationCount,
+          lastEvaluatedAt: flag.lastEvaluatedAt,
         };
 
         await setFlag(redis, updated);

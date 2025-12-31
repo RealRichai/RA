@@ -448,8 +448,8 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
           data: {
             action: 'mfa_enabled',
             actorId: userId,
-            targetType: 'user',
-            targetId: userId,
+            entityType: 'user',
+            entityId: userId,
             metadata: {},
           },
         });
@@ -655,8 +655,8 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
           data: {
             action: 'mfa_backup_code_used',
             actorId: userId,
-            targetType: 'user',
-            targetId: userId,
+            entityType: 'user',
+            entityId: userId,
             metadata: { codesRemaining: hashedCodes.length },
           },
         });
@@ -772,8 +772,8 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
           data: {
             action: 'mfa_disabled',
             actorId: userId,
-            targetType: 'user',
-            targetId: userId,
+            entityType: 'user',
+            entityId: userId,
             metadata: {},
           },
         });
@@ -877,8 +877,8 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
           data: {
             action: 'mfa_backup_codes_regenerated',
             actorId: userId,
-            targetType: 'user',
-            targetId: userId,
+            entityType: 'user',
+            entityId: userId,
             metadata: {},
           },
         });

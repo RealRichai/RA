@@ -89,11 +89,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Querystring: { startDate?: string; endDate?: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { startDate, endDate } = request.query;
+    async (request, reply) => {
+      const { startDate, endDate } = request.query as { startDate?: string; endDate?: string };
 
       // Default to last 30 days
       const end = endDate ? new Date(endDate) : new Date();
@@ -134,15 +131,9 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{
-        Params: { partnerId: string };
-        Querystring: { startDate?: string; endDate?: string };
-      }>,
-      reply: FastifyReply
-    ) => {
-      const { partnerId } = request.params;
-      const { startDate, endDate } = request.query;
+    async (request, reply) => {
+      const { partnerId } = request.params as { partnerId: string };
+      const { startDate, endDate } = request.query as { startDate?: string; endDate?: string };
 
       // Default to last 30 days
       const end = endDate ? new Date(endDate) : new Date();
@@ -181,11 +172,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Querystring: { startDate?: string; endDate?: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { startDate, endDate } = request.query;
+    async (request, reply) => {
+      const { startDate, endDate } = request.query as { startDate?: string; endDate?: string };
 
       // Default to last 30 days
       const end = endDate ? new Date(endDate) : new Date();
@@ -222,19 +210,14 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{
-        Querystring: {
-          partnerId?: string;
-          status?: 'pending' | 'qualified' | 'converted' | 'paid';
-          productType?: string;
-          limit?: number;
-          offset?: number;
-        };
-      }>,
-      reply: FastifyReply
-    ) => {
-      const { partnerId, status, productType, limit = 50, offset = 0 } = request.query;
+    async (request, reply) => {
+      const { partnerId, status, productType, limit = 50, offset = 0 } = request.query as {
+        partnerId?: string;
+        status?: 'pending' | 'qualified' | 'converted' | 'paid';
+        productType?: string;
+        limit?: number;
+        offset?: number;
+      };
 
       const tracker = getReferralTracker();
 
@@ -313,11 +296,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { partnerId: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { partnerId } = request.params;
+    async (request, reply) => {
+      const { partnerId } = request.params as { partnerId: string };
       const tracker = getReferralTracker();
       const stats = tracker.getPartnerStats(partnerId);
 
@@ -355,15 +335,9 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{
-        Params: { partnerId: string };
-        Body: { referralIds?: string[]; ledgerTransactionId?: string };
-      }>,
-      reply: FastifyReply
-    ) => {
-      const { partnerId } = request.params;
-      const { referralIds, ledgerTransactionId } = request.body || {};
+    async (request, reply) => {
+      const { partnerId } = request.params as { partnerId: string };
+      const { referralIds, ledgerTransactionId } = (request.body || {}) as { referralIds?: string[]; ledgerTransactionId?: string };
 
       const tracker = getReferralTracker();
 
@@ -477,11 +451,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { providerId: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { providerId } = request.params;
+    async (request, reply) => {
+      const { providerId } = request.params as { providerId: string };
       const status = await PartnerHealthJob.getHealthStatus(providerId as Parameters<typeof PartnerHealthJob.getHealthStatus>[0]);
 
       if (!status) {
@@ -521,11 +492,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Querystring: { startDate?: string; endDate?: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { startDate, endDate } = request.query;
+    async (request, reply) => {
+      const { startDate, endDate } = request.query as { startDate?: string; endDate?: string };
 
       // Default to last 24 hours
       const end = endDate ? new Date(endDate) : new Date();
@@ -591,11 +559,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Querystring: { limit?: number } }>,
-      reply: FastifyReply
-    ) => {
-      const { limit = 50 } = request.query;
+    async (request, reply) => {
+      const { limit = 50 } = request.query as { limit?: number };
       const entries = await WebhookRetryJob.getDLQEntries(limit);
 
       return reply.send({
@@ -628,11 +593,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { webhookId: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { webhookId } = request.params;
+    async (request, reply) => {
+      const { webhookId } = request.params as { webhookId: string };
       const result = await WebhookRetryJob.getWebhookStatus(webhookId);
 
       if (!result) {
@@ -672,11 +634,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { webhookId: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { webhookId } = request.params;
+    async (request, reply) => {
+      const { webhookId } = request.params as { webhookId: string };
       const success = await WebhookRetryJob.retryDLQEntry(webhookId);
 
       if (!success) {
@@ -719,11 +678,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { webhookId: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { webhookId } = request.params;
+    async (request, reply) => {
+      const { webhookId } = request.params as { webhookId: string };
       const success = await WebhookRetryJob.deleteDLQEntry(webhookId);
 
       if (!success) {
@@ -808,11 +764,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { table: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { table } = request.params;
+    async (request, reply) => {
+      const { table } = request.params as { table: string };
 
       const result = await DataCleanupJob.cleanupTable(
         table as Parameters<typeof DataCleanupJob.cleanupTable>[0]
@@ -882,11 +835,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { date: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { date } = request.params;
+    async (request, reply) => {
+      const { date } = request.params as { date: string };
       const metrics = await AnalyticsAggregationJob.getMetricsForDate(date);
 
       if (!metrics) {
@@ -927,11 +877,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Querystring: { startDate: string; endDate: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { startDate, endDate } = request.query;
+    async (request, reply) => {
+      const { startDate, endDate } = request.query as { startDate: string; endDate: string };
       const metrics = await AnalyticsAggregationJob.getMetricsRange(startDate, endDate);
 
       return reply.send({
@@ -965,11 +912,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { weekStart: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { weekStart } = request.params;
+    async (request, reply) => {
+      const { weekStart } = request.params as { weekStart: string };
       const metrics = await AnalyticsAggregationJob.getWeeklyMetrics(weekStart);
 
       if (!metrics) {
@@ -1009,11 +953,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { yearMonth: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { yearMonth } = request.params;
+    async (request, reply) => {
+      const { yearMonth } = request.params as { yearMonth: string };
       const metrics = await AnalyticsAggregationJob.getMonthlyMetrics(yearMonth);
 
       if (!metrics) {
@@ -1053,11 +994,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { date: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { date } = request.params;
+    async (request, reply) => {
+      const { date } = request.params as { date: string };
       const startTime = Date.now();
 
       const metrics = await AnalyticsAggregationJob.aggregateDate(date);
@@ -1125,11 +1063,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Querystring: { days?: number } }>,
-      reply: FastifyReply
-    ) => {
-      const { days = 30 } = request.query;
+    async (request, reply) => {
+      const { days = 30 } = request.query as { days?: number };
       const history = await ComplianceAuditJob.getAuditHistory(days);
 
       return reply.send({
@@ -1164,11 +1099,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { entityType: string; entityId: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { entityType, entityId } = request.params;
+    async (request, reply) => {
+      const { entityType, entityId } = request.params as { entityType: string; entityId: string };
       const violations = await ComplianceAuditJob.getEntityViolations(entityType, entityId);
 
       return reply.send({
@@ -1203,11 +1135,8 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { entityType: string; entityId: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { entityType, entityId } = request.params;
+    async (request, reply) => {
+      const { entityType, entityId } = request.params as { entityType: string; entityId: string };
 
       const result = await ComplianceAuditJob.auditEntity(
         entityType as 'listing' | 'lease' | 'property',
@@ -1274,22 +1203,17 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{
-        Querystring: {
-          daysThreshold?: number;
-          documentType?: string;
-          limit?: number;
-          offset?: number;
-        };
-      }>,
-      reply: FastifyReply
-    ) => {
-      const { daysThreshold = 30, documentType, limit = 50, offset = 0 } = request.query;
+    async (request, reply) => {
+      const { daysThreshold = 30, documentType, limit = 50, offset = 0 } = request.query as {
+        daysThreshold?: number;
+        documentType?: string;
+        limit?: number;
+        offset?: number;
+      };
 
       const result = await DocumentExpirationJob.getExpiringDocumentsList({
-        daysThreshold,
-        documentType,
+        days: daysThreshold,
+        type: documentType,
         limit,
         offset,
       });
@@ -1322,20 +1246,15 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{
-        Querystring: {
-          documentType?: string;
-          limit?: number;
-          offset?: number;
-        };
-      }>,
-      reply: FastifyReply
-    ) => {
-      const { documentType, limit = 50, offset = 0 } = request.query;
+    async (request, reply) => {
+      const { documentType, limit = 50, offset = 0 } = request.query as {
+        documentType?: string;
+        limit?: number;
+        offset?: number;
+      };
 
       const result = await DocumentExpirationJob.getExpiredDocuments({
-        documentType,
+        type: documentType,
         limit,
         offset,
       });
@@ -1367,20 +1286,17 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: adminPartnerAuth,
     },
-    async (
-      request: FastifyRequest<{ Params: { documentId: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { documentId } = request.params;
+    async (request, reply) => {
+      const { documentId } = request.params as { documentId: string };
 
-      const result = await DocumentExpirationJob.sendRenewalReminder(documentId);
+      const success = await DocumentExpirationJob.sendRenewalReminder(documentId);
 
-      if (!result.success) {
+      if (!success) {
         return reply.status(404).send({
           success: false,
           error: {
             code: 'DOCUMENT_NOT_FOUND',
-            message: result.error || `Document not found: ${documentId}`,
+            message: `Document not found or could not send reminder: ${documentId}`,
           },
         });
       }
@@ -1390,7 +1306,6 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
         data: {
           message: 'Renewal reminder sent',
           documentId,
-          notificationsSent: result.notificationsSent,
         },
       });
     }

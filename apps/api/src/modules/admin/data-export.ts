@@ -162,7 +162,7 @@ async function collectPropertiesData(userId: string) {
           bedrooms: true,
           bathrooms: true,
           squareFeet: true,
-          monthlyRent: true,
+          marketRentAmount: true,
           status: true,
         },
       },
@@ -180,7 +180,7 @@ async function collectUnitsData(userId: string) {
       bedrooms: true,
       bathrooms: true,
       squareFeet: true,
-      monthlyRent: true,
+      marketRentAmount: true,
       status: true,
       amenities: true,
       propertyId: true,
@@ -192,7 +192,7 @@ async function collectListingsData(userId: string) {
   return prisma.listing.findMany({
     where: {
       OR: [
-        { createdById: userId },
+        { landlordId: userId },
         { unit: { property: { ownerId: userId } } },
       ],
     },
@@ -200,14 +200,13 @@ async function collectListingsData(userId: string) {
       id: true,
       title: true,
       description: true,
-      monthlyRent: true,
-      securityDeposit: true,
+      priceAmount: true,
+      securityDepositAmount: true,
       availableDate: true,
       status: true,
       publishedAt: true,
       createdAt: true,
       viewCount: true,
-      inquiryCount: true,
     },
   });
 }
@@ -216,7 +215,8 @@ async function collectLeasesData(userId: string) {
   return prisma.lease.findMany({
     where: {
       OR: [
-        { tenants: { some: { userId } } },
+        { primaryTenantId: userId },
+        { landlordId: userId },
         { unit: { property: { ownerId: userId } } },
       ],
     },
@@ -225,11 +225,11 @@ async function collectLeasesData(userId: string) {
       status: true,
       startDate: true,
       endDate: true,
-      monthlyRent: true,
-      securityDeposit: true,
-      signedAt: true,
+      monthlyRentAmount: true,
+      securityDepositAmount: true,
+      allSignaturesComplete: true,
       createdAt: true,
-      terms: true,
+      type: true,
     },
   });
 }
@@ -238,7 +238,8 @@ async function collectPaymentsData(userId: string) {
   return prisma.payment.findMany({
     where: {
       OR: [
-        { userId },
+        { payerId: userId },
+        { payeeId: userId },
         { lease: { unit: { property: { ownerId: userId } } } },
       ],
     },
@@ -258,7 +259,7 @@ async function collectDocumentsData(userId: string) {
   return prisma.document.findMany({
     where: {
       OR: [
-        { uploadedById: userId },
+        { uploadedBy: userId },
         { ownerId: userId },
       ],
     },
@@ -266,7 +267,6 @@ async function collectDocumentsData(userId: string) {
       id: true,
       name: true,
       type: true,
-      category: true,
       mimeType: true,
       size: true,
       createdAt: true,
@@ -282,8 +282,8 @@ async function collectNotificationsData(userId: string) {
       id: true,
       type: true,
       title: true,
-      message: true,
-      read: true,
+      body: true,
+      readAt: true,
       createdAt: true,
     },
     take: 1000, // Limit to recent 1000
@@ -297,8 +297,8 @@ async function collectAuditLogsData(userId: string) {
     select: {
       id: true,
       action: true,
-      targetType: true,
-      targetId: true,
+      entityType: true,
+      entityId: true,
       timestamp: true,
       ipAddress: true,
     },
@@ -312,7 +312,7 @@ async function collectAIConversationsData(userId: string) {
     where: { userId },
     select: {
       id: true,
-      title: true,
+      agentType: true,
       context: true,
       createdAt: true,
       messages: {
@@ -475,8 +475,8 @@ export async function dataExportRoutes(app: FastifyInstance): Promise<void> {
           data: {
             action: 'data_export_requested',
             actorId: request.user?.id,
-            targetType: 'user',
-            targetId: params.userId,
+            entityType: 'user',
+            entityId: params.userId,
             metadata: {
               exportId: job.id,
               sections: params.sections,
@@ -615,8 +615,8 @@ export async function dataExportRoutes(app: FastifyInstance): Promise<void> {
           data: {
             action: 'data_export_downloaded',
             actorId: request.user?.id,
-            targetType: 'user',
-            targetId: job.userId,
+            entityType: 'user',
+            entityId: job.userId,
             metadata: { exportId: job.id },
           },
         });

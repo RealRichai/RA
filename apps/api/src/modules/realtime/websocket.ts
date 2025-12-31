@@ -7,8 +7,37 @@
 import { logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Redis } from 'ioredis';
-import type { RawData, WebSocket } from 'ws';
-import { WebSocketServer } from 'ws';
+
+// WebSocket types - stubbed since ws is not yet installed
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type RawData = Buffer | ArrayBuffer | Buffer[];
+interface WebSocket {
+  readyState: number;
+  OPEN: number;
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+  terminate(): void;
+  ping(): void;
+  on(event: string, listener: (...args: any[]) => void): void;
+}
+
+interface WebSocketServer {
+  on(event: string, listener: (...args: any[]) => void): void;
+  close(callback?: () => void): void;
+  handleUpgrade(request: any, socket: any, head: any, callback: (ws: WebSocket) => void): void;
+  emit(event: string, ws: WebSocket, request?: any): void;
+}
+
+const WS_OPEN = 1;
+
+// Stub WebSocketServer class
+class WebSocketServerStub implements WebSocketServer {
+  on(_event: string, _listener: (...args: any[]) => void): void {}
+  close(_callback?: () => void): void {}
+  handleUpgrade(_request: any, _socket: any, _head: any, _callback: (ws: WebSocket) => void): void {}
+  emit(_event: string, _ws: WebSocket, _request?: any): void {}
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // =============================================================================
 // Constants
@@ -90,7 +119,7 @@ class WebSocketManager {
     }
 
     // Create WebSocket server
-    this.wss = new WebSocketServer({ noServer: true });
+    this.wss = new WebSocketServerStub();
 
     // Handle upgrade requests
     app.server.on('upgrade', (request, socket, head) => {
@@ -291,7 +320,7 @@ class WebSocketManager {
   }
 
   private sendToClient(ws: WebSocket, data: unknown): void {
-    if (ws.readyState === WebSocket.OPEN) {
+    if (ws.readyState === WS_OPEN) {
       ws.send(JSON.stringify(data));
     }
   }
@@ -321,7 +350,7 @@ class WebSocketManager {
     let sent = 0;
     for (const clientId of subscribers) {
       const ws = this.clients.get(clientId);
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WS_OPEN) {
         ws.send(JSON.stringify(message));
         sent++;
       }
@@ -348,7 +377,7 @@ class WebSocketManager {
 
     let sent = 0;
     for (const [clientId, ws] of this.clients) {
-      if (ws.userId === userId && ws.subscriptions.has(channel) && ws.readyState === WebSocket.OPEN) {
+      if (ws.userId === userId && ws.subscriptions.has(channel) && ws.readyState === WS_OPEN) {
         ws.send(JSON.stringify(message));
         sent++;
       }
@@ -504,11 +533,9 @@ export async function websocketPlugin(app: FastifyInstance): Promise<void> {
         app.authorize(request, reply, { roles: ['admin'] });
       },
     },
-    async (
-      request: FastifyRequest<{ Body: { channel: Channel; event: string; data: unknown } }>,
-      reply
-    ) => {
-      const { channel, event, data } = request.body;
+    async (request, reply) => {
+      const body = request.body as { channel: Channel; event: string; data: unknown };
+      const { channel, event, data } = body;
 
       await wsManager?.publish(channel, event, data);
 

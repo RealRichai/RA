@@ -523,7 +523,7 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const overallCondition = calculateOverallCondition(
-      allItems.map((i) => ({ condition: i.condition as ItemCondition }))
+      allItems.map((i) => ({ name: i.name, condition: i.condition as ItemCondition }))
     );
 
     await prisma.inspectionRoom.update({
@@ -599,7 +599,7 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const overallCondition = calculateOverallCondition(
-      allItems.map((i) => ({ condition: i.condition as ItemCondition }))
+      allItems.map((i) => ({ name: i.name, condition: i.condition as ItemCondition }))
     );
 
     await prisma.inspectionRoom.update({
@@ -705,10 +705,13 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
 
     const summary = generateSummary(
       rooms.map((r) => ({
+        roomType: r.roomType as RoomType,
+        roomName: r.roomName,
         items: r.items.map((i) => ({
+          name: i.name,
           condition: i.condition as ItemCondition,
           requiresRepair: i.requiresRepair,
-          estimatedRepairCost: i.estimatedRepairCost ? toNumber(i.estimatedRepairCost) : null,
+          estimatedRepairCost: i.estimatedRepairCost ? toNumber(i.estimatedRepairCost) : undefined,
         })),
       }))
     );
@@ -773,10 +776,13 @@ export async function inspectionRoutes(app: FastifyInstance): Promise<void> {
 
     const summary = generateSummary(
       rooms.map((r) => ({
+        roomType: r.roomType as RoomType,
+        roomName: r.roomName,
         items: r.items.map((i) => ({
+          name: i.name,
           condition: i.condition as ItemCondition,
           requiresRepair: i.requiresRepair,
-          estimatedRepairCost: i.estimatedRepairCost ? toNumber(i.estimatedRepairCost) : null,
+          estimatedRepairCost: i.estimatedRepairCost ? toNumber(i.estimatedRepairCost) : undefined,
         })),
       }))
     );

@@ -155,7 +155,7 @@ export function comparePropertiesSync(propertyIds: string[], metricKeys: string[
     const values = properties.map(p => ({
       propertyId: p.propertyId,
       propertyName: p.propertyName,
-      value: (p as Record<string, unknown>)[metric] as number || 0,
+      value: (p as unknown as Record<string, unknown>)[metric] as number || 0,
       rank: 0,
     })).sort((a, b) => b.value - a.value);
 
@@ -176,7 +176,7 @@ export function comparePropertiesSync(propertyIds: string[], metricKeys: string[
 
   const averages: Record<string, number> = {};
   for (const metric of metricKeys) {
-    const values = properties.map(p => (p as Record<string, unknown>)[metric] as number || 0);
+    const values = properties.map(p => (p as unknown as Record<string, unknown>)[metric] as number || 0);
     averages[metric] = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
   }
 
@@ -240,7 +240,7 @@ export function compareToBenchmarkSync(propertyId: string, benchmarkId: string):
   const result: Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }> = {};
 
   for (const [key, benchValue] of Object.entries(benchmark.metrics)) {
-    const value = (metrics as Record<string, unknown>)[key] as number || 0;
+    const value = (metrics as unknown as Record<string, unknown>)[key] as number || 0;
     const benchmarkValue = benchValue.value;
     const variance = value - benchmarkValue;
     const status = variance > 0 ? 'above' : variance < 0 ? 'below' : 'at';
@@ -717,7 +717,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.post('/compare', async (request: FastifyRequest, reply: FastifyReply) => {
     const data = comparisonSchema.parse(request.body);
 
-    const results = await compareProperties(data.propertyIds, data.metrics);
+    const results = await comparePropertiesSync(data.propertyIds, data.metrics);
 
     const report = await prisma.comparisonReport.create({
       data: {
@@ -750,7 +750,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     const ids = propertyIds.split(',');
     const metricKeys = metrics ? metrics.split(',') : availableMetrics.map(m => m.key);
 
-    const results = await compareProperties(ids, metricKeys);
+    const results = await comparePropertiesSync(ids, metricKeys);
     return reply.send(results);
   });
 
@@ -804,7 +804,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
       ids = allMetrics.map(m => m.propertyId);
     }
 
-    const averages = await calculatePortfolioAverages(ids);
+    const averages = await calculatePortfolioAveragesSync(ids);
     return reply.send(averages);
   });
 
@@ -845,7 +845,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     const { propertyId, metric } = request.params as { propertyId: string; metric: string };
     const { months } = request.query as { months?: string };
 
-    const trendData = await generateTrendData(propertyId, metric, months ? parseInt(months) : 12);
+    const trendData = await generateTrendDataSync(propertyId, metric, months ? parseInt(months) : 12);
     return reply.send(trendData);
   });
 
@@ -857,7 +857,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     };
 
     const ids = propertyIds.split(',');
-    const trends = await Promise.all(ids.map(id => generateTrendData(id, metric, months ? parseInt(months) : 12)));
+    const trends = await Promise.all(ids.map(id => generateTrendDataSync(id, metric, months ? parseInt(months) : 12)));
 
     return reply.send(trends);
   });
@@ -912,7 +912,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.get('/compare-to-benchmark/:propertyId/:benchmarkId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId, benchmarkId } = request.params as { propertyId: string; benchmarkId: string };
 
-    const comparison = await compareToBenchmark(propertyId, benchmarkId);
+    const comparison = await compareToBenchmarkSync(propertyId, benchmarkId);
     if (Object.keys(comparison).length === 0) {
       return reply.status(404).send({ error: 'Property or benchmark not found' });
     }
@@ -989,14 +989,14 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
 
     const propertyIds = saved.propertyIds as string[];
     const metrics = saved.metrics as string[];
-    const results = await compareProperties(propertyIds, metrics);
+    const results = await comparePropertiesSync(propertyIds, metrics);
 
     // If benchmark specified, add benchmark comparison
     let benchmarkComparison: Record<string, Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }>> | undefined;
     if (saved.benchmarkId) {
       benchmarkComparison = {};
       for (const propId of propertyIds) {
-        benchmarkComparison[propId] = await compareToBenchmark(propId, saved.benchmarkId);
+        benchmarkComparison[propId] = await compareToBenchmarkSync(propId, saved.benchmarkId);
       }
     }
 
@@ -1049,7 +1049,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     }
 
     const rankings = await rankPropertyInPortfolio(propertyId, ids);
-    const portfolioAvgs = await calculatePortfolioAverages(ids);
+    const portfolioAvgs = await calculatePortfolioAveragesSync(ids);
 
     // Calculate grades based on percentile
     const grades: Record<string, string> = {};

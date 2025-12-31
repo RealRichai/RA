@@ -210,7 +210,7 @@ export class DataCleanupJob {
       where: {
         OR: [
           { expiresAt: { lt: new Date() } },
-          { isValid: false, updatedAt: { lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+          { isValid: false, lastActiveAt: { lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
         ],
       },
     });
@@ -399,13 +399,13 @@ export class DataCleanupJob {
           channel: 'in_app',
           title,
           body,
-          data: {
+          data: JSON.parse(JSON.stringify({
             totalDeleted: summary.totalDeleted,
             totalDuration: summary.totalDuration,
             results: summary.results,
             errors: summary.errors,
             priority: hasErrors ? 'high' : 'low',
-          },
+          })),
           status: 'sent',
         },
       });
@@ -446,7 +446,7 @@ export class DataCleanupJob {
         where: {
           OR: [
             { expiresAt: { lt: new Date() } },
-            { isValid: false, updatedAt: { lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+            { isValid: false, lastActiveAt: { lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
           ],
         },
       }),

@@ -422,8 +422,8 @@ export async function roleManagementRoutes(app: FastifyInstance): Promise<void> 
           data: {
             action: 'role_created',
             actorId: adminId,
-            targetType: 'role',
-            targetId: newRole.id,
+            entityType: 'role',
+            entityId: newRole.id,
             metadata: { roleName: newRole.name, permissionCount: permissions.length },
           },
         });
@@ -525,8 +525,8 @@ export async function roleManagementRoutes(app: FastifyInstance): Promise<void> 
           data: {
             action: 'role_updated',
             actorId: adminId,
-            targetType: 'role',
-            targetId: roleId,
+            entityType: 'role',
+            entityId: roleId,
             metadata: { changes: Object.keys(input) },
           },
         });
@@ -604,8 +604,8 @@ export async function roleManagementRoutes(app: FastifyInstance): Promise<void> 
           data: {
             action: 'role_deleted',
             actorId: adminId,
-            targetType: 'role',
-            targetId: roleId,
+            entityType: 'role',
+            entityId: roleId,
             metadata: { roleName: role.name },
           },
         });
@@ -720,8 +720,8 @@ export async function roleManagementRoutes(app: FastifyInstance): Promise<void> 
           data: {
             action: 'user_role_changed',
             actorId: adminId,
-            targetType: 'user',
-            targetId: userId,
+            entityType: 'user',
+            entityId: userId,
             metadata: { oldRole, newRole: role },
           },
         });
@@ -908,8 +908,8 @@ export async function roleManagementRoutes(app: FastifyInstance): Promise<void> 
           data: {
             action: 'user_permissions_updated',
             actorId: adminId,
-            targetType: 'user',
-            targetId: userId,
+            entityType: 'user',
+            entityId: userId,
             metadata: {
               additionalPermissions: override.additionalPermissions,
               revokedPermissions: override.revokedPermissions,
@@ -971,8 +971,8 @@ export async function roleManagementRoutes(app: FastifyInstance): Promise<void> 
           data: {
             action: 'user_permissions_reset',
             actorId: adminId,
-            targetType: 'user',
-            targetId: userId,
+            entityType: 'user',
+            entityId: userId,
             metadata: {},
           },
         });

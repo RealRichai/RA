@@ -215,7 +215,7 @@ async function checkEmailQueue(app: FastifyInstance): Promise<DependencyCheck> {
     }
 
     // Check if email service is paused or has issues
-    const isPaused = app.emailService.isPaused?.() ?? false;
+    const isPaused = (app.emailService as unknown as { isPaused?: () => boolean })?.isPaused?.() ?? false;
 
     return {
       status: isPaused ? 'degraded' : 'up',
@@ -244,7 +244,7 @@ async function checkJobScheduler(app: FastifyInstance): Promise<DependencyCheck>
       };
     }
 
-    const isRunning = app.jobScheduler.isRunning?.() ?? true;
+    const isRunning = (app.jobScheduler as unknown as { isRunning?: () => boolean })?.isRunning?.() ?? true;
 
     return {
       status: isRunning ? 'up' : 'degraded',

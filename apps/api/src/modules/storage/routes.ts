@@ -104,7 +104,7 @@ export function getOccupancyStats(propertyId: string): {
 
   const total = units.length;
   const available = units.filter((u) => u.status === 'available').length;
-  const rented = units.filter((u) => u.status === 'assigned' || u.status === 'rented').length;
+  const rented = units.filter((u) => u.status === 'assigned').length;
   const reserved = units.filter((u) => u.status === 'reserved').length;
   const maintenance = units.filter((u) => u.status === 'maintenance').length;
 
@@ -116,13 +116,13 @@ export function getOccupancyStats(propertyId: string): {
       bySize[unit.size] = { total: 0, rented: 0 };
     }
     bySize[unit.size].total++;
-    if (unit.status === 'assigned' || unit.status === 'rented') bySize[unit.size].rented++;
+    if (unit.status === 'assigned') bySize[unit.size].rented++;
 
     if (!byType[unit.type]) {
       byType[unit.type] = { total: 0, rented: 0 };
     }
     byType[unit.type].total++;
-    if (unit.status === 'assigned' || unit.status === 'rented') byType[unit.type].rented++;
+    if (unit.status === 'assigned') byType[unit.type].rented++;
   });
 
   return {

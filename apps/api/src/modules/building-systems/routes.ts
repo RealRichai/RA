@@ -804,7 +804,7 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/systems/:id/health',
     async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
-      const health = await calculateSystemHealth(request.params.id);
+      const health = await calculateSystemHealthAsync(request.params.id);
       return reply.send(health);
     }
   );
@@ -820,7 +820,7 @@ export const buildingSystemRoutes: FastifyPluginAsync = async (app) => {
       reply
     ) => {
       const days = request.query.days ? parseInt(request.query.days) : 30;
-      const uptime = await getSystemUptime(request.params.id, days);
+      const uptime = await getSystemUptimeAsync(request.params.id, days);
       return reply.send(uptime);
     }
   );

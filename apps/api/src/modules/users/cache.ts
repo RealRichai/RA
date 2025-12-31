@@ -62,7 +62,7 @@ export async function getCachedUser(
           status: true,
           phone: true,
           avatarUrl: true,
-          preferences: true,
+          metadata: true,
           createdAt: true,
         },
       });
@@ -71,7 +71,7 @@ export async function getCachedUser(
         return null;
       }
 
-      return user as CachedUserProfile;
+      return { ...user, preferences: user.metadata } as unknown as CachedUserProfile;
     },
     {
       ttl: CacheTTL.MEDIUM,
@@ -103,7 +103,7 @@ export async function getCachedUserByEmail(
           status: true,
           phone: true,
           avatarUrl: true,
-          preferences: true,
+          metadata: true,
           createdAt: true,
         },
       });
@@ -112,7 +112,7 @@ export async function getCachedUserByEmail(
         return null;
       }
 
-      return user as CachedUserProfile;
+      return { ...user, preferences: user.metadata } as unknown as CachedUserProfile;
     },
     {
       ttl: CacheTTL.MEDIUM,
@@ -145,7 +145,7 @@ export async function getCachedUserProfile(
             status: true,
             phone: true,
             avatarUrl: true,
-            preferences: true,
+            metadata: true,
             createdAt: true,
           },
         }),
@@ -162,7 +162,7 @@ export async function getCachedUserProfile(
               { tenantId: id },
               { property: { ownerId: id } },
             ],
-            status: { in: ['active', 'pending'] },
+            status: { in: ['active', 'pending_signatures', 'draft'] },
           },
         }),
       ]);
@@ -173,12 +173,13 @@ export async function getCachedUserProfile(
 
       return {
         ...user,
+        preferences: user.metadata,
         stats: {
           propertiesCount,
           activeListingsCount,
           leasesCount,
         },
-      } as CachedUserWithStats;
+      } as unknown as CachedUserWithStats;
     },
     {
       ttl: CacheTTL.SHORT, // Stats change more frequently

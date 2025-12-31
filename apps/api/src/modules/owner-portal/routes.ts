@@ -721,7 +721,7 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
     // Add management fee as expense
     const managementFee = calculateManagementFee(
       income.totalIncome,
-      ownership.managementFeeType,
+      ownership.managementFeeType as 'flat' | 'percentage',
       toNumber(ownership.managementFeeAmount)
     );
     expenses.managementFee = managementFee;
@@ -1040,7 +1040,7 @@ export async function ownerPortalRoutes(app: FastifyInstance): Promise<void> {
         totalRents: taxData.totalRents,
         totalOtherIncome: taxData.totalOtherIncome,
         grossProceeds: taxData.grossProceeds,
-        status: 'generated',
+        status: 'draft',
         generatedAt: new Date(),
       },
     });

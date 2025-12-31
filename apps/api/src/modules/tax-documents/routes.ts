@@ -933,7 +933,7 @@ export async function taxDocumentRoutes(app: FastifyInstance): Promise<void> {
             status: 'draft',
             filingStatus: 'not_filed',
             totalAmount,
-            breakdown: request.body.breakdown,
+            breakdown: JSON.parse(JSON.stringify(request.body.breakdown)),
             correctionOf: original.id,
             generatedAt: new Date(),
           },
@@ -980,7 +980,7 @@ export async function taxDocumentRoutes(app: FastifyInstance): Promise<void> {
           ownerId: request.body.ownerId,
           taxYearId: request.body.taxYearId,
           year: taxYear.year,
-          properties: request.body.properties,
+          properties: JSON.parse(JSON.stringify(request.body.properties)),
           totalIncome,
           totalExpenses,
           netIncome: totalIncome - totalExpenses,
@@ -1035,7 +1035,7 @@ export async function taxDocumentRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Get depreciation for properties
-      const properties = packet.properties as PropertyTaxSummary[];
+      const properties = packet.properties as unknown as PropertyTaxSummary[];
       const propertyIds = properties.map((p) => p.propertyId);
       const depreciation = await prisma.depreciationItem.findMany({
         where: { propertyId: { in: propertyIds } },

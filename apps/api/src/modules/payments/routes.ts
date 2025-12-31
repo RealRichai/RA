@@ -2,7 +2,7 @@ import { prisma } from '@realriches/database';
 import {
   generatePaymentIdempotencyKey,
   createMockIdempotencyManager,
-  getPartnerProvider,
+  getProviderRegistry,
   type IdempotencyManager,
 } from '@realriches/revenue-engine';
 import { generatePrefixedId, NotFoundError, ForbiddenError, ValidationError, AppError } from '@realriches/utils';
@@ -126,7 +126,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
               },
             },
           },
-          orderBy: { dueDate: 'desc' },
+          orderBy: { scheduledDate: 'desc' },
         }),
         prisma.payment.count({ where }),
       ]);
@@ -160,7 +160,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           lease: {
             include: {
               unit: { include: { property: true } },
-              tenant: { select: { id: true, firstName: true, lastName: true } },
+              primaryTenant: { select: { id: true, firstName: true, lastName: true } },
             },
           },
         },
@@ -215,9 +215,13 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       const payment = await prisma.payment.create({
         data: {
           id: generatePrefixedId('pay'),
-          ...data,
+          payerId: lease.tenantId,
+          payeeId: lease.unit.property.ownerId,
+          leaseId: data.leaseId,
           amount: data.amount,
-          dueDate: new Date(data.dueDate),
+          type: data.type,
+          scheduledDate: new Date(data.dueDate),
+          description: data.description,
           status: 'pending',
         },
       });
@@ -486,7 +490,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const methods = await prisma.paymentMethod.findMany({
-        where: { userId: request.user.id, isActive: true },
+        where: { userId: request.user.id, status: 'active' },
         orderBy: { isDefault: 'desc' },
       });
 
@@ -614,16 +618,16 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           id: generatePrefixedId('pm'),
           userId: request.user.id,
           type: data.type,
-          provider: 'stripe',
           stripePaymentMethodId: data.token,
-          last4,
+          cardLast4: data.type === 'card' ? last4 : null,
+          bankLast4: data.type === 'bank_account' ? last4 : null,
           cardBrand,
           cardExpMonth,
           cardExpYear,
           bankName,
           isDefault: data.isDefault,
           isVerified: true,
-          isActive: true,
+          status: 'active',
         },
       });
 
@@ -670,12 +674,16 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       const recurring = await prisma.recurringPayment.create({
         data: {
           id: generatePrefixedId('rp'),
+          payerId: request.user.id,
+          payeeId: lease.landlordId || lease.tenantId, // fallback if no landlordId
           leaseId,
           paymentMethodId,
+          type: 'rent',
           amount: Number(lease.monthlyRent),
           frequency: 'monthly',
           dayOfMonth: dayOfMonth || 1,
-          isActive: true,
+          startDate: new Date(),
+          status: 'active',
           nextPaymentDate: getNextPaymentDate(dayOfMonth || 1),
         },
       });
@@ -715,7 +723,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
               property: true,
             },
           },
-          tenant: {
+          primaryTenant: {
             select: {
               id: true,
               email: true,
@@ -745,7 +753,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         // Get the partner provider adapter
-        const provider = getPartnerProvider(partnerProvider);
+        const provider = getProviderRegistry().getProviderOrThrow(partnerProvider);
 
         // Check if the provider is available
         const isAvailable = await provider.isAvailable();
@@ -766,16 +774,16 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           term: calculateLeaseTerm(lease.startDate, lease.endDate),
           startDate: new Date(lease.startDate),
           applicantInfo: {
-            firstName: lease.tenant.firstName,
-            lastName: lease.tenant.lastName,
-            email: lease.tenant.email,
-            phone: lease.tenant.phone || undefined,
+            firstName: lease.primaryTenant?.firstName || '',
+            lastName: lease.primaryTenant?.lastName || '',
+            email: lease.primaryTenant?.email || '',
+            phone: lease.primaryTenant?.phone || undefined,
           },
           propertyInfo: {
             address: lease.unit.property.address,
             city: lease.unit.property.city,
             state: lease.unit.property.state,
-            zip: lease.unit.property.zip,
+            zip: lease.unit.property.postalCode,
             monthlyRent: Number(lease.monthlyRent),
             propertyType: lease.unit.property.type || 'residential',
           },
@@ -817,10 +825,10 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           data: {
             id: generatePrefixedId('da'),
             leaseId: data.leaseId,
-            userId: request.user.id,
+            tenantId: request.user.id,
             provider: data.provider,
-            coverageAmount: data.coverageAmount,
-            monthlyPremium,
+            coverageAmount: Math.round(data.coverageAmount * 100), // Convert to cents
+            monthlyPremiumAmount: Math.round(monthlyPremium * 100), // Convert to cents
             status: quoteStatus,
             metadata: {
               quoteId: quote?.quoteId,
@@ -862,10 +870,10 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
           data: {
             id: generatePrefixedId('da'),
             leaseId: data.leaseId,
-            userId: request.user.id,
+            tenantId: request.user.id,
             provider: data.provider,
-            coverageAmount: data.coverageAmount,
-            monthlyPremium: data.coverageAmount * 0.02,
+            coverageAmount: Math.round(data.coverageAmount * 100),
+            monthlyPremiumAmount: Math.round(data.coverageAmount * 0.02 * 100),
             status: 'pending',
             metadata: {
               error: error instanceof Error ? error.message : 'Unknown error',
@@ -905,7 +913,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       }
 
       let account = await prisma.rentRewardsAccount.findUnique({
-        where: { userId: request.user.id },
+        where: { tenantId: request.user.id },
         include: {
           transactions: { orderBy: { createdAt: 'desc' }, take: 10 },
         },
@@ -915,7 +923,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
         account = await prisma.rentRewardsAccount.create({
           data: {
             id: generatePrefixedId('rra'),
-            userId: request.user.id,
+            tenantId: request.user.id,
             pointsBalance: 0,
             lifetimePoints: 0,
             tier: 'bronze',

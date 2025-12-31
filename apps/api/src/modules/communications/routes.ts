@@ -311,7 +311,7 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
 
       if (query.channel && lastMessage.channel !== query.channel) continue;
 
-      const participants = (thread.participants || []) as ThreadParticipant[];
+      const participants = (thread.participants || []) as unknown as ThreadParticipant[];
 
       inboxItems.push({
         id: thread.id,
@@ -442,7 +442,7 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
       success: true,
       data: {
         ...thread,
-        participants: thread.participants as ThreadParticipant[],
+        participants: thread.participants as unknown as ThreadParticipant[],
         messages: thread.messages,
       },
     });
@@ -470,7 +470,7 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
 
     const results = threads.map((t) => ({
       ...t,
-      participants: t.participants as ThreadParticipant[],
+      participants: t.participants as unknown as ThreadParticipant[],
     }));
 
     return reply.send({
@@ -516,7 +516,7 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
       success: true,
       data: {
         ...updated,
-        participants: updated.participants as ThreadParticipant[],
+        participants: updated.participants as unknown as ThreadParticipant[],
       },
     });
   });
@@ -571,7 +571,7 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
 
     // If SMS, also create SMS record
     if (body.channel === 'sms') {
-      const participants = (thread.participants || []) as ThreadParticipant[];
+      const participants = (thread.participants || []) as unknown as ThreadParticipant[];
       const recipient = participants.find((p) => p.phone);
       if (recipient?.phone) {
         const smsResult = await mockSMSProvider.send(recipient.phone, body.body);
@@ -850,9 +850,9 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
 
     const mapped = results.map((b) => ({
       ...b,
-      recipients: b.recipients as BroadcastRecipient[],
-      filters: b.filters as BroadcastFilter,
-      stats: b.stats as BroadcastStats,
+      recipients: b.recipients as unknown as BroadcastRecipient[],
+      filters: b.filters as unknown as BroadcastFilter,
+      stats: b.stats as unknown as BroadcastStats,
     }));
 
     return reply.send({
@@ -879,9 +879,9 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
       success: true,
       data: {
         ...broadcast,
-        recipients: broadcast.recipients as BroadcastRecipient[],
-        filters: broadcast.filters as BroadcastFilter,
-        stats: broadcast.stats as BroadcastStats,
+        recipients: broadcast.recipients as unknown as BroadcastRecipient[],
+        filters: broadcast.filters as unknown as BroadcastFilter,
+        stats: broadcast.stats as unknown as BroadcastStats,
       },
     });
   });
@@ -909,8 +909,8 @@ export async function communicationRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const now = new Date();
-    const recipients = (broadcast.recipients || []) as BroadcastRecipient[];
-    const stats = (broadcast.stats || {}) as BroadcastStats;
+    const recipients = (broadcast.recipients || []) as unknown as BroadcastRecipient[];
+    const stats = (broadcast.stats || {}) as unknown as BroadcastStats;
 
     // Simulate sending to recipients
     for (const recipient of recipients) {

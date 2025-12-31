@@ -821,7 +821,7 @@ export async function esignatureRoutes(app: FastifyInstance): Promise<void> {
               property: true,
             },
           },
-          tenant: true,
+          primaryTenant: true,
         },
       });
 
@@ -829,7 +829,7 @@ export async function esignatureRoutes(app: FastifyInstance): Promise<void> {
         throw new AppError('NOT_FOUND', 'Lease not found', 404);
       }
 
-      if (lease.unit.property.ownerId !== request.user.id) {
+      if (lease.unit?.property?.ownerId !== request.user.id) {
         throw new AppError('FORBIDDEN', 'Not authorized', 403);
       }
 
@@ -842,7 +842,7 @@ export async function esignatureRoutes(app: FastifyInstance): Promise<void> {
         documentType: 'lease',
         relatedEntityId: leaseId,
         relatedEntityType: 'lease',
-        title: `Lease Agreement - ${lease.unit.property.name} Unit ${lease.unit.unitNumber}`,
+        title: `Lease Agreement - ${lease.unit?.property?.name || 'Property'} Unit ${lease.unit?.unitNumber || ''}`,
         documents: [{
           id: generatePrefixedId('doc'),
           name: 'Lease Agreement',
@@ -851,15 +851,15 @@ export async function esignatureRoutes(app: FastifyInstance): Promise<void> {
         signers: [
           {
             id: generatePrefixedId('sig'),
-            name: lease.tenant ? `${lease.tenant.firstName} ${lease.tenant.lastName}` : 'Tenant',
-            email: lease.tenant?.email || '',
+            name: lease.primaryTenant ? `${lease.primaryTenant.firstName} ${lease.primaryTenant.lastName}` : 'Tenant',
+            email: lease.primaryTenant?.email || '',
             role: 'tenant',
             order: 1,
             status: 'pending',
           },
           {
             id: generatePrefixedId('sig'),
-            name: request.user.name || 'Landlord',
+            name: (request.user as unknown as { firstName?: string; lastName?: string }).firstName && (request.user as unknown as { firstName?: string; lastName?: string }).lastName ? `${(request.user as unknown as { firstName?: string }).firstName} ${(request.user as unknown as { lastName?: string }).lastName}` : 'Landlord',
             email: request.user.email || '',
             role: 'landlord',
             order: 2,

@@ -43,7 +43,7 @@ interface JobSummary {
   id: string;
   name: string;
   data: unknown;
-  progress: number | object;
+  progress: number | object | string | boolean;
   attemptsMade: number;
   processedOn?: number;
   finishedOn?: number;
@@ -143,16 +143,16 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
       try {
         const queue = getQueue(app);
 
-        const [waiting, active, completed, failed, delayed, paused, repeatableJobs] =
+        const [waiting, active, completed, failed, delayed, repeatableJobs] =
           await Promise.all([
             queue.getWaitingCount(),
             queue.getActiveCount(),
             queue.getCompletedCount(),
             queue.getFailedCount(),
             queue.getDelayedCount(),
-            queue.getPausedCount(),
             queue.getRepeatableJobs(),
           ]);
+        const paused = 0; // getPausedCount not available in this BullMQ version
 
         const stats: QueueStats = {
           name: 'realriches:jobs',

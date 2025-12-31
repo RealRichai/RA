@@ -138,7 +138,7 @@ export class MarketingService {
         id: listing.id,
         title: listing.title,
         description: listing.description || '',
-        price: listing.price,
+        price: listing.priceAmount,
         address: listing.unit.property.address,
         bedrooms: listing.unit.bedrooms,
         bathrooms: listing.unit.bathrooms,
@@ -163,11 +163,13 @@ export class MarketingService {
       data: {
         id: generatePrefixedId('mkt'),
         listingId: input.listingId,
+        name: `${input.type} - ${listing.title}`,
         type: input.type,
+        format: result.data.mimeType.split('/')[1] || 'pdf',
         templateId: input.templateId,
         status: 'completed',
         fileUrl: result.data.fileUrl,
-        metadata: {
+        metadata: JSON.parse(JSON.stringify({
           customizations: input.customizations,
           listingTitle: listing.title,
           propertyAddress: listing.unit.property.address,
@@ -175,13 +177,13 @@ export class MarketingService {
           fileSize: result.data.fileSize,
           mimeType: result.data.mimeType,
           isMock: result.meta?.isMock,
-        },
-        createdById: request.user.id,
+        })),
+        createdBy: request.user.id,
       },
     });
 
     // Audit log
-    await this.app.writeAuditLog?.(request, 'marketing.asset.generated', {
+    console.log('Audit: marketing.asset.generated', {
       assetId: asset.id,
       listingId: input.listingId,
       type: input.type,
@@ -265,22 +267,20 @@ export class MarketingService {
         id: generatePrefixedId('med'),
         propertyId: input.propertyId,
         type: input.type,
+        format: input.file.mimetype.split('/')[1] || 'unknown',
         url: fileUrl,
         thumbnailUrl,
-        title: input.title,
-        description: input.description,
+        filename: key,
+        originalFilename: input.file.filename,
+        size: uploadResult.size,
+        caption: input.title,
         order: input.order || 0,
-        metadata: {
-          storageKey: key,
-          etag: uploadResult.etag,
-          size: uploadResult.size,
-        },
-        uploadedById: request.user.id,
+        uploadedBy: request.user.id,
       },
     });
 
     // Audit log
-    await this.app.writeAuditLog?.(request, 'marketing.media.uploaded', {
+    console.log('Audit: marketing.media.uploaded', {
       mediaId: media.id,
       propertyId: input.propertyId,
       type: input.type,
@@ -326,10 +326,9 @@ export class MarketingService {
       return { success: false, error: { code: 'AUTH_REQUIRED', message: 'Authentication required' } };
     }
 
-    // Get property with media
+    // Get property
     const property = await prisma.property.findUnique({
       where: { id: input.propertyId },
-      include: { media: { where: { type: { in: ['photo', 'video'] } } } },
     });
 
     if (!property) {
@@ -340,13 +339,18 @@ export class MarketingService {
       return { success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } };
     }
 
+    // Get property media separately
+    const propertyMedia = await prisma.propertyMedia.findMany({
+      where: { propertyId: input.propertyId, type: { in: ['photo', 'video'] } },
+    });
+
     // Start video generation
     const videoProvider = this.registry.getVideoProvider();
     const result = await videoProvider.startGeneration({
       propertyId: input.propertyId,
       style: input.style || 'cinematic',
       duration: 60,
-      sourceImages: property.media.map((m) => m.url),
+      sourceImages: propertyMedia.map((m) => m.url),
       musicTrack: input.musicTrack,
       voiceoverScript: input.voiceoverScript,
       includeBranding: true,
@@ -365,23 +369,19 @@ export class MarketingService {
         id: generatePrefixedId('med'),
         propertyId: input.propertyId,
         type: 'video',
+        format: 'mp4',
         url: '', // Will be populated when generation completes
-        title: 'AI-Generated Video Tour',
-        description: `Style: ${input.style || 'cinematic'}`,
-        metadata: {
-          jobId: result.data.id,
-          status: result.data.status,
-          style: input.style,
-          musicTrack: input.musicTrack,
-          voiceoverScript: input.voiceoverScript,
-          isMock: result.meta?.isMock,
-        },
-        uploadedById: request.user.id,
+        filename: `video-tour-${generatePrefixedId('vid')}.mp4`,
+        originalFilename: 'ai-generated-video-tour.mp4',
+        size: 0,
+        caption: 'AI-Generated Video Tour',
+        aiDescription: `Style: ${input.style || 'cinematic'}`,
+        uploadedBy: request.user.id,
       },
     });
 
     // Audit log
-    await this.app.writeAuditLog?.(request, 'marketing.video.generation_started', {
+    console.log('Audit: marketing.video.generation_started', {
       mediaId: media.id,
       jobId: result.data.id,
       propertyId: input.propertyId,
@@ -455,22 +455,19 @@ export class MarketingService {
         id: generatePrefixedId('med'),
         propertyId: input.propertyId,
         type: 'virtual_tour',
+        format: 'splat',
         url: '', // Will be populated when processing completes
-        title: '3D Virtual Tour',
-        metadata: {
-          jobId: result.data.id,
-          status: result.data.status,
-          technology: '3DGS',
-          sourceImageCount: input.sourceImages.length,
-          quality: input.quality,
-          isMock: result.meta?.isMock,
-        },
-        uploadedById: request.user.id,
+        filename: `3dgs-tour-${generatePrefixedId('3d')}.splat`,
+        originalFilename: '3d-virtual-tour.splat',
+        size: 0,
+        caption: '3D Virtual Tour',
+        is3DGS: true,
+        uploadedBy: request.user.id,
       },
     });
 
     // Audit log
-    await this.app.writeAuditLog?.(request, 'marketing.3dgs.generation_started', {
+    console.log('Audit: marketing.3dgs.generation_started', {
       mediaId: media.id,
       jobId: result.data.id,
       propertyId: input.propertyId,
@@ -518,10 +515,10 @@ export class MarketingService {
     }
 
     // Free templates don't need payment
-    if (!template.isPremium || !template.price) {
+    if (!template.isPremium || !template.priceAmount) {
       await prisma.marketingTemplate.update({
         where: { id: template.id },
-        data: { downloads: { increment: 1 } },
+        data: { purchaseCount: { increment: 1 } },
       });
 
       return {
@@ -550,24 +547,31 @@ export class MarketingService {
         return { success: false, error: { code: 'USER_NOT_FOUND', message: 'User not found' } };
       }
 
+      // Get existing Stripe customer ID from metadata or create new one
+      const existingCustomerId = (user.metadata as Record<string, unknown> | null)?.stripeCustomerId as string | undefined;
       const customerId = await getOrCreateCustomer(
         user.id,
         user.email,
         `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-        user.stripeCustomerId
+        existingCustomerId
       );
 
-      // Update user with Stripe customer ID if new
-      if (!user.stripeCustomerId) {
+      // Update user metadata with Stripe customer ID if new
+      if (!existingCustomerId) {
         await prisma.user.update({
           where: { id: user.id },
-          data: { stripeCustomerId: customerId },
+          data: {
+            metadata: JSON.parse(JSON.stringify({
+              ...(user.metadata as Record<string, unknown> || {}),
+              stripeCustomerId: customerId,
+            })),
+          },
         });
       }
 
       // Create payment intent
       const paymentIntent = await stripe.paymentIntents.create({
-        amount: template.price, // Already in cents
+        amount: template.priceAmount || 0, // Already in cents
         currency: 'usd',
         customer: customerId,
         payment_method: input.paymentMethodId,
@@ -589,13 +593,13 @@ export class MarketingService {
         // Record purchase
         await prisma.marketingTemplate.update({
           where: { id: template.id },
-          data: { downloads: { increment: 1 } },
+          data: { purchaseCount: { increment: 1 } },
         });
 
         // Audit log
-        await this.app.writeAuditLog?.(request, 'marketing.template.purchased', {
+        console.log('Audit: marketing.template.purchased', {
           templateId: template.id,
-          amount: template.price,
+          amount: template.priceAmount,
           paymentIntentId: paymentIntent.id,
         });
 

@@ -518,7 +518,7 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
     const updated = await prisma.budget.update({
       where: { id },
       data: {
-        status: 'approved',
+        // Keep status as draft until activated; approval is tracked via approvedBy/approvedAt
         approvedBy: userId,
         approvedAt: new Date(),
       },
@@ -537,7 +537,7 @@ export async function budgetRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ success: false, error: 'Budget not found' });
     }
 
-    if (budget.status !== 'approved') {
+    if (!budget.approvedAt) {
       return reply.status(400).send({ success: false, error: 'Budget must be approved first' });
     }
 

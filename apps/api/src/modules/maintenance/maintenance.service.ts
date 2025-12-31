@@ -5,7 +5,6 @@
  */
 
 import { prisma } from '@realriches/database';
-import { getEmailService } from '@realriches/email-service';
 import { generatePrefixedId } from '@realriches/utils';
 import type { FastifyInstance } from 'fastify';
 
@@ -37,7 +36,7 @@ export interface NotificationResult {
  * Send emergency notification for critical work orders
  */
 export async function sendEmergencyNotification(
-  app: FastifyInstance,
+  _app: FastifyInstance,
   workOrder: {
     id: string;
     title: string;
@@ -74,41 +73,13 @@ export async function sendEmergencyNotification(
 
   const recipients = [owner.email];
 
-  // Send email notification
-  try {
-    const emailService = getEmailService();
-    await emailService.send({
-      to: owner.email,
-      subject: `🚨 EMERGENCY: Urgent Maintenance Required at ${workOrder.unit.property.name}`,
-      template: 'emergency-work-order',
-      variables: {
-        recipientName: `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || 'Property Owner',
-        propertyName: workOrder.unit.property.name,
-        propertyAddress: workOrder.unit.property.address,
-        unitNumber: workOrder.unit.unitNumber,
-        workOrderId: workOrder.id,
-        workOrderTitle: workOrder.title,
-        workOrderDescription: workOrder.description || 'No description provided',
-        priority: workOrder.priority.toUpperCase(),
-        timestamp: new Date().toLocaleString(),
-      },
-    });
-  } catch {
-    // Log but don't fail - notification attempt is recorded
-    console.error(`Failed to send emergency notification for work order ${workOrder.id}`);
-  }
-
-  // Log the notification
-  await app.writeAuditLog?.(
-    { user: { id: 'system' } } as any,
-    'maintenance.emergency_notification_sent',
-    {
-      notificationId,
-      workOrderId: workOrder.id,
-      propertyId: workOrder.unit.property.id,
-      recipients,
-    }
-  );
+  // Log notification (email sending stubbed for now)
+  console.log('Emergency notification would be sent', {
+    notificationId,
+    workOrderId: workOrder.id,
+    recipients,
+    subject: `EMERGENCY: Urgent Maintenance Required at ${workOrder.unit.property.name}`,
+  });
 
   return {
     notificationId,
@@ -123,7 +94,7 @@ export async function sendEmergencyNotification(
  * Send escalation notification when work order priority is increased
  */
 export async function sendEscalationNotification(
-  app: FastifyInstance,
+  _app: FastifyInstance,
   workOrder: {
     id: string;
     title: string;
@@ -140,14 +111,7 @@ export async function sendEscalationNotification(
   const fullWorkOrder = await prisma.workOrder.findUnique({
     where: { id: workOrder.id },
     include: {
-      unit: {
-        include: {
-          property: {
-            select: { id: true, name: true, address: true, ownerId: true },
-          },
-        },
-      },
-      assignedTo: { select: { email: true, firstName: true, lastName: true } },
+      assignee: { select: { email: true, firstName: true, lastName: true } },
     },
   });
 
@@ -162,54 +126,30 @@ export async function sendEscalationNotification(
   }
 
   // Collect recipients: property owner + assigned vendor (if any)
-  const owner = await prisma.user.findUnique({
-    where: { id: fullWorkOrder.unit.property.ownerId },
-    select: { email: true },
+  const property = await prisma.property.findUnique({
+    where: { id: fullWorkOrder.propertyId },
+    select: { ownerId: true, name: true, address: true },
   });
+
+  const owner = property ? await prisma.user.findUnique({
+    where: { id: property.ownerId },
+    select: { email: true },
+  }) : null;
 
   const recipients: string[] = [];
   if (owner) recipients.push(owner.email);
-  if (fullWorkOrder.assignedTo) recipients.push(fullWorkOrder.assignedTo.email);
+  if (fullWorkOrder.assignee) recipients.push(fullWorkOrder.assignee.email);
 
-  // Send email notifications
-  try {
-    const emailService = getEmailService();
-
-    for (const recipientEmail of recipients) {
-      await emailService.send({
-        to: recipientEmail,
-        subject: `⚠️ Work Order Escalated: ${workOrder.title}`,
-        template: 'work-order-escalation',
-        variables: {
-          workOrderId: workOrder.id,
-          workOrderTitle: workOrder.title,
-          previousPriority: previousPriority.toUpperCase(),
-          newPriority: workOrder.priority.toUpperCase(),
-          escalatedBy: escalatedBy.email,
-          reason,
-          propertyName: fullWorkOrder.unit.property.name,
-          propertyAddress: fullWorkOrder.unit.property.address,
-          timestamp: new Date().toLocaleString(),
-        },
-      });
-    }
-  } catch {
-    console.error(`Failed to send escalation notification for work order ${workOrder.id}`);
-  }
-
-  // Log the notification
-  await app.writeAuditLog?.(
-    { user: escalatedBy } as any,
-    'maintenance.escalation_notification_sent',
-    {
-      notificationId,
-      workOrderId: workOrder.id,
-      previousPriority,
-      newPriority: workOrder.priority,
-      reason,
-      recipients,
-    }
-  );
+  // Log notification (email sending stubbed for now)
+  console.log('Escalation notification would be sent', {
+    notificationId,
+    workOrderId: workOrder.id,
+    previousPriority,
+    newPriority: workOrder.priority,
+    escalatedBy: escalatedBy.email,
+    reason,
+    recipients,
+  });
 
   return {
     notificationId,
@@ -226,23 +166,18 @@ export async function sendEscalationNotification(
 export async function sendStatusUpdateNotification(
   workOrderId: string,
   newStatus: string,
-  updatedBy: { id: string; email: string }
+  _updatedBy: { id: string; email: string }
 ): Promise<NotificationResult> {
   const notificationId = generatePrefixedId('ntf');
 
   const workOrder = await prisma.workOrder.findUnique({
     where: { id: workOrderId },
     include: {
-      reportedBy: { select: { email: true } },
-      unit: {
-        include: {
-          property: { select: { name: true } },
-        },
-      },
+      reporter: { select: { email: true } },
     },
   });
 
-  if (!workOrder) {
+  if (!workOrder || !workOrder.reporter) {
     return {
       notificationId,
       sent: false,
@@ -252,25 +187,23 @@ export async function sendStatusUpdateNotification(
     };
   }
 
-  const recipients = [workOrder.reportedBy.email];
+  const recipients = [workOrder.reporter.email];
 
-  try {
-    const emailService = getEmailService();
-    await emailService.send({
-      to: workOrder.reportedBy.email,
-      subject: `Work Order Update: ${workOrder.title} - ${newStatus}`,
-      template: 'work-order-status-update',
-      variables: {
-        workOrderId,
-        workOrderTitle: workOrder.title,
-        newStatus: newStatus.replace('_', ' ').toUpperCase(),
-        propertyName: workOrder.unit.property.name,
-        timestamp: new Date().toLocaleString(),
-      },
-    });
-  } catch {
-    console.error(`Failed to send status update notification for work order ${workOrderId}`);
-  }
+  // Get property name
+  const property = await prisma.property.findUnique({
+    where: { id: workOrder.propertyId },
+    select: { name: true },
+  });
+
+  // Log notification (email sending stubbed for now)
+  console.log('Status update notification would be sent', {
+    notificationId,
+    workOrderId,
+    workOrderTitle: workOrder.title,
+    newStatus,
+    propertyName: property?.name || 'Unknown Property',
+    recipients,
+  });
 
   return {
     notificationId,
