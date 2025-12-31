@@ -9,6 +9,7 @@ import type { Redis } from 'ioredis';
 
 import { EmailNotificationJob } from './email-notification';
 import { LeaseRenewalJob } from './lease-renewal';
+import { PartnerHealthJob } from './partner-health';
 import { PaymentReminderJob } from './payment-reminder';
 import { PolicyExpirationJob } from './policy-expiration';
 import { JobScheduler } from './scheduler';
@@ -24,8 +25,9 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
     return scheduler;
   }
 
-  // Initialize email service for email notification job
+  // Initialize services that jobs depend on
   EmailNotificationJob.initializeEmailService(redis);
+  PartnerHealthJob.initializeRedis(redis);
 
   // Create scheduler with Redis connection
   scheduler = new JobScheduler({
@@ -39,6 +41,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   scheduler.register(PaymentReminderJob.getDefinition());
   scheduler.register(LeaseRenewalJob.getDefinition());
   scheduler.register(EmailNotificationJob.getDefinition());
+  scheduler.register(PartnerHealthJob.getDefinition());
 
   // Start the scheduler
   await scheduler.start();
