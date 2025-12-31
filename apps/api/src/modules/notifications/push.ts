@@ -5,6 +5,7 @@
  * Supports device registration, notification sending, and delivery tracking.
  */
 
+import { randomUUID } from 'crypto';
 import {
   prisma,
   Prisma,
@@ -289,10 +290,7 @@ async function seedDefaultTemplates(): Promise<void> {
     });
     if (!existing) {
       await prisma.pushNotificationTemplate.create({
-        data: {
-          id: generatePrefixedId('tpl'),
-          ...template,
-        },
+        data: template,
       });
     }
   }
@@ -413,7 +411,6 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
 
       const device = await prisma.deviceRegistration.create({
         data: {
-          id: generatePrefixedId('dev'),
           userId: request.user.id,
           platform: data.platform as PrismaDevicePlatform,
           provider: providerName,
@@ -579,7 +576,7 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
       const results: Array<{ deviceId: string; status: DeliveryStatus; messageId?: string; error?: string }> = [];
 
       for (const device of targetDevices) {
-        const notificationId = generatePrefixedId('psh');
+        const notificationId = randomUUID();
         const payload: PushNotificationPayload = {
           id: notificationId,
           userId: device.userId,
@@ -713,7 +710,7 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
       const templateData = template.data as Record<string, string> | null;
 
       for (const device of targetDevices) {
-        const notificationId = generatePrefixedId('psh');
+        const notificationId = randomUUID();
         const payload: PushNotificationPayload = {
           id: notificationId,
           userId: device.userId,
@@ -825,7 +822,7 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
         const tokens = devices.map(d => d.deviceToken);
 
         const payload: PushNotificationPayload = {
-          id: generatePrefixedId('psh'),
+          id: randomUUID(),
           userId: 'broadcast',
           title,
           body,
@@ -1036,7 +1033,7 @@ export async function sendPushToUser(
   let failed = 0;
 
   for (const device of devices) {
-    const notificationId = generatePrefixedId('psh');
+    const notificationId = randomUUID();
     const payload: PushNotificationPayload = {
       id: notificationId,
       userId,

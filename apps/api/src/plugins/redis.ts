@@ -13,11 +13,20 @@ declare module 'fastify' {
 const redisPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
   const config = getConfig();
 
+  // Debug: log Redis config
+  logger.info({
+    url: config.redis.url,
+    tls: config.redis.tls,
+    tlsType: typeof config.redis.tls,
+  }, 'Redis config');
+
   const enableTls = config.redis.tls === true;
   const redis = new Redis(config.redis.url, {
     password: config.redis.password || undefined,
-    ...(enableTls && { tls: {} }),
+    tls: enableTls ? {} : undefined,
     maxRetriesPerRequest: 3,
+    lazyConnect: false,
+    enableReadyCheck: true,
     retryStrategy: (times) => {
       if (times > 5) {
         logger.error('Redis connection failed after 5 retries');

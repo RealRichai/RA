@@ -20,10 +20,16 @@ const DatabaseConfigSchema = z.object({
   ssl: z.coerce.boolean().default(false),
 });
 
+// Helper to properly parse boolean from env vars (handles "false", "0", etc.)
+const envBoolean = z.union([
+  z.boolean(),
+  z.string().transform(val => val.toLowerCase() === 'true' || val === '1'),
+]).default(false);
+
 const RedisConfigSchema = z.object({
   url: z.string(),
   password: z.string().optional(),
-  tls: z.coerce.boolean().default(false),
+  tls: envBoolean,
 });
 
 const JWTConfigSchema = z.object({
