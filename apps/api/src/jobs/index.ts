@@ -8,6 +8,7 @@
 export { AnalyticsAggregationJob } from './analytics-aggregation';
 export { ComplianceAuditJob } from './compliance-audit';
 export { DataCleanupJob } from './data-cleanup';
+export { DocumentExpirationJob } from './document-expiration';
 export { EmailNotificationJob } from './email-notification';
 export { JobScheduler, type JobSchedulerConfig } from './scheduler';
 export { LeaseRenewalJob } from './lease-renewal';

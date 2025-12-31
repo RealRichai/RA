@@ -10,6 +10,7 @@ import type { Redis } from 'ioredis';
 import { AnalyticsAggregationJob } from './analytics-aggregation';
 import { ComplianceAuditJob } from './compliance-audit';
 import { DataCleanupJob } from './data-cleanup';
+import { DocumentExpirationJob } from './document-expiration';
 import { EmailNotificationJob } from './email-notification';
 import { LeaseRenewalJob } from './lease-renewal';
 import { PartnerHealthJob } from './partner-health';
@@ -36,6 +37,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   DataCleanupJob.initializeRedis(redis);
   AnalyticsAggregationJob.initializeRedis(redis);
   ComplianceAuditJob.initializeRedis(redis);
+  DocumentExpirationJob.initializeRedis(redis);
 
   // Create scheduler with Redis connection
   scheduler = new JobScheduler({
@@ -54,6 +56,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   scheduler.register(DataCleanupJob.getDefinition());
   scheduler.register(AnalyticsAggregationJob.getDefinition());
   scheduler.register(ComplianceAuditJob.getDefinition());
+  scheduler.register(DocumentExpirationJob.getDefinition());
 
   // Start the scheduler
   await scheduler.start();

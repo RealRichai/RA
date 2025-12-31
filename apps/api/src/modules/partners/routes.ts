@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { AnalyticsAggregationJob } from '../../jobs/analytics-aggregation';
 import { ComplianceAuditJob } from '../../jobs/compliance-audit';
 import { DataCleanupJob } from '../../jobs/data-cleanup';
+import { DocumentExpirationJob } from '../../jobs/document-expiration';
 import { PartnerHealthJob } from '../../jobs/partner-health';
 import { WebhookRetryJob } from '../../jobs/webhook-retry';
 
@@ -1223,6 +1224,173 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
           violationCount: result.violations.length,
           violations: result.violations,
           passed: result.violations.length === 0,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/documents/expiring/stats - Get document expiration statistics
+  // =========================================================================
+  app.get(
+    '/admin/documents/expiring/stats',
+    {
+      schema: {
+        description: 'Get document expiration statistics',
+        tags: ['Admin', 'Documents'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const stats = await DocumentExpirationJob.getExpirationStats();
+
+      return reply.send({
+        success: true,
+        data: stats,
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/documents/expiring - List expiring documents
+  // =========================================================================
+  app.get(
+    '/admin/documents/expiring',
+    {
+      schema: {
+        description: 'List documents expiring within threshold',
+        tags: ['Admin', 'Documents'],
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            daysThreshold: { type: 'integer', default: 30 },
+            documentType: { type: 'string' },
+            limit: { type: 'integer', default: 50 },
+            offset: { type: 'integer', default: 0 },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{
+        Querystring: {
+          daysThreshold?: number;
+          documentType?: string;
+          limit?: number;
+          offset?: number;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      const { daysThreshold = 30, documentType, limit = 50, offset = 0 } = request.query;
+
+      const result = await DocumentExpirationJob.getExpiringDocumentsList({
+        daysThreshold,
+        documentType,
+        limit,
+        offset,
+      });
+
+      return reply.send({
+        success: true,
+        data: result,
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/documents/expired - List expired documents
+  // =========================================================================
+  app.get(
+    '/admin/documents/expired',
+    {
+      schema: {
+        description: 'List expired documents',
+        tags: ['Admin', 'Documents'],
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            documentType: { type: 'string' },
+            limit: { type: 'integer', default: 50 },
+            offset: { type: 'integer', default: 0 },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{
+        Querystring: {
+          documentType?: string;
+          limit?: number;
+          offset?: number;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      const { documentType, limit = 50, offset = 0 } = request.query;
+
+      const result = await DocumentExpirationJob.getExpiredDocuments({
+        documentType,
+        limit,
+        offset,
+      });
+
+      return reply.send({
+        success: true,
+        data: result,
+      });
+    }
+  );
+
+  // =========================================================================
+  // POST /admin/documents/:documentId/reminder - Send renewal reminder
+  // =========================================================================
+  app.post(
+    '/admin/documents/:documentId/reminder',
+    {
+      schema: {
+        description: 'Send a renewal reminder for a specific document',
+        tags: ['Admin', 'Documents'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['documentId'],
+          properties: {
+            documentId: { type: 'string' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { documentId: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { documentId } = request.params;
+
+      const result = await DocumentExpirationJob.sendRenewalReminder(documentId);
+
+      if (!result.success) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'DOCUMENT_NOT_FOUND',
+            message: result.error || `Document not found: ${documentId}`,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          message: 'Renewal reminder sent',
+          documentId,
+          notificationsSent: result.notificationsSent,
         },
       });
     }
