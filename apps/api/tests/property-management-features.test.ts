@@ -38,6 +38,56 @@ import {
   type TemplateClause,
 } from '../src/modules/leases/templates';
 
+// Portfolio Dashboard imports
+import {
+  properties as portfolioProperties,
+  occupancyHistory,
+  revenueHistory,
+  calculateNOI,
+  calculateCapRate,
+  calculateCashOnCash,
+  calculateLTV,
+  calculateTrend,
+} from '../src/modules/portfolio/routes';
+
+// Applicant Screening imports
+import {
+  applications,
+  screeningCriteria,
+  calculateApplicantScore,
+  determineRiskLevel,
+  generateRiskFactors,
+  generateMockCreditReport,
+  generateMockCriminalReport,
+  generateMockEvictionReport,
+  type Applicant,
+  type ScreeningCriteria,
+} from '../src/modules/screening/routes';
+
+// Communication Hub imports
+import {
+  threads,
+  messages,
+  smsMessages,
+  templates as messageTemplates,
+  broadcasts,
+  extractVariables,
+  interpolateTemplate,
+  truncatePreview,
+} from '../src/modules/communications/routes';
+
+// Insurance Tracking imports
+import {
+  policies,
+  certificates,
+  claims,
+  alerts,
+  daysUntil,
+  createExpirationAlert,
+  analyzeCoverage,
+  type InsurancePolicy,
+} from '../src/modules/insurance/routes';
+
 describe('Automated Rent Collection', () => {
   beforeEach(() => {
     schedules.clear();
@@ -1126,6 +1176,1416 @@ describe('Lease Templates', () => {
       const lease = generatedLeases.get('gen-1');
       expect(lease?.status).toBe('draft');
       expect(lease?.clauses.length).toBe(2);
+    });
+  });
+});
+
+describe('Portfolio Dashboard', () => {
+  describe('Financial Calculations', () => {
+    describe('calculateNOI', () => {
+      it('should calculate net operating income', () => {
+        expect(calculateNOI(10000, 4000)).toBe(6000);
+        expect(calculateNOI(50000, 20000)).toBe(30000);
+      });
+
+      it('should handle zero values', () => {
+        expect(calculateNOI(0, 0)).toBe(0);
+        expect(calculateNOI(10000, 0)).toBe(10000);
+      });
+
+      it('should handle negative NOI', () => {
+        expect(calculateNOI(5000, 8000)).toBe(-3000);
+      });
+    });
+
+    describe('calculateCapRate', () => {
+      it('should calculate cap rate as percentage', () => {
+        // NOI of $50,000/month = $600,000/year, property value $10M = 6% cap rate
+        const capRate = calculateCapRate(50000, 10000000);
+        expect(capRate).toBe(6);
+      });
+
+      it('should handle zero property value', () => {
+        expect(calculateCapRate(50000, 0)).toBe(0);
+      });
+
+      it('should handle high cap rates', () => {
+        const capRate = calculateCapRate(100000, 1000000);
+        expect(capRate).toBe(120); // 100k * 12 / 1M * 100 = 120%
+      });
+    });
+
+    describe('calculateCashOnCash', () => {
+      it('should calculate cash on cash return', () => {
+        // $50,000 annual cash flow / $500,000 investment = 10%
+        const coc = calculateCashOnCash(50000, 500000);
+        expect(coc).toBe(10);
+      });
+
+      it('should handle zero investment', () => {
+        expect(calculateCashOnCash(50000, 0)).toBe(0);
+      });
+
+      it('should handle negative cash flow', () => {
+        const coc = calculateCashOnCash(-10000, 500000);
+        expect(coc).toBe(-2);
+      });
+    });
+
+    describe('calculateLTV', () => {
+      it('should calculate loan to value ratio', () => {
+        // $800,000 debt / $1,000,000 value = 80%
+        expect(calculateLTV(800000, 1000000)).toBe(80);
+      });
+
+      it('should handle zero property value', () => {
+        expect(calculateLTV(500000, 0)).toBe(0);
+      });
+
+      it('should handle no debt', () => {
+        expect(calculateLTV(0, 1000000)).toBe(0);
+      });
+
+      it('should handle over-leveraged properties', () => {
+        expect(calculateLTV(1200000, 1000000)).toBe(120);
+      });
+    });
+
+    describe('calculateTrend', () => {
+      it('should identify upward trend', () => {
+        expect(calculateTrend(100, 90)).toBe('up');
+        expect(calculateTrend(50000, 45000)).toBe('up');
+      });
+
+      it('should identify downward trend', () => {
+        expect(calculateTrend(90, 100)).toBe('down');
+        expect(calculateTrend(45000, 50000)).toBe('down');
+      });
+
+      it('should identify flat trend for minimal changes', () => {
+        expect(calculateTrend(100, 100)).toBe('flat');
+        expect(calculateTrend(100.005, 100)).toBe('flat');
+      });
+    });
+  });
+
+  describe('Portfolio Data', () => {
+    it('should have initial mock properties', () => {
+      expect(portfolioProperties.size).toBeGreaterThan(0);
+    });
+
+    it('should have occupancy history for properties', () => {
+      expect(occupancyHistory.size).toBeGreaterThan(0);
+      const firstHistory = Array.from(occupancyHistory.values())[0];
+      expect(firstHistory.length).toBe(12);
+    });
+
+    it('should have revenue history for properties', () => {
+      expect(revenueHistory.size).toBeGreaterThan(0);
+      const firstHistory = Array.from(revenueHistory.values())[0];
+      expect(firstHistory.length).toBe(12);
+    });
+
+    it('should calculate property-level metrics', () => {
+      const props = Array.from(portfolioProperties.values());
+      const prop = props[0];
+
+      expect(prop.propertyId).toBeDefined();
+      expect(prop.units).toBeGreaterThan(0);
+      expect(prop.occupiedUnits).toBeLessThanOrEqual(prop.units);
+      expect(prop.occupancyRate).toBeGreaterThan(0);
+      expect(prop.noi).toBeDefined();
+      expect(prop.capRate).toBeDefined();
+    });
+  });
+
+  describe('Portfolio Aggregation', () => {
+    it('should aggregate across properties', () => {
+      const props = Array.from(portfolioProperties.values());
+      const totalUnits = props.reduce((sum, p) => sum + p.units, 0);
+      const occupiedUnits = props.reduce((sum, p) => sum + p.occupiedUnits, 0);
+      const totalValue = props.reduce((sum, p) => sum + p.value, 0);
+
+      expect(totalUnits).toBeGreaterThan(0);
+      expect(occupiedUnits).toBeLessThanOrEqual(totalUnits);
+      expect(totalValue).toBeGreaterThan(0);
+    });
+
+    it('should calculate portfolio-level occupancy', () => {
+      const props = Array.from(portfolioProperties.values());
+      const totalUnits = props.reduce((sum, p) => sum + p.units, 0);
+      const occupiedUnits = props.reduce((sum, p) => sum + p.occupiedUnits, 0);
+      const occupancyRate = (occupiedUnits / totalUnits) * 100;
+
+      expect(occupancyRate).toBeGreaterThan(0);
+      expect(occupancyRate).toBeLessThanOrEqual(100);
+    });
+  });
+});
+
+describe('Applicant Screening', () => {
+  beforeEach(() => {
+    applications.clear();
+  });
+
+  describe('Mock Report Generation', () => {
+    describe('generateMockCreditReport', () => {
+      it('should generate valid credit report', () => {
+        const report = generateMockCreditReport();
+
+        expect(report.creditScore).toBeGreaterThanOrEqual(300);
+        expect(report.creditScore).toBeLessThanOrEqual(850);
+        expect(report.scoreRange.min).toBe(300);
+        expect(report.scoreRange.max).toBe(850);
+        expect(report.scoreRating).toBeDefined();
+        expect(report.tradelines).toBeDefined();
+        expect(report.paymentHistory).toBeDefined();
+      });
+
+      it('should assign correct score rating', () => {
+        for (let i = 0; i < 10; i++) {
+          const report = generateMockCreditReport();
+          if (report.creditScore >= 750) expect(report.scoreRating).toBe('excellent');
+          else if (report.creditScore >= 700) expect(report.scoreRating).toBe('good');
+          else if (report.creditScore >= 650) expect(report.scoreRating).toBe('fair');
+          else if (report.creditScore >= 550) expect(report.scoreRating).toBe('poor');
+          else expect(report.scoreRating).toBe('very_poor');
+        }
+      });
+
+      it('should include tradelines', () => {
+        const report = generateMockCreditReport();
+        expect(report.tradelines.length).toBeGreaterThan(0);
+        expect(report.tradelines[0].creditor).toBeDefined();
+        expect(report.tradelines[0].balance).toBeDefined();
+      });
+    });
+
+    describe('generateMockCriminalReport', () => {
+      it('should generate valid criminal report', () => {
+        const report = generateMockCriminalReport();
+
+        expect(typeof report.hasRecords).toBe('boolean');
+        expect(report.sexOffenderCheck).toBe(false);
+        expect(report.terroristWatchlist).toBe(false);
+      });
+
+      it('should have records array matching hasRecords flag', () => {
+        for (let i = 0; i < 20; i++) {
+          const report = generateMockCriminalReport();
+          if (report.hasRecords) {
+            expect(report.records.length).toBeGreaterThan(0);
+          } else {
+            expect(report.records.length).toBe(0);
+          }
+        }
+      });
+    });
+
+    describe('generateMockEvictionReport', () => {
+      it('should generate valid eviction report', () => {
+        const report = generateMockEvictionReport();
+
+        expect(typeof report.hasEvictions).toBe('boolean');
+        expect(Array.isArray(report.evictions)).toBe(true);
+      });
+
+      it('should have evictions array matching hasEvictions flag', () => {
+        for (let i = 0; i < 20; i++) {
+          const report = generateMockEvictionReport();
+          if (report.hasEvictions) {
+            expect(report.evictions.length).toBeGreaterThan(0);
+          } else {
+            expect(report.evictions.length).toBe(0);
+          }
+        }
+      });
+    });
+  });
+
+  describe('Scoring and Risk Assessment', () => {
+    const defaultCriteria: ScreeningCriteria = {
+      id: 'test',
+      name: 'Test Criteria',
+      propertyId: null,
+      isDefault: true,
+      minCreditScore: 650,
+      maxDebtToIncomeRatio: 43,
+      minIncomeToRentRatio: 3,
+      maxLatePayments: 3,
+      maxCollections: 2,
+      allowBankruptcy: false,
+      bankruptcyLookbackYears: 7,
+      allowEvictions: false,
+      evictionLookbackYears: 7,
+      allowFelonies: false,
+      felonyLookbackYears: 7,
+      allowMisdemeanors: true,
+      misdemeanorLookbackYears: 3,
+      requireEmploymentVerification: true,
+      requireIncomeVerification: true,
+      requireRentalHistory: true,
+      minRentalHistoryMonths: 12,
+    };
+
+    describe('determineRiskLevel', () => {
+      it('should classify low risk for high scores', () => {
+        expect(determineRiskLevel(80)).toBe('low');
+        expect(determineRiskLevel(90)).toBe('low');
+        expect(determineRiskLevel(100)).toBe('low');
+      });
+
+      it('should classify medium risk for moderate scores', () => {
+        expect(determineRiskLevel(60)).toBe('medium');
+        expect(determineRiskLevel(70)).toBe('medium');
+        expect(determineRiskLevel(79)).toBe('medium');
+      });
+
+      it('should classify high risk for low scores', () => {
+        expect(determineRiskLevel(40)).toBe('high');
+        expect(determineRiskLevel(50)).toBe('high');
+        expect(determineRiskLevel(59)).toBe('high');
+      });
+
+      it('should classify very high risk for very low scores', () => {
+        expect(determineRiskLevel(0)).toBe('very_high');
+        expect(determineRiskLevel(20)).toBe('very_high');
+        expect(determineRiskLevel(39)).toBe('very_high');
+      });
+    });
+
+    describe('generateRiskFactors', () => {
+      it('should identify low credit score as risk factor', () => {
+        const applicant: Partial<Applicant> = {
+          screeningReports: [{
+            id: 'r1',
+            applicantId: 'a1',
+            type: 'credit',
+            provider: 'mock',
+            status: 'completed',
+            requestedAt: new Date(),
+            completedAt: new Date(),
+            expiresAt: null,
+            score: 580,
+            data: {
+              creditScore: 580,
+              scoreRange: { min: 300, max: 850 },
+              scoreRating: 'poor',
+              tradelines: [],
+              collections: [],
+              publicRecords: [],
+              inquiries: [],
+              totalDebt: 0,
+              availableCredit: 0,
+              creditUtilization: 0,
+              oldestAccount: null,
+              paymentHistory: { onTime: 90, late: 10, percentage: 90 },
+            },
+            riskFactors: [],
+            recommendations: [],
+          }],
+          incomeInfo: {
+            annualIncome: 72000,
+            monthlyIncome: 6000,
+            incomeSources: [],
+            incomeToRentRatio: 3,
+            verified: false,
+            verificationMethod: null,
+            verificationDate: null,
+          },
+          rentalHistory: [],
+        };
+
+        const factors = generateRiskFactors(applicant as Applicant, defaultCriteria);
+        expect(factors.some((f) => f.includes('Credit score'))).toBe(true);
+      });
+
+      it('should identify low income ratio as risk factor', () => {
+        const applicant: Partial<Applicant> = {
+          screeningReports: [],
+          incomeInfo: {
+            annualIncome: 36000,
+            monthlyIncome: 3000,
+            incomeSources: [],
+            incomeToRentRatio: 1.5,
+            verified: false,
+            verificationMethod: null,
+            verificationDate: null,
+          },
+          rentalHistory: [],
+        };
+
+        const factors = generateRiskFactors(applicant as Applicant, defaultCriteria);
+        expect(factors.some((f) => f.includes('Income to rent ratio'))).toBe(true);
+      });
+    });
+  });
+
+  describe('Screening Criteria', () => {
+    it('should have default screening criteria', () => {
+      expect(screeningCriteria.size).toBeGreaterThan(0);
+      const defaultC = screeningCriteria.get('default');
+      expect(defaultC).toBeDefined();
+      expect(defaultC?.isDefault).toBe(true);
+    });
+
+    it('should have reasonable default values', () => {
+      const defaultC = screeningCriteria.get('default');
+      expect(defaultC?.minCreditScore).toBeGreaterThanOrEqual(500);
+      expect(defaultC?.minCreditScore).toBeLessThanOrEqual(750);
+      expect(defaultC?.minIncomeToRentRatio).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('Application Management', () => {
+    it('should store applications', () => {
+      const now = new Date();
+      applications.set('app-1', {
+        id: 'app-1',
+        propertyId: 'prop-1',
+        unitId: 'unit-1',
+        listingId: null,
+        status: 'pending',
+        applicants: [],
+        desiredMoveIn: now,
+        desiredLeaseTerm: 12,
+        monthlyRent: 2000,
+        applicationFee: 50,
+        applicationFeePaid: false,
+        screeningConsent: true,
+        screeningConsentDate: now,
+        overallScore: null,
+        riskLevel: null,
+        decision: null,
+        notes: [],
+        createdAt: now,
+        updatedAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+      });
+
+      expect(applications.size).toBe(1);
+      const app = applications.get('app-1');
+      expect(app?.status).toBe('pending');
+    });
+
+    it('should track application status transitions', () => {
+      const now = new Date();
+      const app = {
+        id: 'app-2',
+        propertyId: 'prop-1',
+        unitId: null,
+        listingId: null,
+        status: 'pending' as const,
+        applicants: [],
+        desiredMoveIn: now,
+        desiredLeaseTerm: 12,
+        monthlyRent: 2000,
+        applicationFee: 50,
+        applicationFeePaid: true,
+        screeningConsent: true,
+        screeningConsentDate: now,
+        overallScore: null,
+        riskLevel: null,
+        decision: null,
+        notes: [],
+        createdAt: now,
+        updatedAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+      };
+
+      applications.set(app.id, app);
+      expect(applications.get(app.id)?.status).toBe('pending');
+
+      // Transition to screening
+      app.status = 'screening';
+      applications.set(app.id, app);
+      expect(applications.get(app.id)?.status).toBe('screening');
+
+      // Transition to review
+      app.status = 'review';
+      app.overallScore = 75;
+      app.riskLevel = 'medium';
+      applications.set(app.id, app);
+      expect(applications.get(app.id)?.overallScore).toBe(75);
+    });
+  });
+});
+
+describe('Communication Hub', () => {
+  beforeEach(() => {
+    threads.clear();
+    messages.clear();
+    smsMessages.clear();
+    broadcasts.clear();
+  });
+
+  describe('Template Variable Extraction', () => {
+    describe('extractVariables', () => {
+      it('should extract simple variables', () => {
+        const template = 'Hello {{name}}, your rent is {{amount}}.';
+        const vars = extractVariables(template);
+
+        expect(vars).toContain('name');
+        expect(vars).toContain('amount');
+        expect(vars.length).toBe(2);
+      });
+
+      it('should extract unique variables only', () => {
+        const template = '{{name}} is great. Hello {{name}}, welcome {{name}}!';
+        const vars = extractVariables(template);
+
+        expect(vars).toContain('name');
+        expect(vars.length).toBe(1);
+      });
+
+      it('should return empty array for no variables', () => {
+        const template = 'Hello, this is a static message.';
+        const vars = extractVariables(template);
+
+        expect(vars.length).toBe(0);
+      });
+
+      it('should handle complex templates', () => {
+        const template = 'Dear {{tenant_name}}, your rent of {{amount}} is due on {{due_date}}. Property: {{property_name}}.';
+        const vars = extractVariables(template);
+
+        expect(vars).toContain('tenant_name');
+        expect(vars).toContain('amount');
+        expect(vars).toContain('due_date');
+        expect(vars).toContain('property_name');
+        expect(vars.length).toBe(4);
+      });
+    });
+
+    describe('interpolateTemplate', () => {
+      it('should replace variables with values', () => {
+        const template = 'Hello {{name}}, your balance is {{balance}}.';
+        const variables = { name: 'John', balance: '$500' };
+
+        const result = interpolateTemplate(template, variables);
+
+        expect(result).toBe('Hello John, your balance is $500.');
+      });
+
+      it('should replace multiple occurrences', () => {
+        const template = '{{name}} is here. Welcome {{name}}!';
+        const variables = { name: 'Alice' };
+
+        const result = interpolateTemplate(template, variables);
+
+        expect(result).toBe('Alice is here. Welcome Alice!');
+      });
+
+      it('should leave unmatched variables as-is', () => {
+        const template = 'Hello {{name}}, {{missing}} is not replaced.';
+        const variables = { name: 'Bob' };
+
+        const result = interpolateTemplate(template, variables);
+
+        expect(result).toBe('Hello Bob, {{missing}} is not replaced.');
+      });
+
+      it('should handle empty variables object', () => {
+        const template = 'Static {{content}} here.';
+        const result = interpolateTemplate(template, {});
+
+        expect(result).toBe('Static {{content}} here.');
+      });
+    });
+  });
+
+  describe('Message Preview', () => {
+    describe('truncatePreview', () => {
+      it('should return short text unchanged', () => {
+        expect(truncatePreview('Hello', 100)).toBe('Hello');
+        expect(truncatePreview('Short message', 100)).toBe('Short message');
+      });
+
+      it('should truncate long text with ellipsis', () => {
+        const longText = 'This is a very long message that should be truncated because it exceeds the maximum length allowed for preview.';
+        const result = truncatePreview(longText, 50);
+
+        expect(result.length).toBe(50);
+        expect(result.endsWith('...')).toBe(true);
+      });
+
+      it('should handle exact length text', () => {
+        const text = 'Exactly 10';
+        expect(truncatePreview(text, 10)).toBe('Exactly 10');
+      });
+
+      it('should use default max length', () => {
+        const longText = 'A'.repeat(150);
+        const result = truncatePreview(longText);
+
+        expect(result.length).toBe(100);
+        expect(result.endsWith('...')).toBe(true);
+      });
+    });
+  });
+
+  describe('Thread Management', () => {
+    it('should create message thread', () => {
+      const now = new Date();
+      threads.set('thread-1', {
+        id: 'thread-1',
+        propertyId: 'prop-1',
+        unitId: 'unit-1',
+        subject: 'Maintenance Request',
+        participants: [
+          { id: 'p1', type: 'tenant', name: 'John Doe', email: 'john@example.com', phone: null, userId: null },
+          { id: 'p2', type: 'staff', name: 'Property Manager', email: 'pm@example.com', phone: null, userId: 'user-1' },
+        ],
+        status: 'open',
+        priority: 'normal',
+        labels: ['maintenance'],
+        assignedTo: 'user-1',
+        lastMessageAt: now,
+        messageCount: 0,
+        unreadCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      expect(threads.size).toBe(1);
+      const thread = threads.get('thread-1');
+      expect(thread?.subject).toBe('Maintenance Request');
+      expect(thread?.participants.length).toBe(2);
+    });
+
+    it('should track thread status changes', () => {
+      const now = new Date();
+      const thread = {
+        id: 'thread-2',
+        propertyId: null,
+        unitId: null,
+        subject: 'Question',
+        participants: [],
+        status: 'open' as const,
+        priority: 'normal' as const,
+        labels: [],
+        assignedTo: null,
+        lastMessageAt: now,
+        messageCount: 1,
+        unreadCount: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      threads.set(thread.id, thread);
+      expect(threads.get(thread.id)?.status).toBe('open');
+
+      thread.status = 'pending';
+      threads.set(thread.id, thread);
+      expect(threads.get(thread.id)?.status).toBe('pending');
+
+      thread.status = 'resolved';
+      threads.set(thread.id, thread);
+      expect(threads.get(thread.id)?.status).toBe('resolved');
+    });
+  });
+
+  describe('SMS Messages', () => {
+    it('should store SMS message', () => {
+      const now = new Date();
+      smsMessages.set('sms-1', {
+        id: 'sms-1',
+        to: '+15551234567',
+        from: '+15559876543',
+        body: 'Your rent is due tomorrow.',
+        status: 'sent',
+        direction: 'outbound',
+        provider: 'mock',
+        providerMessageId: 'msg_123',
+        segments: 1,
+        sentAt: now,
+        deliveredAt: null,
+        failureReason: null,
+        cost: 0.0075,
+        createdAt: now,
+      });
+
+      const sms = smsMessages.get('sms-1');
+      expect(sms?.body).toBe('Your rent is due tomorrow.');
+      expect(sms?.segments).toBe(1);
+    });
+
+    it('should calculate SMS segments correctly', () => {
+      const shortMessage = 'Hello!';
+      const longMessage = 'A'.repeat(200);
+
+      // 160 chars per segment
+      expect(Math.ceil(shortMessage.length / 160)).toBe(1);
+      expect(Math.ceil(longMessage.length / 160)).toBe(2);
+    });
+  });
+
+  describe('Message Templates', () => {
+    it('should have default templates', () => {
+      expect(messageTemplates.size).toBeGreaterThan(0);
+    });
+
+    it('should have payment category templates', () => {
+      const paymentTemplates = Array.from(messageTemplates.values()).filter(
+        (t) => t.category === 'payment'
+      );
+      expect(paymentTemplates.length).toBeGreaterThan(0);
+    });
+
+    it('should have templates with variables', () => {
+      const templatesWithVars = Array.from(messageTemplates.values()).filter(
+        (t) => t.variables.length > 0
+      );
+      expect(templatesWithVars.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Broadcast Messages', () => {
+    it('should create broadcast with recipients', () => {
+      const now = new Date();
+      broadcasts.set('broadcast-1', {
+        id: 'broadcast-1',
+        name: 'Rent Reminder',
+        templateId: null,
+        channel: 'sms',
+        subject: null,
+        body: 'Rent is due on the 1st.',
+        recipients: [
+          { id: 'r1', type: 'tenant', name: 'John', email: null, phone: '+15551111111', status: 'queued', sentAt: null, error: null },
+          { id: 'r2', type: 'tenant', name: 'Jane', email: null, phone: '+15552222222', status: 'queued', sentAt: null, error: null },
+        ],
+        filters: {},
+        status: 'draft',
+        scheduledAt: null,
+        sentAt: null,
+        stats: {
+          totalRecipients: 2,
+          sent: 0,
+          delivered: 0,
+          failed: 0,
+          opened: 0,
+          clicked: 0,
+        },
+        createdById: 'user-1',
+        createdAt: now,
+      });
+
+      const broadcast = broadcasts.get('broadcast-1');
+      expect(broadcast?.recipients.length).toBe(2);
+      expect(broadcast?.stats.totalRecipients).toBe(2);
+    });
+
+    it('should track broadcast status', () => {
+      const now = new Date();
+      const broadcast = {
+        id: 'broadcast-2',
+        name: 'Test',
+        templateId: null,
+        channel: 'email' as const,
+        subject: 'Test',
+        body: 'Test message',
+        recipients: [],
+        filters: {},
+        status: 'draft' as const,
+        scheduledAt: null,
+        sentAt: null,
+        stats: {
+          totalRecipients: 0,
+          sent: 0,
+          delivered: 0,
+          failed: 0,
+          opened: 0,
+          clicked: 0,
+        },
+        createdById: 'user-1',
+        createdAt: now,
+      };
+
+      broadcasts.set(broadcast.id, broadcast);
+      expect(broadcasts.get(broadcast.id)?.status).toBe('draft');
+
+      broadcast.status = 'scheduled';
+      broadcast.scheduledAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      broadcasts.set(broadcast.id, broadcast);
+      expect(broadcasts.get(broadcast.id)?.status).toBe('scheduled');
+    });
+  });
+});
+
+describe('Insurance Tracking', () => {
+  beforeEach(() => {
+    policies.clear();
+    certificates.clear();
+    claims.clear();
+    alerts.clear();
+  });
+
+  describe('Date Calculations', () => {
+    describe('daysUntil', () => {
+      it('should return positive days for future date', () => {
+        const futureDate = new Date();
+        futureDate.setDate(futureDate.getDate() + 30);
+
+        const days = daysUntil(futureDate);
+        expect(days).toBe(30);
+      });
+
+      it('should return negative days for past date', () => {
+        const pastDate = new Date();
+        pastDate.setDate(pastDate.getDate() - 10);
+
+        const days = daysUntil(pastDate);
+        expect(days).toBeLessThan(0);
+      });
+
+      it('should return 0 or 1 for today', () => {
+        const today = new Date();
+        const days = daysUntil(today);
+        expect(days).toBeLessThanOrEqual(1);
+        expect(days).toBeGreaterThanOrEqual(0);
+      });
+    });
+  });
+
+  describe('Expiration Alerts', () => {
+    describe('createExpirationAlert', () => {
+      it('should create critical alert for expired policy', () => {
+        const expiredPolicy: InsurancePolicy = {
+          id: 'pol-1',
+          propertyId: 'prop-1',
+          entityId: null,
+          entityType: 'property',
+          policyType: 'property',
+          policyNumber: 'POL-001',
+          carrier: 'ABC Insurance',
+          carrierContact: null,
+          status: 'active',
+          effectiveDate: new Date('2023-01-01'),
+          expirationDate: new Date('2023-12-31'),
+          premium: 5000,
+          premiumFrequency: 'annual',
+          deductible: 2500,
+          coverageAmount: 500000,
+          coverageDetails: [],
+          additionalInsured: [],
+          documents: [],
+          autoRenew: false,
+          renewalReminder: 30,
+          notes: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const alert = createExpirationAlert(expiredPolicy);
+
+        expect(alert).not.toBeNull();
+        expect(alert?.type).toBe('expiration');
+        expect(alert?.priority).toBe('critical');
+        expect(alert?.title).toBe('Policy Expired');
+      });
+
+      it('should create high priority alert for policy expiring within 7 days', () => {
+        const expirationDate = new Date();
+        expirationDate.setDate(expirationDate.getDate() + 5);
+
+        const policy: InsurancePolicy = {
+          id: 'pol-2',
+          propertyId: 'prop-1',
+          entityId: null,
+          entityType: 'property',
+          policyType: 'liability',
+          policyNumber: 'POL-002',
+          carrier: 'XYZ Insurance',
+          carrierContact: null,
+          status: 'active',
+          effectiveDate: new Date('2024-01-01'),
+          expirationDate,
+          premium: 3000,
+          premiumFrequency: 'annual',
+          deductible: 1000,
+          coverageAmount: 1000000,
+          coverageDetails: [],
+          additionalInsured: [],
+          documents: [],
+          autoRenew: false,
+          renewalReminder: 30,
+          notes: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const alert = createExpirationAlert(policy);
+
+        expect(alert).not.toBeNull();
+        expect(alert?.priority).toBe('high');
+        expect(alert?.title).toBe('Policy Expiring Soon');
+      });
+
+      it('should create medium priority alert for policy expiring within renewal reminder period', () => {
+        const expirationDate = new Date();
+        expirationDate.setDate(expirationDate.getDate() + 20);
+
+        const policy: InsurancePolicy = {
+          id: 'pol-3',
+          propertyId: 'prop-1',
+          entityId: null,
+          entityType: 'property',
+          policyType: 'property',
+          policyNumber: 'POL-003',
+          carrier: 'DEF Insurance',
+          carrierContact: null,
+          status: 'active',
+          effectiveDate: new Date('2024-01-01'),
+          expirationDate,
+          premium: 4000,
+          premiumFrequency: 'annual',
+          deductible: 2000,
+          coverageAmount: 750000,
+          coverageDetails: [],
+          additionalInsured: [],
+          documents: [],
+          autoRenew: false,
+          renewalReminder: 30,
+          notes: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const alert = createExpirationAlert(policy);
+
+        expect(alert).not.toBeNull();
+        expect(alert?.priority).toBe('medium');
+        expect(alert?.type).toBe('renewal');
+      });
+
+      it('should return null for policy not expiring soon', () => {
+        const expirationDate = new Date();
+        expirationDate.setDate(expirationDate.getDate() + 90);
+
+        const policy: InsurancePolicy = {
+          id: 'pol-4',
+          propertyId: 'prop-1',
+          entityId: null,
+          entityType: 'property',
+          policyType: 'property',
+          policyNumber: 'POL-004',
+          carrier: 'GHI Insurance',
+          carrierContact: null,
+          status: 'active',
+          effectiveDate: new Date('2024-01-01'),
+          expirationDate,
+          premium: 5000,
+          premiumFrequency: 'annual',
+          deductible: 2500,
+          coverageAmount: 1000000,
+          coverageDetails: [],
+          additionalInsured: [],
+          documents: [],
+          autoRenew: false,
+          renewalReminder: 30,
+          notes: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const alert = createExpirationAlert(policy);
+
+        expect(alert).toBeNull();
+      });
+    });
+  });
+
+  describe('Coverage Analysis', () => {
+    beforeEach(() => {
+      // Add test policies
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1);
+
+      policies.set('pol-test-1', {
+        id: 'pol-test-1',
+        propertyId: 'prop-coverage-test',
+        entityId: null,
+        entityType: 'property',
+        policyType: 'property',
+        policyNumber: 'POL-T1',
+        carrier: 'Test Insurance',
+        carrierContact: null,
+        status: 'active',
+        effectiveDate: new Date(),
+        expirationDate: futureDate,
+        premium: 5000,
+        premiumFrequency: 'annual',
+        deductible: 2500,
+        coverageAmount: 800000,
+        coverageDetails: [],
+        additionalInsured: [],
+        documents: [],
+        autoRenew: false,
+        renewalReminder: 30,
+        notes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      policies.set('pol-test-2', {
+        id: 'pol-test-2',
+        propertyId: 'prop-coverage-test',
+        entityId: null,
+        entityType: 'property',
+        policyType: 'liability',
+        policyNumber: 'POL-T2',
+        carrier: 'Test Insurance',
+        carrierContact: null,
+        status: 'active',
+        effectiveDate: new Date(),
+        expirationDate: futureDate,
+        premium: 3000,
+        premiumFrequency: 'annual',
+        deductible: 1000,
+        coverageAmount: 1000000,
+        coverageDetails: [],
+        additionalInsured: [],
+        documents: [],
+        autoRenew: false,
+        renewalReminder: 30,
+        notes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
+    describe('analyzeCoverage', () => {
+      it('should analyze coverage for property', () => {
+        const analysis = analyzeCoverage('prop-coverage-test', 1000000);
+
+        expect(analysis.propertyId).toBe('prop-coverage-test');
+        expect(analysis.propertyValue).toBe(1000000);
+        expect(analysis.policies.length).toBe(2);
+        expect(analysis.totalCoverage).toBe(1800000);
+      });
+
+      it('should calculate coverage ratio', () => {
+        const analysis = analyzeCoverage('prop-coverage-test', 1000000);
+
+        // 1,800,000 coverage / 1,000,000 value = 1.8
+        expect(analysis.coverageRatio).toBe(1.8);
+      });
+
+      it('should identify coverage gaps for underinsured property', () => {
+        // Clear existing policies
+        policies.clear();
+
+        // Add only partial property coverage (50% of value)
+        const futureDate = new Date();
+        futureDate.setFullYear(futureDate.getFullYear() + 1);
+
+        policies.set('pol-partial', {
+          id: 'pol-partial',
+          propertyId: 'prop-underinsured',
+          entityId: null,
+          entityType: 'property',
+          policyType: 'property',
+          policyNumber: 'POL-P1',
+          carrier: 'Test',
+          carrierContact: null,
+          status: 'active',
+          effectiveDate: new Date(),
+          expirationDate: futureDate,
+          premium: 2000,
+          premiumFrequency: 'annual',
+          deductible: 1000,
+          coverageAmount: 500000,
+          coverageDetails: [],
+          additionalInsured: [],
+          documents: [],
+          autoRenew: false,
+          renewalReminder: 30,
+          notes: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+
+        const analysis = analyzeCoverage('prop-underinsured', 1000000);
+
+        expect(analysis.gaps.length).toBeGreaterThan(0);
+        expect(analysis.gaps.some((g) => g.type === 'property')).toBe(true);
+        expect(analysis.gaps.some((g) => g.type === 'liability')).toBe(true);
+      });
+
+      it('should generate recommendations', () => {
+        const analysis = analyzeCoverage('prop-no-policies', 1000000);
+
+        expect(analysis.recommendations.length).toBeGreaterThan(0);
+        expect(analysis.recommendations.some((r) => r.includes('property insurance'))).toBe(true);
+      });
+
+      it('should recommend umbrella for high-value properties', () => {
+        // Clear and add policies for high-value property without umbrella
+        policies.clear();
+
+        const futureDate = new Date();
+        futureDate.setFullYear(futureDate.getFullYear() + 1);
+
+        policies.set('pol-hv-prop', {
+          id: 'pol-hv-prop',
+          propertyId: 'prop-high-value',
+          entityId: null,
+          entityType: 'property',
+          policyType: 'property',
+          policyNumber: 'POL-HV1',
+          carrier: 'Test',
+          carrierContact: null,
+          status: 'active',
+          effectiveDate: new Date(),
+          expirationDate: futureDate,
+          premium: 10000,
+          premiumFrequency: 'annual',
+          deductible: 5000,
+          coverageAmount: 2500000,
+          coverageDetails: [],
+          additionalInsured: [],
+          documents: [],
+          autoRenew: false,
+          renewalReminder: 30,
+          notes: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+
+        policies.set('pol-hv-liab', {
+          id: 'pol-hv-liab',
+          propertyId: 'prop-high-value',
+          entityId: null,
+          entityType: 'property',
+          policyType: 'liability',
+          policyNumber: 'POL-HV2',
+          carrier: 'Test',
+          carrierContact: null,
+          status: 'active',
+          effectiveDate: new Date(),
+          expirationDate: futureDate,
+          premium: 5000,
+          premiumFrequency: 'annual',
+          deductible: 2500,
+          coverageAmount: 2000000,
+          coverageDetails: [],
+          additionalInsured: [],
+          documents: [],
+          autoRenew: false,
+          renewalReminder: 30,
+          notes: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+
+        const analysis = analyzeCoverage('prop-high-value', 3000000);
+
+        expect(analysis.recommendations.some((r) => r.toLowerCase().includes('umbrella'))).toBe(true);
+      });
+    });
+  });
+
+  describe('Policy Management', () => {
+    it('should store policy', () => {
+      const now = new Date();
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1);
+
+      policies.set('pol-mgmt-1', {
+        id: 'pol-mgmt-1',
+        propertyId: 'prop-1',
+        entityId: null,
+        entityType: 'property',
+        policyType: 'property',
+        policyNumber: 'POL-2024-001',
+        carrier: 'Allstate',
+        carrierContact: {
+          name: 'Allstate Claims',
+          phone: '1-800-255-7828',
+          email: 'claims@allstate.com',
+          agentName: 'John Agent',
+          agentPhone: '555-1234',
+          agentEmail: 'john@allstate.com',
+          claimsPhone: '1-800-255-7828',
+        },
+        status: 'active',
+        effectiveDate: now,
+        expirationDate: futureDate,
+        premium: 4500,
+        premiumFrequency: 'annual',
+        deductible: 2500,
+        coverageAmount: 750000,
+        coverageDetails: [
+          { type: 'dwelling', description: 'Building coverage', limit: 750000, deductible: 2500, perOccurrence: false },
+          { type: 'contents', description: 'Personal property', limit: 100000, deductible: 1000, perOccurrence: false },
+        ],
+        additionalInsured: [],
+        documents: [],
+        autoRenew: true,
+        renewalReminder: 45,
+        notes: 'Primary property coverage',
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      expect(policies.size).toBe(1);
+      const policy = policies.get('pol-mgmt-1');
+      expect(policy?.carrier).toBe('Allstate');
+      expect(policy?.coverageDetails.length).toBe(2);
+    });
+  });
+
+  describe('Certificate Management', () => {
+    it('should store certificate', () => {
+      const now = new Date();
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1);
+
+      certificates.set('cert-1', {
+        id: 'cert-1',
+        policyId: 'pol-vendor',
+        vendorId: 'vendor-1',
+        tenantId: null,
+        holderName: "Bob's Plumbing",
+        holderType: 'vendor',
+        certificateNumber: 'CERT-2024-001',
+        policyType: 'liability',
+        carrier: 'Hartford',
+        policyNumber: 'HL-123456',
+        effectiveDate: now,
+        expirationDate: futureDate,
+        coverageAmount: 1000000,
+        additionalInsuredIncluded: true,
+        waiverOfSubrogation: true,
+        status: 'pending_verification',
+        documentUrl: 'https://example.com/cert.pdf',
+        verifiedAt: null,
+        verifiedBy: null,
+        rejectionReason: null,
+        notes: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      expect(certificates.size).toBe(1);
+      const cert = certificates.get('cert-1');
+      expect(cert?.status).toBe('pending_verification');
+      expect(cert?.additionalInsuredIncluded).toBe(true);
+    });
+
+    it('should track certificate verification', () => {
+      const now = new Date();
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1);
+
+      const cert = {
+        id: 'cert-2',
+        policyId: 'pol-vendor',
+        vendorId: 'vendor-2',
+        tenantId: null,
+        holderName: 'HVAC Pro',
+        holderType: 'vendor' as const,
+        certificateNumber: 'CERT-2024-002',
+        policyType: 'liability' as const,
+        carrier: 'State Farm',
+        policyNumber: 'SF-654321',
+        effectiveDate: now,
+        expirationDate: futureDate,
+        coverageAmount: 2000000,
+        additionalInsuredIncluded: true,
+        waiverOfSubrogation: false,
+        status: 'pending_verification' as const,
+        documentUrl: null,
+        verifiedAt: null,
+        verifiedBy: null,
+        rejectionReason: null,
+        notes: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      certificates.set(cert.id, cert);
+
+      // Verify the certificate
+      cert.status = 'valid';
+      cert.verifiedAt = now;
+      cert.verifiedBy = 'admin-1';
+      certificates.set(cert.id, cert);
+
+      expect(certificates.get(cert.id)?.status).toBe('valid');
+      expect(certificates.get(cert.id)?.verifiedAt).not.toBeNull();
+    });
+  });
+
+  describe('Claims Management', () => {
+    it('should create claim with timeline', () => {
+      const now = new Date();
+      const incidentDate = new Date();
+      incidentDate.setDate(incidentDate.getDate() - 3);
+
+      claims.set('claim-1', {
+        id: 'claim-1',
+        policyId: 'pol-1',
+        propertyId: 'prop-1',
+        claimNumber: 'CLM-2024-001',
+        incidentDate,
+        reportedDate: now,
+        description: 'Water damage from burst pipe in unit 2B',
+        claimType: 'water_damage',
+        status: 'reported',
+        estimatedAmount: 15000,
+        approvedAmount: null,
+        paidAmount: null,
+        deductibleApplied: null,
+        adjusterName: null,
+        adjusterPhone: null,
+        adjusterEmail: null,
+        documents: [],
+        timeline: [
+          { date: now, event: 'Claim Reported', description: 'Initial claim filed', userId: null },
+        ],
+        notes: null,
+        closedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const claim = claims.get('claim-1');
+      expect(claim?.status).toBe('reported');
+      expect(claim?.timeline.length).toBe(1);
+      expect(claim?.estimatedAmount).toBe(15000);
+    });
+
+    it('should track claim status progression', () => {
+      const now = new Date();
+      const claim = {
+        id: 'claim-2',
+        policyId: 'pol-1',
+        propertyId: null,
+        claimNumber: 'CLM-2024-002',
+        incidentDate: now,
+        reportedDate: now,
+        description: 'Fire damage',
+        claimType: 'fire',
+        status: 'reported' as const,
+        estimatedAmount: 50000,
+        approvedAmount: null,
+        paidAmount: null,
+        deductibleApplied: null,
+        adjusterName: null,
+        adjusterPhone: null,
+        adjusterEmail: null,
+        documents: [],
+        timeline: [{ date: now, event: 'Reported', description: 'Filed', userId: null }],
+        notes: null,
+        closedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      claims.set(claim.id, claim);
+
+      // Under review
+      claim.status = 'under_review';
+      claim.adjusterName = 'Jane Adjuster';
+      claim.timeline.push({ date: now, event: 'Under Review', description: 'Adjuster assigned', userId: null });
+      claims.set(claim.id, claim);
+      expect(claims.get(claim.id)?.status).toBe('under_review');
+
+      // Approved
+      claim.status = 'approved';
+      claim.approvedAmount = 45000;
+      claim.deductibleApplied = 2500;
+      claim.timeline.push({ date: now, event: 'Approved', description: 'Claim approved', userId: null });
+      claims.set(claim.id, claim);
+      expect(claims.get(claim.id)?.approvedAmount).toBe(45000);
+
+      // Paid
+      claim.status = 'paid';
+      claim.paidAmount = 42500;
+      claims.set(claim.id, claim);
+      expect(claims.get(claim.id)?.paidAmount).toBe(42500);
+    });
+  });
+
+  describe('Alert Management', () => {
+    it('should store and filter alerts', () => {
+      const now = new Date();
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 7);
+
+      alerts.set('alert-1', {
+        id: 'alert-1',
+        policyId: 'pol-1',
+        certificateId: null,
+        claimId: null,
+        type: 'expiration',
+        priority: 'high',
+        title: 'Policy Expiring Soon',
+        message: 'Property policy expires in 7 days',
+        dueDate,
+        acknowledgedAt: null,
+        acknowledgedBy: null,
+        resolvedAt: null,
+        createdAt: now,
+      });
+
+      alerts.set('alert-2', {
+        id: 'alert-2',
+        policyId: null,
+        certificateId: 'cert-1',
+        claimId: null,
+        type: 'certificate_expiring',
+        priority: 'medium',
+        title: 'Certificate Expiring',
+        message: 'Vendor certificate expires in 30 days',
+        dueDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+        acknowledgedAt: null,
+        acknowledgedBy: null,
+        resolvedAt: null,
+        createdAt: now,
+      });
+
+      expect(alerts.size).toBe(2);
+
+      const highPriorityAlerts = Array.from(alerts.values()).filter(
+        (a) => a.priority === 'high'
+      );
+      expect(highPriorityAlerts.length).toBe(1);
+
+      const unacknowledgedAlerts = Array.from(alerts.values()).filter(
+        (a) => !a.acknowledgedAt
+      );
+      expect(unacknowledgedAlerts.length).toBe(2);
+    });
+
+    it('should acknowledge alerts', () => {
+      const now = new Date();
+      const alert = {
+        id: 'alert-ack',
+        policyId: 'pol-1',
+        certificateId: null,
+        claimId: null,
+        type: 'renewal' as const,
+        priority: 'medium' as const,
+        title: 'Renewal Reminder',
+        message: 'Consider renewal options',
+        dueDate: null,
+        acknowledgedAt: null,
+        acknowledgedBy: null,
+        resolvedAt: null,
+        createdAt: now,
+      };
+
+      alerts.set(alert.id, alert);
+      expect(alerts.get(alert.id)?.acknowledgedAt).toBeNull();
+
+      alert.acknowledgedAt = now;
+      alert.acknowledgedBy = 'admin-1';
+      alerts.set(alert.id, alert);
+
+      expect(alerts.get(alert.id)?.acknowledgedAt).not.toBeNull();
+      expect(alerts.get(alert.id)?.acknowledgedBy).toBe('admin-1');
     });
   });
 });

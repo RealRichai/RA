@@ -22,11 +22,13 @@ import { mfaRoutes } from './auth/mfa';
 import { authRoutes } from './auth/routes';
 import { commerceRoutes } from './commerce/routes';
 import { commercialRoutes } from './commercial/routes';
+import { communicationRoutes } from './communications/routes';
 import { complianceRoutes } from './compliance/routes';
 import { esignatureRoutes } from './documents/esignature';
 import { documentRoutes } from './documents/routes';
 import { healthRoutes } from './health/routes';
 import { inspectionRoutes } from './inspections/routes';
+import { insuranceRoutes } from './insurance/routes';
 import { renewalRoutes } from './leases/renewals';
 import { leaseRoutes } from './leases/routes';
 import { leaseTemplateRoutes } from './leases/templates';
@@ -40,10 +42,12 @@ import { partnerRoutes } from './partners/routes';
 import { reconciliationRoutes } from './payments/reconciliation';
 import { rentCollectionRoutes } from './payments/rent-collection';
 import { paymentRoutes } from './payments/routes';
+import { portfolioRoutes } from './portfolio/routes';
 import { comparableRoutes } from './properties/comparables';
 import { propertyRoutes } from './properties/routes';
 import { websocketPlugin } from './realtime/websocket';
 import { reportRoutes } from './reports/routes';
+import { screeningRoutes } from './screening/routes';
 import { searchRoutes } from './search/routes';
 import { tenantPortalRoutes } from './tenant-portal/routes';
 import { userRoutes } from './users/routes';
@@ -100,6 +104,10 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(inspectionRoutes, { prefix: '/inspections' });
       await api.register(vendorRoutes, { prefix: '/vendors' });
       await api.register(leaseTemplateRoutes, { prefix: '/lease-templates' });
+      await api.register(portfolioRoutes, { prefix: '/portfolio' });
+      await api.register(screeningRoutes, { prefix: '/screening' });
+      await api.register(communicationRoutes, { prefix: '/communications' });
+      await api.register(insuranceRoutes, { prefix: '/insurance' });
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
