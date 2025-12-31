@@ -13,6 +13,7 @@ import { PartnerHealthJob } from './partner-health';
 import { PaymentReminderJob } from './payment-reminder';
 import { PolicyExpirationJob } from './policy-expiration';
 import { JobScheduler } from './scheduler';
+import { WebhookRetryJob } from './webhook-retry';
 
 let scheduler: JobScheduler | null = null;
 
@@ -28,6 +29,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   // Initialize services that jobs depend on
   EmailNotificationJob.initializeEmailService(redis);
   PartnerHealthJob.initializeRedis(redis);
+  WebhookRetryJob.initializeRedis(redis);
 
   // Create scheduler with Redis connection
   scheduler = new JobScheduler({
@@ -42,6 +44,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   scheduler.register(LeaseRenewalJob.getDefinition());
   scheduler.register(EmailNotificationJob.getDefinition());
   scheduler.register(PartnerHealthJob.getDefinition());
+  scheduler.register(WebhookRetryJob.getDefinition());
 
   // Start the scheduler
   await scheduler.start();

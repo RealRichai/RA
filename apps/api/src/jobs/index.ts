@@ -12,3 +12,4 @@ export { PartnerHealthJob } from './partner-health';
 export { PaymentReminderJob } from './payment-reminder';
 export { PolicyExpirationJob } from './policy-expiration';
 export { setupJobs } from './setup';
+export { WebhookRetryJob } from './webhook-retry';
