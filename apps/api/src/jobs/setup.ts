@@ -7,6 +7,7 @@
 import { logger } from '@realriches/utils';
 import type { Redis } from 'ioredis';
 
+import { EmailNotificationJob } from './email-notification';
 import { LeaseRenewalJob } from './lease-renewal';
 import { PaymentReminderJob } from './payment-reminder';
 import { PolicyExpirationJob } from './policy-expiration';
@@ -23,6 +24,9 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
     return scheduler;
   }
 
+  // Initialize email service for email notification job
+  EmailNotificationJob.initializeEmailService(redis);
+
   // Create scheduler with Redis connection
   scheduler = new JobScheduler({
     connection: redis,
@@ -34,6 +38,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   scheduler.register(PolicyExpirationJob.getDefinition());
   scheduler.register(PaymentReminderJob.getDefinition());
   scheduler.register(LeaseRenewalJob.getDefinition());
+  scheduler.register(EmailNotificationJob.getDefinition());
 
   // Start the scheduler
   await scheduler.start();
