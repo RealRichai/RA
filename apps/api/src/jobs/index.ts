@@ -5,6 +5,7 @@
  * Jobs are scheduled with cron patterns for recurring execution.
  */
 
+export { AnalyticsAggregationJob } from './analytics-aggregation';
 export { DataCleanupJob } from './data-cleanup';
 export { EmailNotificationJob } from './email-notification';
 export { JobScheduler, type JobSchedulerConfig } from './scheduler';

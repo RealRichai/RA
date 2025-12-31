@@ -16,6 +16,7 @@ import { ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import { AnalyticsAggregationJob } from '../../jobs/analytics-aggregation';
 import { DataCleanupJob } from '../../jobs/data-cleanup';
 import { PartnerHealthJob } from '../../jobs/partner-health';
 import { WebhookRetryJob } from '../../jobs/webhook-retry';
@@ -821,6 +822,250 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
           table,
           deleted: result.deleted,
           durationMs: result.duration,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/analytics/latest - Get latest aggregated metrics
+  // =========================================================================
+  app.get(
+    '/admin/analytics/latest',
+    {
+      schema: {
+        description: 'Get latest aggregated analytics metrics',
+        tags: ['Admin', 'Analytics'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const metrics = await AnalyticsAggregationJob.getLatestMetrics();
+
+      if (!metrics) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'NO_METRICS',
+            message: 'No aggregated metrics available yet',
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: metrics,
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/analytics/daily/:date - Get metrics for a specific date
+  // =========================================================================
+  app.get(
+    '/admin/analytics/daily/:date',
+    {
+      schema: {
+        description: 'Get aggregated metrics for a specific date',
+        tags: ['Admin', 'Analytics'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['date'],
+          properties: {
+            date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { date: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { date } = request.params;
+      const metrics = await AnalyticsAggregationJob.getMetricsForDate(date);
+
+      if (!metrics) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'NO_METRICS',
+            message: `No metrics found for date: ${date}`,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: metrics,
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/analytics/range - Get metrics for a date range
+  // =========================================================================
+  app.get(
+    '/admin/analytics/range',
+    {
+      schema: {
+        description: 'Get aggregated metrics for a date range',
+        tags: ['Admin', 'Analytics'],
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          required: ['startDate', 'endDate'],
+          properties: {
+            startDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+            endDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Querystring: { startDate: string; endDate: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { startDate, endDate } = request.query;
+      const metrics = await AnalyticsAggregationJob.getMetricsRange(startDate, endDate);
+
+      return reply.send({
+        success: true,
+        data: {
+          period: { startDate, endDate },
+          count: metrics.length,
+          metrics,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/analytics/weekly/:weekStart - Get weekly metrics
+  // =========================================================================
+  app.get(
+    '/admin/analytics/weekly/:weekStart',
+    {
+      schema: {
+        description: 'Get weekly aggregated metrics',
+        tags: ['Admin', 'Analytics'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['weekStart'],
+          properties: {
+            weekStart: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { weekStart: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { weekStart } = request.params;
+      const metrics = await AnalyticsAggregationJob.getWeeklyMetrics(weekStart);
+
+      if (!metrics) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'NO_METRICS',
+            message: `No weekly metrics found for week starting: ${weekStart}`,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: metrics,
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/analytics/monthly/:yearMonth - Get monthly metrics
+  // =========================================================================
+  app.get(
+    '/admin/analytics/monthly/:yearMonth',
+    {
+      schema: {
+        description: 'Get monthly aggregated metrics',
+        tags: ['Admin', 'Analytics'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['yearMonth'],
+          properties: {
+            yearMonth: { type: 'string', pattern: '^\\d{4}-\\d{2}$' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { yearMonth: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { yearMonth } = request.params;
+      const metrics = await AnalyticsAggregationJob.getMonthlyMetrics(yearMonth);
+
+      if (!metrics) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'NO_METRICS',
+            message: `No monthly metrics found for: ${yearMonth}`,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: metrics,
+      });
+    }
+  );
+
+  // =========================================================================
+  // POST /admin/analytics/aggregate/:date - Manually trigger aggregation
+  // =========================================================================
+  app.post(
+    '/admin/analytics/aggregate/:date',
+    {
+      schema: {
+        description: 'Manually trigger analytics aggregation for a specific date',
+        tags: ['Admin', 'Analytics'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['date'],
+          properties: {
+            date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { date: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { date } = request.params;
+      const startTime = Date.now();
+
+      const metrics = await AnalyticsAggregationJob.aggregateDate(date);
+
+      return reply.send({
+        success: true,
+        data: {
+          date,
+          metrics,
+          durationMs: Date.now() - startTime,
         },
       });
     }
