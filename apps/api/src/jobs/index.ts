@@ -6,5 +6,6 @@
  */
 
 export { JobScheduler, type JobSchedulerConfig } from './scheduler';
+export { PaymentReminderJob } from './payment-reminder';
 export { PolicyExpirationJob } from './policy-expiration';
 export { setupJobs } from './setup';

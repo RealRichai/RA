@@ -7,6 +7,7 @@
 import { logger } from '@realriches/utils';
 import type { Redis } from 'ioredis';
 
+import { PaymentReminderJob } from './payment-reminder';
 import { PolicyExpirationJob } from './policy-expiration';
 import { JobScheduler } from './scheduler';
 
@@ -30,6 +31,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
 
   // Register all jobs
   scheduler.register(PolicyExpirationJob.getDefinition());
+  scheduler.register(PaymentReminderJob.getDefinition());
 
   // Start the scheduler
   await scheduler.start();
