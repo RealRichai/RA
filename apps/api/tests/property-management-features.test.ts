@@ -1,36 +1,230 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-// Import stores for cleanup
+// ============================================================================
+// MOCK STORES FOR TESTING
+// These replace the in-memory Maps that were migrated to Prisma
+// ============================================================================
+
+// Rent Collection stores
+const schedules = new Map<string, unknown>();
+const charges = new Map<string, unknown>();
+const paymentMethods = new Map<string, unknown>();
+
+// Inspection stores
+const inspections = new Map<string, unknown>();
+const inspectionTemplates = new Map<string, unknown>();
+
+// Vendor stores
+const vendors = new Map<string, unknown>();
+const workOrders = new Map<string, unknown>();
+const invoices = new Map<string, unknown>();
+const ratings = new Map<string, unknown>();
+
+// Lease Template stores
+const leaseTemplates = new Map<string, unknown>();
+const clauses = new Map<string, unknown>();
+const generatedLeases = new Map<string, unknown>();
+
+// Portfolio stores
+const portfolioProperties = new Map<string, unknown>();
+const occupancyHistory = new Map<string, unknown>();
+const revenueHistory = new Map<string, unknown>();
+
+// Screening stores
+const applications = new Map<string, unknown>();
+const screeningCriteria = new Map<string, unknown>();
+
+// Communication stores
+const threads = new Map<string, unknown>();
+const messages = new Map<string, unknown>();
+const smsMessages = new Map<string, unknown>();
+const messageTemplates = new Map<string, unknown>();
+const broadcasts = new Map<string, unknown>();
+
+// Insurance stores
+const policies = new Map<string, unknown>();
+const certificates = new Map<string, unknown>();
+const claims = new Map<string, unknown>();
+const alerts = new Map<string, unknown>();
+
+// Utility stores
+const utilityProviders = new Map<string, unknown>();
+const utilityAccounts = new Map<string, unknown>();
+const utilityBills = new Map<string, unknown>();
+const rubsConfigs = new Map<string, unknown>();
+
+// Owner Portal stores
+const owners = new Map<string, unknown>();
+const ownerships = new Map<string, unknown>();
+const ownerStatements = new Map<string, unknown>();
+const distributions = new Map<string, unknown>();
+
+// Budget stores
+const budgets = new Map<string, unknown>();
+const budgetActuals = new Map<string, unknown>();
+const forecasts = new Map<string, unknown>();
+const capExItems = new Map<string, unknown>();
+
+// Showing stores
+const showings = new Map<string, unknown>();
+const prospects = new Map<string, unknown>();
+const showingAgents = new Map<string, unknown>();
+const listingAvailability = new Map<string, unknown>();
+
+// Move Workflow stores
+const workflows = new Map<string, unknown>();
+const checklistTemplates = new Map<string, unknown>();
+const checklistItems = new Map<string, unknown>();
+const conditionReports = new Map<string, unknown>();
+const keyRecords = new Map<string, unknown>();
+const depositRecords = new Map<string, unknown>();
+const depositDeductions = new Map<string, unknown>();
+const utilityTransfers = new Map<string, unknown>();
+
+// HOA stores
+const associations = new Map<string, unknown>();
+const hoaAssessments = new Map<string, unknown>();
+const violations = new Map<string, unknown>();
+const architecturalRequests = new Map<string, unknown>();
+const boardMeetings = new Map<string, unknown>();
+const associationDocuments = new Map<string, unknown>();
+
+// Tax Document stores
+const taxYears = new Map<string, unknown>();
+const taxRecipients = new Map<string, unknown>();
+const taxDocuments = new Map<string, unknown>();
+const taxPayments = new Map<string, unknown>();
+const ownerTaxPackets = new Map<string, unknown>();
+const depreciationItems = new Map<string, unknown>();
+
+// Rental Assistance stores
+const assistancePrograms = new Map<string, unknown>();
+const assistanceApplications = new Map<string, unknown>();
+const vouchers = new Map<string, unknown>();
+const assistanceInspections = new Map<string, unknown>();
+const assistancePayments = new Map<string, unknown>();
+const landlordCertifications = new Map<string, unknown>();
+const complianceReports = new Map<string, unknown>();
+
+// Amenity stores
+const amenityStore = new Map<string, unknown>();
+const amenityReservations = new Map<string, unknown>();
+const amenityWaitlists = new Map<string, unknown>();
+const amenityRecurringBookings = new Map<string, unknown>();
+const amenityUsageLogs = new Map<string, unknown>();
+
+// Package stores
+const packageLockers = new Map<string, unknown>();
+const packageStore = new Map<string, unknown>();
+const packagePickupLogs = new Map<string, unknown>();
+const packageProxyAuthorizations = new Map<string, unknown>();
+const packageForwardingAddresses = new Map<string, unknown>();
+
+// Pet stores
+const petStore = new Map<string, unknown>();
+const petBreedRestrictions = new Map<string, unknown>();
+const petPolicyStore = new Map<string, unknown>();
+const petVaccinationRecords = new Map<string, unknown>();
+const petIncidentStore = new Map<string, unknown>();
+const petScreeningStore = new Map<string, unknown>();
+const petFeeStore = new Map<string, unknown>();
+
+// Parking stores
+const parkingLotStore = new Map<string, unknown>();
+const parkingSpaceStore = new Map<string, unknown>();
+const vehicleStore = new Map<string, unknown>();
+const parkingPermitStore = new Map<string, unknown>();
+const guestPassStore = new Map<string, unknown>();
+const parkingViolationStore = new Map<string, unknown>();
+const towRecordStore = new Map<string, unknown>();
+
+// Storage stores
+const storageUnits = new Map<string, unknown>();
+const storageRentals = new Map<string, unknown>();
+const storagePayments = new Map<string, unknown>();
+const storageAccessLogs = new Map<string, unknown>();
+const storageWaitlists = new Map<string, unknown>();
+const storagePromotions = new Map<string, unknown>();
+const lienAuctions = new Map<string, unknown>();
+
+// Key & Access stores
+const physicalKeys = new Map<string, unknown>();
+const accessDevices = new Map<string, unknown>();
+const accessZones = new Map<string, unknown>();
+const accessPoints = new Map<string, unknown>();
+const keyAssignments = new Map<string, unknown>();
+const accessAuditLogs = new Map<string, unknown>();
+const lockoutEvents = new Map<string, unknown>();
+const keyRequests = new Map<string, unknown>();
+const temporaryAccesses = new Map<string, unknown>();
+
+// Building Systems stores
+const buildingSystems = new Map<string, unknown>();
+const systemSensors = new Map<string, unknown>();
+const sensorReadings = new Map<string, unknown>();
+const systemAlerts = new Map<string, unknown>();
+const maintenanceSchedules = new Map<string, unknown>();
+const energyUsages = new Map<string, unknown>();
+const systemDowntimes = new Map<string, unknown>();
+const alertRules = new Map<string, unknown>();
+
+// Common Area stores
+const commonAreas = new Map<string, unknown>();
+const areaReservations = new Map<string, unknown>();
+const areaWaitlists = new Map<string, unknown>();
+const areaIncidents = new Map<string, unknown>();
+const areaRatings = new Map<string, unknown>();
+const communityEvents = new Map<string, unknown>();
+
+// Guest stores
+const guestPassStore2 = new Map<string, unknown>();
+const guestCheckIns = new Map<string, unknown>();
+const guestParkingSpots = new Map<string, unknown>();
+const guestPolicies = new Map<string, unknown>();
+const guestIncidents = new Map<string, unknown>();
+const guestNotifications = new Map<string, unknown>();
+
+// Violation stores
+const leaseViolations = new Map<string, unknown>();
+const violationNotices = new Map<string, unknown>();
+const violationFines = new Map<string, unknown>();
+const violationHearings = new Map<string, unknown>();
+const violationTemplates = new Map<string, unknown>();
+const violationPolicies = new Map<string, unknown>();
+
+// Rent Roll stores
+const rentRollEntries = new Map<string, unknown>();
+const rentRollSnapshots = new Map<string, unknown>();
+const scheduledReports = new Map<string, unknown>();
+const reportExecutions = new Map<string, unknown>();
+const rentRollChanges = new Map<string, unknown>();
+
+// Property Comparison stores
+const propertyMetrics = new Map<string, unknown>();
+const comparisonReports = new Map<string, unknown>();
+const benchmarks = new Map<string, unknown>();
+const savedComparisons = new Map<string, unknown>();
+
+// ============================================================================
+// FUNCTION & TYPE IMPORTS FROM MODULES
+// ============================================================================
+
 import {
-  schedules,
-  charges,
-  paymentMethods,
   calculateLateFee,
   calculateNextChargeDate,
   type LateFeeConfig,
 } from '../src/modules/payments/rent-collection';
 
 import {
-  inspections,
-  templates as inspectionTemplates,
   calculateOverallCondition,
   generateSummary,
   type InspectionItem,
   type InspectionRoom,
 } from '../src/modules/inspections/routes';
 
-import {
-  vendors,
-  workOrders,
-  invoices,
-  ratings,
-  findBestVendor,
-} from '../src/modules/vendors/routes';
+import { findBestVendor } from '../src/modules/vendors/routes';
 
 import {
-  templates as leaseTemplates,
-  clauses,
-  generatedLeases,
   interpolateVariables,
   evaluateCondition,
   shouldIncludeClause,
@@ -40,9 +234,6 @@ import {
 
 // Portfolio Dashboard imports
 import {
-  properties as portfolioProperties,
-  occupancyHistory,
-  revenueHistory,
   calculateNOI,
   calculateCapRate,
   calculateCashOnCash,
@@ -52,8 +243,6 @@ import {
 
 // Applicant Screening imports
 import {
-  applications,
-  screeningCriteria,
   calculateApplicantScore,
   determineRiskLevel,
   generateRiskFactors,
@@ -66,11 +255,6 @@ import {
 
 // Communication Hub imports
 import {
-  threads,
-  messages,
-  smsMessages,
-  templates as messageTemplates,
-  broadcasts,
   extractVariables,
   interpolateTemplate,
   truncatePreview,
@@ -78,10 +262,6 @@ import {
 
 // Insurance Tracking imports
 import {
-  policies,
-  certificates,
-  claims,
-  alerts,
   daysUntil,
   createExpirationAlert,
   analyzeCoverage,
@@ -90,10 +270,6 @@ import {
 
 // Utility Management imports
 import {
-  providers as utilityProviders,
-  accounts as utilityAccounts,
-  bills as utilityBills,
-  rubsConfigs,
   calculateRUBSAllocation,
   calculateUsage,
   estimateMonthlyAverage,
@@ -103,10 +279,6 @@ import {
 
 // Owner Portal imports
 import {
-  owners,
-  ownerships,
-  statements as ownerStatements,
-  distributions,
   calculateIncome,
   calculateExpenses,
   calculateStatementSummary,
@@ -116,10 +288,6 @@ import {
 
 // Budget & Forecasting imports
 import {
-  budgets,
-  budgetActuals,
-  forecasts,
-  capExItems,
   calculateVariance,
   getVarianceStatus,
   distributeAnnualToMonths,
@@ -131,10 +299,6 @@ import {
 
 // Showing Scheduler imports
 import {
-  showings,
-  prospects,
-  agents as showingAgents,
-  listingAvailability,
   generateTimeSlots,
   getDayOfWeek,
   timeToMinutes,
@@ -146,14 +310,6 @@ import {
 
 // Move-In/Move-Out Workflow imports
 import {
-  workflows,
-  checklistTemplates,
-  checklistItems,
-  conditionReports,
-  keyRecords,
-  depositRecords,
-  depositDeductions,
-  utilityTransfers,
   calculateDepositRefund,
   generateChecklistFromTemplate,
   calculateWorkflowProgress,
@@ -165,12 +321,6 @@ import {
 
 // HOA/COA Management imports
 import {
-  associations,
-  assessments as hoaAssessments,
-  violations,
-  architecturalRequests,
-  boardMeetings,
-  associationDocuments,
   calculateAssessmentSchedule,
   calculateLateFee as calculateHOALateFee,
   getViolationEscalationLevel,
@@ -180,12 +330,6 @@ import {
 
 // Tax Document Management imports
 import {
-  taxYears,
-  taxRecipients,
-  taxDocuments,
-  taxPayments,
-  ownerTaxPackets,
-  depreciationItems,
   calculateReportablePayments,
   determineFormType,
   calculateStraightLineDepreciation,
@@ -196,13 +340,6 @@ import {
 
 // Rental Assistance imports
 import {
-  programs as assistancePrograms,
-  applications as assistanceApplications,
-  vouchers,
-  inspections as assistanceInspections,
-  assistancePayments,
-  landlordCertifications,
-  complianceReports,
   calculateHAPPayment,
   isInspectionDue,
   calculateInspectionPassRate,
@@ -212,22 +349,10 @@ import {
 } from '../src/modules/rental-assistance/routes';
 
 // Amenity Booking imports
-import {
-  amenities as amenityStore,
-  reservations as amenityReservations,
-  waitlists as amenityWaitlists,
-  recurringBookings as amenityRecurringBookings,
-  usageLogs as amenityUsageLogs,
-  generateConfirmationCode as generateAmenityConfirmationCode,
-} from '../src/modules/amenities/routes';
+import { generateConfirmationCode as generateAmenityConfirmationCode } from '../src/modules/amenities/routes';
 
 // Package Tracking imports
 import {
-  lockers as packageLockers,
-  packages as packageStore,
-  pickupLogs as packagePickupLogs,
-  proxyAuthorizations as packageProxyAuthorizations,
-  forwardingAddresses as packageForwardingAddresses,
   generateAccessCode,
   findAvailableLocker,
   isPackageOverdue,
@@ -240,13 +365,6 @@ import {
 
 // Pet Management imports
 import {
-  pets as petStore,
-  breedRestrictions as petBreedRestrictions,
-  petPolicies as petPolicyStore,
-  vaccinationRecords as petVaccinationRecords,
-  petIncidents as petIncidentStore,
-  petScreenings as petScreeningStore,
-  petFees as petFeeStore,
   checkBreedRestriction,
   validatePetAgainstPolicy,
   calculatePetFees,
@@ -262,13 +380,6 @@ import {
 
 // Parking Management imports
 import {
-  parkingLots as parkingLotStore,
-  parkingSpaces as parkingSpaceStore,
-  vehicles as vehicleStore,
-  parkingPermits as parkingPermitStore,
-  guestPasses as guestPassStore,
-  parkingViolations as parkingViolationStore,
-  towRecords as towRecordStore,
   generatePermitNumber,
   generatePassCode,
   getLotOccupancy,
@@ -289,13 +400,6 @@ import {
 
 // Storage Unit Management imports
 import {
-  storageUnits,
-  storageRentals,
-  storagePayments,
-  storageAccessLogs,
-  storageWaitlists,
-  storagePromotions,
-  lienAuctions,
   generateAccessCode as generateStorageAccessCode,
   calculateSquareFeet,
   calculateCubicFeet,
@@ -311,15 +415,6 @@ import {
 
 // Key & Access Management imports
 import {
-  physicalKeys,
-  accessDevices,
-  accessZones,
-  accessPoints,
-  keyAssignments,
-  accessAuditLogs,
-  lockoutEvents,
-  keyRequests,
-  temporaryAccesses,
   generateKeyNumber,
   generateAccessCode as generateKeyAccessCode,
   generateDeviceId,
@@ -335,14 +430,6 @@ import {
 
 // Building Systems Monitoring imports
 import {
-  buildingSystems,
-  systemSensors,
-  sensorReadings,
-  systemAlerts,
-  maintenanceSchedules,
-  energyUsages,
-  systemDowntimes,
-  alertRules,
   checkThresholds,
   calculateSystemHealth,
   getMaintenanceSummary,
@@ -357,12 +444,6 @@ import {
 
 // Common Area Scheduling imports
 import {
-  commonAreas,
-  areaReservations,
-  areaWaitlists,
-  areaIncidents,
-  areaRatings,
-  communityEvents,
   generateConfirmationCode as generateAreaConfirmationCode,
   getOperatingHoursForDay,
   isTimeSlotAvailable,
@@ -378,12 +459,6 @@ import {
 
 // Guest Management imports
 import {
-  guestPasses as guestPassStore2,
-  guestCheckIns,
-  guestParkingSpots,
-  guestPolicies,
-  guestIncidents,
-  guestNotifications,
   generateAccessCode as generateGuestAccessCode,
   isPassValid,
   getAvailableParkingSpots,
@@ -398,12 +473,6 @@ import {
 
 // Lease Violation Tracking imports
 import {
-  leaseViolations,
-  violationNotices,
-  violationFines,
-  violationHearings,
-  violationTemplates,
-  violationPolicies,
   getViolationCount,
   calculateFine,
   shouldEscalate,
@@ -420,11 +489,6 @@ import {
 
 // Rent Roll Reporting imports
 import {
-  rentRollEntries,
-  rentRollSnapshots,
-  scheduledReports,
-  reportExecutions,
-  rentRollChanges,
   calculateSummary,
   getRentRollForProperty,
   getVacancyAnalysis,
@@ -442,10 +506,6 @@ import {
 
 // Property Comparison imports
 import {
-  propertyMetrics,
-  comparisonReports,
-  benchmarks,
-  savedComparisons,
   availableMetrics,
   getMetricDefinition,
   compareProperties,
