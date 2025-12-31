@@ -16,6 +16,9 @@ import { ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import { PartnerHealthJob } from '../../jobs/partner-health';
+import { WebhookRetryJob } from '../../jobs/webhook-retry';
+
 // =============================================================================
 // Request Schemas
 // =============================================================================
@@ -409,6 +412,331 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
           ledgerTransactionId: txnId,
           processed,
           errors: errors.length > 0 ? errors : undefined,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/partners/health - All partner health statuses
+  // =========================================================================
+  app.get(
+    '/admin/partners/health',
+    {
+      schema: {
+        description: 'Get health status for all partner integrations',
+        tags: ['Admin', 'Partners'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const statuses = await PartnerHealthJob.getAllHealthStatus();
+
+      // Calculate summary
+      const healthy = statuses.filter((s) => s.status === 'healthy').length;
+      const degraded = statuses.filter((s) => s.status === 'degraded').length;
+      const down = statuses.filter((s) => s.status === 'down').length;
+
+      return reply.send({
+        success: true,
+        data: {
+          summary: {
+            total: statuses.length,
+            healthy,
+            degraded,
+            down,
+          },
+          providers: statuses,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/partners/health/:providerId - Single provider health
+  // =========================================================================
+  app.get(
+    '/admin/partners/health/:providerId',
+    {
+      schema: {
+        description: 'Get health status for a specific partner',
+        tags: ['Admin', 'Partners'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['providerId'],
+          properties: {
+            providerId: { type: 'string' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { providerId: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { providerId } = request.params;
+      const status = await PartnerHealthJob.getHealthStatus(providerId as Parameters<typeof PartnerHealthJob.getHealthStatus>[0]);
+
+      if (!status) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'PROVIDER_NOT_FOUND',
+            message: `No health data found for provider: ${providerId}`,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: status,
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/partners/health/history - Health history for reporting
+  // =========================================================================
+  app.get(
+    '/admin/partners/health/history',
+    {
+      schema: {
+        description: 'Get partner health check history',
+        tags: ['Admin', 'Partners'],
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            startDate: { type: 'string', format: 'date-time' },
+            endDate: { type: 'string', format: 'date-time' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Querystring: { startDate?: string; endDate?: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { startDate, endDate } = request.query;
+
+      // Default to last 24 hours
+      const end = endDate ? new Date(endDate) : new Date();
+      const start = startDate
+        ? new Date(startDate)
+        : new Date(end.getTime() - 24 * 60 * 60 * 1000);
+
+      const history = await PartnerHealthJob.getHealthHistory(start, end);
+
+      return reply.send({
+        success: true,
+        data: {
+          period: {
+            start: start.toISOString(),
+            end: end.toISOString(),
+          },
+          checkCount: history.length,
+          history,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/partners/webhooks/stats - Webhook queue statistics
+  // =========================================================================
+  app.get(
+    '/admin/partners/webhooks/stats',
+    {
+      schema: {
+        description: 'Get webhook delivery queue statistics',
+        tags: ['Admin', 'Partners'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const stats = await WebhookRetryJob.getStats();
+
+      return reply.send({
+        success: true,
+        data: stats,
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/partners/webhooks/dlq - Dead letter queue entries
+  // =========================================================================
+  app.get(
+    '/admin/partners/webhooks/dlq',
+    {
+      schema: {
+        description: 'Get failed webhook deliveries from dead letter queue',
+        tags: ['Admin', 'Partners'],
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', default: 50 },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Querystring: { limit?: number } }>,
+      reply: FastifyReply
+    ) => {
+      const { limit = 50 } = request.query;
+      const entries = await WebhookRetryJob.getDLQEntries(limit);
+
+      return reply.send({
+        success: true,
+        data: {
+          count: entries.length,
+          entries,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/partners/webhooks/:webhookId - Webhook delivery status
+  // =========================================================================
+  app.get(
+    '/admin/partners/webhooks/:webhookId',
+    {
+      schema: {
+        description: 'Get status of a specific webhook delivery',
+        tags: ['Admin', 'Partners'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['webhookId'],
+          properties: {
+            webhookId: { type: 'string' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { webhookId: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { webhookId } = request.params;
+      const result = await WebhookRetryJob.getWebhookStatus(webhookId);
+
+      if (!result) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'WEBHOOK_NOT_FOUND',
+            message: `No webhook found with ID: ${webhookId}`,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: result,
+      });
+    }
+  );
+
+  // =========================================================================
+  // POST /admin/partners/webhooks/dlq/:webhookId/retry - Retry a DLQ entry
+  // =========================================================================
+  app.post(
+    '/admin/partners/webhooks/dlq/:webhookId/retry',
+    {
+      schema: {
+        description: 'Retry a failed webhook from the dead letter queue',
+        tags: ['Admin', 'Partners'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['webhookId'],
+          properties: {
+            webhookId: { type: 'string' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { webhookId: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { webhookId } = request.params;
+      const success = await WebhookRetryJob.retryDLQEntry(webhookId);
+
+      if (!success) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'WEBHOOK_NOT_FOUND',
+            message: `No DLQ entry found with ID: ${webhookId}`,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          message: 'Webhook requeued for retry',
+          webhookId,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // DELETE /admin/partners/webhooks/dlq/:webhookId - Delete a DLQ entry
+  // =========================================================================
+  app.delete(
+    '/admin/partners/webhooks/dlq/:webhookId',
+    {
+      schema: {
+        description: 'Delete a failed webhook from the dead letter queue',
+        tags: ['Admin', 'Partners'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['webhookId'],
+          properties: {
+            webhookId: { type: 'string' },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { webhookId: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { webhookId } = request.params;
+      const success = await WebhookRetryJob.deleteDLQEntry(webhookId);
+
+      if (!success) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'WEBHOOK_NOT_FOUND',
+            message: `No DLQ entry found with ID: ${webhookId}`,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          message: 'Webhook deleted from DLQ',
+          webhookId,
         },
       });
     }
