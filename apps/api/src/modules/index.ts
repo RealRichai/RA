@@ -5,10 +5,13 @@ import { metricsRoutes } from '../plugins/metrics';
 
 import { apiKeyAdminRoutes } from './admin/api-keys';
 import { auditLogRoutes } from './admin/audit-logs';
+import { dataExportRoutes } from './admin/data-export';
 import { emailTemplateAdminRoutes } from './admin/email-templates';
 import { featureFlagAdminRoutes } from './admin/feature-flags';
+import { impersonationAdminRoutes } from './admin/impersonation';
 import { jobRoutes } from './admin/jobs';
 import { rateLimitAdminRoutes } from './admin/rate-limits';
+import { systemSettingsAdminRoutes } from './admin/system-settings';
 import { webhookAdminRoutes } from './admin/webhooks';
 import { aiRoutes } from './ai/routes';
 import { analyticsRoutes } from './analytics/routes';
@@ -26,6 +29,8 @@ import { notificationRoutes } from './notifications/routes';
 import { partnerRoutes } from './partners/routes';
 import { paymentRoutes } from './payments/routes';
 import { propertyRoutes } from './properties/routes';
+import { websocketPlugin } from './realtime/websocket';
+import { searchRoutes } from './search/routes';
 import { userRoutes } from './users/routes';
 import { webhookRoutes } from './webhooks/routes';
 
@@ -38,6 +43,9 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
 
   // Metrics (no prefix, Prometheus format)
   await app.register(metricsRoutes);
+
+  // WebSocket server for real-time notifications
+  await app.register(websocketPlugin);
 
   // Webhooks (no auth, signature verification)
   await app.register(webhookRoutes, { prefix: '/webhooks' });
@@ -61,6 +69,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(commercialRoutes, { prefix: '/commercial' });
       await api.register(notificationRoutes, { prefix: '/notifications' });
       await api.register(partnerRoutes, { prefix: '/partners' });
+      await api.register(searchRoutes, { prefix: '/search' });
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
@@ -70,6 +79,9 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(apiKeyAdminRoutes, { prefix: '/admin/api-keys' });
       await api.register(emailTemplateAdminRoutes, { prefix: '/admin/email-templates' });
       await api.register(featureFlagAdminRoutes, { prefix: '/admin/feature-flags' });
+      await api.register(systemSettingsAdminRoutes, { prefix: '/admin/settings' });
+      await api.register(impersonationAdminRoutes, { prefix: '/admin/impersonate' });
+      await api.register(dataExportRoutes, { prefix: '/admin/exports' });
     },
     { prefix }
   );
