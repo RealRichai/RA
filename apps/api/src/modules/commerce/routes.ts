@@ -12,6 +12,7 @@
  * provider integrations with fallback to mock providers.
  */
 
+import { getProviderRegistry } from '@realriches/revenue-engine';
 import { generatePrefixedId, logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -98,6 +99,33 @@ const OrderConfirmSchema = z.object({
   idempotencyKey: z.string(),
 });
 
+const QuoteComparisonSchema = z.object({
+  productType: z.enum(['deposit_alternative', 'renters_insurance', 'guarantor']),
+  propertyId: z.string(),
+  leaseId: z.string().optional(),
+  applicant: z.object({
+    firstName: z.string(),
+    lastName: z.string(),
+    email: z.string().email(),
+    phone: z.string().optional(),
+    dateOfBirth: z.string().datetime().optional(),
+    annualIncome: z.number().optional(),
+    creditScore: z.number().int().min(300).max(850).optional(),
+  }),
+  property: z.object({
+    address: z.string(),
+    city: z.string(),
+    state: z.string(),
+    zip: z.string(),
+    monthlyRent: z.number().int().min(100),
+    squareFeet: z.number().int().optional(),
+    propertyType: z.string().optional(),
+  }),
+  coverageAmount: z.number().optional(),
+  term: z.number().int().min(1).max(24).optional(), // Lease term in months
+  providers: z.array(z.string()).optional(), // Optionally limit to specific providers
+});
+
 // Type exports for Zod schemas
 type MovingBookInput = z.infer<typeof MovingBookSchema>;
 type InsurancePurchaseInput = z.infer<typeof InsurancePurchaseSchema>;
@@ -154,6 +182,224 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const status = commerceService.getProviderStatus();
       return reply.send({ success: true, data: status });
+    }
+  );
+
+  // ===========================================================================
+  // QUOTE COMPARISON
+  // ===========================================================================
+
+  app.post(
+    '/quotes/compare',
+    {
+      schema: {
+        description: 'Get quotes from all available providers for a product type',
+        tags: ['Commerce', 'Quotes'],
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['productType', 'propertyId', 'applicant', 'property'],
+          properties: {
+            productType: { type: 'string', enum: ['deposit_alternative', 'renters_insurance', 'guarantor'] },
+            propertyId: { type: 'string' },
+            leaseId: { type: 'string' },
+            applicant: {
+              type: 'object',
+              properties: {
+                firstName: { type: 'string' },
+                lastName: { type: 'string' },
+                email: { type: 'string', format: 'email' },
+                phone: { type: 'string' },
+                dateOfBirth: { type: 'string', format: 'date-time' },
+                annualIncome: { type: 'number' },
+                creditScore: { type: 'integer' },
+              },
+            },
+            property: {
+              type: 'object',
+              properties: {
+                address: { type: 'string' },
+                city: { type: 'string' },
+                state: { type: 'string' },
+                zip: { type: 'string' },
+                monthlyRent: { type: 'integer' },
+                squareFeet: { type: 'integer' },
+                propertyType: { type: 'string' },
+              },
+            },
+            coverageAmount: { type: 'number' },
+            term: { type: 'integer' },
+            providers: { type: 'array', items: { type: 'string' } },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              data: {
+                type: 'object',
+                properties: {
+                  quotes: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        provider: { type: 'string' },
+                        quote: { type: 'object' },
+                        error: { type: 'string' },
+                        responseTimeMs: { type: 'number' },
+                      },
+                    },
+                  },
+                  bestQuote: { type: 'object' },
+                  totalProviders: { type: 'integer' },
+                  successfulQuotes: { type: 'integer' },
+                  requestedAt: { type: 'string', format: 'date-time' },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const startTime = Date.now();
+      const data = QuoteComparisonSchema.parse(request.body);
+
+      const registry = getProviderRegistry();
+
+      // Build the quote request
+      const quoteRequest = {
+        productType: data.productType as 'deposit_alternative' | 'renters_insurance' | 'guarantor',
+        provider: 'internal' as const, // Will be overridden per provider
+        applicantId: request.user?.id || 'anonymous',
+        propertyId: data.propertyId,
+        leaseId: data.leaseId,
+        coverageAmount: data.coverageAmount,
+        term: data.term || 12,
+        startDate: new Date(),
+        applicantInfo: {
+          firstName: data.applicant.firstName,
+          lastName: data.applicant.lastName,
+          email: data.applicant.email,
+          phone: data.applicant.phone,
+          dateOfBirth: data.applicant.dateOfBirth ? new Date(data.applicant.dateOfBirth) : undefined,
+          annualIncome: data.applicant.annualIncome,
+          creditScore: data.applicant.creditScore,
+        },
+        propertyInfo: {
+          address: data.property.address,
+          city: data.property.city,
+          state: data.property.state,
+          zip: data.property.zip,
+          monthlyRent: data.property.monthlyRent,
+          squareFeet: data.property.squareFeet,
+          propertyType: data.property.propertyType,
+        },
+      };
+
+      // Get quotes from all or specified providers
+      const providerIds = data.providers as any[] | undefined;
+      const comparisons = await registry.getMultiProviderQuotes(quoteRequest, providerIds);
+
+      // Find the best quote (lowest premium with successful status)
+      const successfulQuotes = comparisons.filter((c) => c.quote !== null && c.quote.status === 'success');
+      const bestQuote = successfulQuotes.length > 0 ? successfulQuotes[0]?.quote : null;
+
+      const totalTime = Date.now() - startTime;
+
+      logger.info({
+        msg: 'quote_comparison_completed',
+        productType: data.productType,
+        totalProviders: comparisons.length,
+        successfulQuotes: successfulQuotes.length,
+        totalTimeMs: totalTime,
+        userId: request.user?.id,
+      });
+
+      return reply.send({
+        success: true,
+        data: {
+          quotes: comparisons.map((c) => ({
+            provider: c.provider,
+            quote: c.quote,
+            error: c.error,
+            responseTimeMs: c.responseTimeMs,
+          })),
+          bestQuote,
+          totalProviders: comparisons.length,
+          successfulQuotes: successfulQuotes.length,
+          requestedAt: new Date().toISOString(),
+          totalResponseTimeMs: totalTime,
+        },
+      });
+    }
+  );
+
+  app.get(
+    '/quotes/providers',
+    {
+      schema: {
+        description: 'Get available providers for a product type',
+        tags: ['Commerce', 'Quotes'],
+        querystring: {
+          type: 'object',
+          properties: {
+            productType: { type: 'string', enum: ['deposit_alternative', 'renters_insurance', 'guarantor'] },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Querystring: { productType?: 'deposit_alternative' | 'renters_insurance' | 'guarantor' };
+      }>,
+      reply: FastifyReply
+    ) => {
+      const { productType } = request.query;
+      const registry = getProviderRegistry();
+
+      if (productType) {
+        const providers = registry.getProviderIdsForProduct(productType);
+        const availabilityChecks = await Promise.all(
+          providers.map(async (providerId) => {
+            const provider = registry.getProvider(providerId);
+            const isAvailable = provider ? await provider.isAvailable() : false;
+            return {
+              providerId,
+              productTypes: provider?.supportedProducts || [],
+              isAvailable,
+            };
+          })
+        );
+
+        return reply.send({
+          success: true,
+          data: {
+            productType,
+            providers: availabilityChecks,
+          },
+        });
+      }
+
+      // Return all providers grouped by product type
+      const productTypes = registry.getAvailableProductTypes();
+      const grouped: Record<string, string[]> = {};
+
+      for (const pt of productTypes) {
+        grouped[pt] = registry.getProviderIdsForProduct(pt);
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          productTypes: grouped,
+        },
+      });
     }
   );
 
