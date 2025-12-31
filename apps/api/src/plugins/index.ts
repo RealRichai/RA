@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import { aiPlugin } from './ai';
 import { auditPlugin } from './audit';
 import { authPlugin } from './auth';
+import { cachePlugin } from './cache';
 import { emailPlugin } from './email';
 import { errorHandler } from './error-handler';
 import { jobsPlugin } from './jobs';
@@ -116,6 +117,14 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
 
   // Redis
   await app.register(redisPlugin);
+
+  // Cache layer (depends on Redis)
+  await app.register(cachePlugin, {
+    enabled: true,
+    prefix: 'cache',
+    defaultTtl: 300, // 5 minutes
+    collectMetrics: true,
+  });
 
   // Enhanced rate limiting (depends on Redis)
   await app.register(rateLimitPlugin, {

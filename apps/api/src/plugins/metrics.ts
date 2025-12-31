@@ -111,6 +111,37 @@ const rateLimitHits = new client.Counter({
 });
 
 // =============================================================================
+// Cache Metrics
+// =============================================================================
+
+const cacheHits = new client.Counter({
+  name: 'cache_hits_total',
+  help: 'Total cache hits',
+  labelNames: ['cache_type'],
+  registers: [register],
+});
+
+const cacheMisses = new client.Counter({
+  name: 'cache_misses_total',
+  help: 'Total cache misses',
+  labelNames: ['cache_type'],
+  registers: [register],
+});
+
+const cacheOperations = new client.Counter({
+  name: 'cache_operations_total',
+  help: 'Total cache operations',
+  labelNames: ['operation', 'status'],
+  registers: [register],
+});
+
+const cacheSize = new client.Gauge({
+  name: 'cache_keys_count',
+  help: 'Number of keys in cache',
+  registers: [register],
+});
+
+// =============================================================================
 // Authentication Metrics
 // =============================================================================
 
@@ -378,6 +409,10 @@ const metricsPluginCallback: FastifyPluginCallback<MetricsPluginOptions> = (
     jobDuration,
     dbQueryDuration,
     redisOperations,
+    cacheHits,
+    cacheMisses,
+    cacheOperations,
+    cacheSize,
   });
 
   // Cleanup on close
@@ -467,6 +502,10 @@ declare module 'fastify' {
       jobDuration: typeof jobDuration;
       dbQueryDuration: typeof dbQueryDuration;
       redisOperations: typeof redisOperations;
+      cacheHits: typeof cacheHits;
+      cacheMisses: typeof cacheMisses;
+      cacheOperations: typeof cacheOperations;
+      cacheSize: typeof cacheSize;
     };
   }
 }
@@ -490,4 +529,8 @@ export {
   totalListings,
   totalLeases,
   totalProperties,
+  cacheHits,
+  cacheMisses,
+  cacheOperations,
+  cacheSize,
 };
