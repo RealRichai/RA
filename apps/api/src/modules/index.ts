@@ -61,6 +61,10 @@ import { userRoutes } from './users/routes';
 import { utilitiesRoutes } from './utilities/routes';
 import { vendorRoutes } from './vendors/routes';
 import { webhookRoutes } from './webhooks/routes';
+import { amenityRoutes } from './amenities/routes';
+import { packageRoutes } from './packages/routes';
+import { petRoutes } from './pets/routes';
+import { parkingRoutes } from './parking/routes';
 
 export async function registerModules(app: FastifyInstance): Promise<void> {
   const config = getConfig();
@@ -124,6 +128,10 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(hoaRoutes, { prefix: '/hoa' });
       await api.register(taxDocumentRoutes, { prefix: '/tax-documents' });
       await api.register(rentalAssistanceRoutes, { prefix: '/rental-assistance' });
+      await api.register(amenityRoutes, { prefix: '/amenities' });
+      await api.register(packageRoutes, { prefix: '/packages' });
+      await api.register(petRoutes, { prefix: '/pets' });
+      await api.register(parkingRoutes, { prefix: '/parking' });
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });

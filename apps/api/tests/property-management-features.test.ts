@@ -211,6 +211,82 @@ import {
   getVoucherExpirationDays,
 } from '../src/modules/rental-assistance/routes';
 
+// Amenity Booking imports
+import {
+  amenities as amenityStore,
+  reservations as amenityReservations,
+  waitlists as amenityWaitlists,
+  recurringBookings as amenityRecurringBookings,
+  usageLogs as amenityUsageLogs,
+  generateConfirmationCode as generateAmenityConfirmationCode,
+} from '../src/modules/amenities/routes';
+
+// Package Tracking imports
+import {
+  lockers as packageLockers,
+  packages as packageStore,
+  pickupLogs as packagePickupLogs,
+  proxyAuthorizations as packageProxyAuthorizations,
+  forwardingAddresses as packageForwardingAddresses,
+  generateAccessCode,
+  findAvailableLocker,
+  isPackageOverdue,
+  calculatePackageStats,
+  getLockerUtilization,
+  validateTrackingNumber,
+  type Package,
+  type PackageLocker,
+} from '../src/modules/packages/routes';
+
+// Pet Management imports
+import {
+  pets as petStore,
+  breedRestrictions as petBreedRestrictions,
+  petPolicies as petPolicyStore,
+  vaccinationRecords as petVaccinationRecords,
+  petIncidents as petIncidentStore,
+  petScreenings as petScreeningStore,
+  petFees as petFeeStore,
+  checkBreedRestriction,
+  validatePetAgainstPolicy,
+  calculatePetFees,
+  getVaccinationStatus,
+  getIncidentHistory,
+  calculateRiskScore,
+  getPropertyPetCensus,
+  type Pet,
+  type PetPolicy,
+  type VaccinationRecord,
+  type PetIncident,
+} from '../src/modules/pets/routes';
+
+// Parking Management imports
+import {
+  parkingLots as parkingLotStore,
+  parkingSpaces as parkingSpaceStore,
+  vehicles as vehicleStore,
+  parkingPermits as parkingPermitStore,
+  guestPasses as guestPassStore,
+  parkingViolations as parkingViolationStore,
+  towRecords as towRecordStore,
+  generatePermitNumber,
+  generatePassCode,
+  getLotOccupancy,
+  getSpacesByType,
+  findAvailableSpace,
+  isPermitValid,
+  getActivePermitsForTenant,
+  isGuestPassValid,
+  calculateViolationStats,
+  getViolationFineAmount,
+  calculateParkingRevenue,
+  type ParkingLot,
+  type ParkingSpace,
+  type ParkingPermit,
+  type GuestPass,
+  type ParkingViolation,
+} from '../src/modules/parking/routes';
+
 describe('Automated Rent Collection', () => {
   beforeEach(() => {
     schedules.clear();
@@ -4441,6 +4517,1201 @@ describe('Rental Assistance Programs', () => {
       };
 
       expect(getVoucherExpirationDays(voucher)).toBe(-1);
+    });
+  });
+});
+
+// ===========================================================================
+// AMENITY BOOKING TESTS
+// ===========================================================================
+
+describe('Amenity Booking', () => {
+  beforeEach(() => {
+    amenityStore.clear();
+    amenityReservations.clear();
+    amenityWaitlists.clear();
+    amenityRecurringBookings.clear();
+    amenityUsageLogs.clear();
+  });
+
+  describe('generateConfirmationCode', () => {
+    it('should generate 6-character codes', () => {
+      const code1 = generateAmenityConfirmationCode();
+      const code2 = generateAmenityConfirmationCode();
+
+      expect(code1).toHaveLength(6);
+      expect(code2).toHaveLength(6);
+      expect(code1).not.toBe(code2);
+    });
+
+    it('should generate alphanumeric codes', () => {
+      const code = generateAmenityConfirmationCode();
+      expect(code).toMatch(/^[A-Z0-9]+$/);
+    });
+  });
+});
+
+// ===========================================================================
+// PACKAGE TRACKING TESTS
+// ===========================================================================
+
+describe('Package Tracking', () => {
+  beforeEach(() => {
+    packageLockers.clear();
+    packageStore.clear();
+    packagePickupLogs.clear();
+    packageProxyAuthorizations.clear();
+    packageForwardingAddresses.clear();
+  });
+
+  describe('generateAccessCode', () => {
+    it('should generate codes of specified length', () => {
+      const code6 = generateAccessCode(6);
+      const code8 = generateAccessCode(8);
+
+      expect(code6).toHaveLength(6);
+      expect(code8).toHaveLength(8);
+    });
+
+    it('should generate numeric codes', () => {
+      const code = generateAccessCode(6);
+      expect(code).toMatch(/^\d+$/);
+    });
+  });
+
+  describe('validateTrackingNumber', () => {
+    it('should validate USPS tracking numbers', () => {
+      expect(validateTrackingNumber('9400111899223033225712', 'usps')).toBe(true);
+      expect(validateTrackingNumber('94001118992230332257', 'usps')).toBe(true);
+      expect(validateTrackingNumber('12345', 'usps')).toBe(false);
+    });
+
+    it('should validate UPS tracking numbers', () => {
+      expect(validateTrackingNumber('1Z999AA10123456784', 'ups')).toBe(true);
+      expect(validateTrackingNumber('1Z12345E0291980793', 'ups')).toBe(true);
+      expect(validateTrackingNumber('12345', 'ups')).toBe(false);
+    });
+
+    it('should validate FedEx tracking numbers', () => {
+      expect(validateTrackingNumber('123456789012', 'fedex')).toBe(true);
+      expect(validateTrackingNumber('123456789012345', 'fedex')).toBe(true); // 15 digits max
+      expect(validateTrackingNumber('1234', 'fedex')).toBe(false);
+    });
+
+    it('should validate Amazon tracking numbers', () => {
+      expect(validateTrackingNumber('TBA123456789000', 'amazon')).toBe(true);
+      expect(validateTrackingNumber('TBA999888777666', 'amazon')).toBe(true);
+      expect(validateTrackingNumber('ABC123', 'amazon')).toBe(false);
+    });
+
+    it('should validate DHL tracking numbers', () => {
+      expect(validateTrackingNumber('1234567890', 'dhl')).toBe(true);
+      expect(validateTrackingNumber('123456789', 'dhl')).toBe(false);
+    });
+  });
+
+  describe('findAvailableLocker', () => {
+    it('should find available locker of correct size', () => {
+      const locker1: PackageLocker = {
+        id: 'locker1',
+        propertyId: 'p1',
+        lockerNumber: 'L001',
+        size: 'small',
+        status: 'available',
+        createdAt: '',
+        updatedAt: '',
+      };
+      const locker2: PackageLocker = {
+        id: 'locker2',
+        propertyId: 'p1',
+        lockerNumber: 'L002',
+        size: 'large',
+        status: 'available',
+        createdAt: '',
+        updatedAt: '',
+      };
+      const locker3: PackageLocker = {
+        id: 'locker3',
+        propertyId: 'p1',
+        lockerNumber: 'L003',
+        size: 'small',
+        status: 'occupied',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      packageLockers.set('locker1', locker1);
+      packageLockers.set('locker2', locker2);
+      packageLockers.set('locker3', locker3);
+
+      const found = findAvailableLocker('p1', 'large');
+
+      expect(found).not.toBeNull();
+      expect(found?.id).toBe('locker2');
+      expect(found?.size).toBe('large');
+    });
+
+    it('should return null when no locker available', () => {
+      const locker: PackageLocker = {
+        id: 'locker1',
+        propertyId: 'p1',
+        lockerNumber: 'L001',
+        size: 'small',
+        status: 'occupied',
+        createdAt: '',
+        updatedAt: '',
+      };
+      packageLockers.set('locker1', locker);
+
+      const found = findAvailableLocker('p1', 'small');
+
+      expect(found).toBeNull();
+    });
+  });
+
+  describe('isPackageOverdue', () => {
+    it('should return true for packages held longer than threshold', () => {
+      const tenDaysAgo = new Date();
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+
+      const pkg: Package = {
+        id: 'pkg1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        carrier: 'usps',
+        trackingNumber: '12345',
+        size: 'small',
+        status: 'in_locker',
+        receivedAt: tenDaysAgo.toISOString(),
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(isPackageOverdue(pkg, 7)).toBe(true);
+    });
+
+    it('should return false for recent packages', () => {
+      const twoDaysAgo = new Date();
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+      const pkg: Package = {
+        id: 'pkg1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        carrier: 'usps',
+        trackingNumber: '12345',
+        size: 'small',
+        status: 'in_locker',
+        receivedAt: twoDaysAgo.toISOString(),
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(isPackageOverdue(pkg, 7)).toBe(false);
+    });
+  });
+
+  describe('calculatePackageStats', () => {
+    it('should calculate package statistics correctly', () => {
+      const now = new Date();
+      const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+
+      const pkgList: Package[] = [
+        {
+          id: 'pkg1',
+          propertyId: 'p1',
+          tenantId: 't1',
+          carrier: 'usps',
+          trackingNumber: '12345',
+          size: 'small',
+          status: 'picked_up',
+          receivedAt: threeDaysAgo.toISOString(),
+          pickedUpAt: now.toISOString(),
+          isOverdue: false,
+          notificationCount: 0,
+          createdAt: '',
+          updatedAt: '',
+        },
+        {
+          id: 'pkg2',
+          propertyId: 'p1',
+          tenantId: 't1',
+          carrier: 'ups',
+          trackingNumber: '67890',
+          size: 'medium',
+          status: 'in_locker',
+          receivedAt: threeDaysAgo.toISOString(),
+          isOverdue: true,
+          notificationCount: 3,
+          createdAt: '',
+          updatedAt: '',
+        },
+        {
+          id: 'pkg3',
+          propertyId: 'p1',
+          tenantId: 't2',
+          carrier: 'fedex',
+          trackingNumber: '11111',
+          size: 'large',
+          status: 'returned',
+          receivedAt: threeDaysAgo.toISOString(),
+          isOverdue: false,
+          notificationCount: 0,
+          createdAt: '',
+          updatedAt: '',
+        },
+      ];
+
+      const stats = calculatePackageStats(pkgList);
+
+      expect(stats.totalReceived).toBe(3);
+      expect(stats.totalPickedUp).toBe(1);
+      expect(stats.totalOverdue).toBe(1);
+      expect(stats.byCarrier.usps).toBe(1);
+      expect(stats.byCarrier.ups).toBe(1);
+      expect(stats.byCarrier.fedex).toBe(1);
+    });
+  });
+
+  describe('getLockerUtilization', () => {
+    it('should calculate locker utilization correctly', () => {
+      packageLockers.set('l1', {
+        id: 'l1',
+        propertyId: 'p1',
+        lockerNumber: 'L001',
+        size: 'small',
+        status: 'available',
+        createdAt: '',
+        updatedAt: '',
+      });
+      packageLockers.set('l2', {
+        id: 'l2',
+        propertyId: 'p1',
+        lockerNumber: 'L002',
+        size: 'small',
+        status: 'occupied',
+        createdAt: '',
+        updatedAt: '',
+      });
+      packageLockers.set('l3', {
+        id: 'l3',
+        propertyId: 'p1',
+        lockerNumber: 'L003',
+        size: 'medium',
+        status: 'occupied',
+        createdAt: '',
+        updatedAt: '',
+      });
+      packageLockers.set('l4', {
+        id: 'l4',
+        propertyId: 'p1',
+        lockerNumber: 'L004',
+        size: 'large',
+        status: 'maintenance',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const utilization = getLockerUtilization('p1');
+
+      expect(utilization.total).toBe(4);
+      expect(utilization.available).toBe(1);
+      expect(utilization.occupied).toBe(2);
+      expect(utilization.maintenance).toBe(1);
+      expect(utilization.utilizationRate).toBe(50); // 2/4 = 50%
+    });
+  });
+});
+
+// ===========================================================================
+// PET MANAGEMENT TESTS
+// ===========================================================================
+
+describe('Pet Management', () => {
+  beforeEach(() => {
+    petStore.clear();
+    petBreedRestrictions.clear();
+    petPolicyStore.clear();
+    petVaccinationRecords.clear();
+    petIncidentStore.clear();
+    petScreeningStore.clear();
+    petFeeStore.clear();
+  });
+
+  describe('checkBreedRestriction', () => {
+    it('should detect restricted breeds', () => {
+      petBreedRestrictions.set('r1', {
+        id: 'r1',
+        propertyId: 'p1',
+        petType: 'dog',
+        breed: 'pit bull',
+        reason: 'Insurance restriction',
+        createdAt: '',
+      });
+
+      const result = checkBreedRestriction('p1', 'dog', 'Pit Bull Terrier');
+
+      expect(result.restricted).toBe(true);
+      expect(result.reason).toBe('Insurance restriction');
+    });
+
+    it('should allow non-restricted breeds', () => {
+      petBreedRestrictions.set('r1', {
+        id: 'r1',
+        propertyId: 'p1',
+        petType: 'dog',
+        breed: 'pit bull',
+        reason: 'Insurance restriction',
+        createdAt: '',
+      });
+
+      const result = checkBreedRestriction('p1', 'dog', 'Golden Retriever');
+
+      expect(result.restricted).toBe(false);
+    });
+  });
+
+  describe('validatePetAgainstPolicy', () => {
+    const policy: PetPolicy = {
+      id: 'policy1',
+      propertyId: 'p1',
+      maxPets: 2,
+      allowedTypes: ['dog', 'cat'],
+      maxWeight: 50,
+      petDeposit: 300,
+      monthlyPetRent: 25,
+      oneTimePetFee: 100,
+      serviceAnimalExempt: true,
+      emotionalSupportExempt: true,
+      requiresVaccinations: true,
+      requiresLicense: false,
+      requiresInsurance: false,
+      insuranceMinCoverage: 100000,
+      restrictedBreeds: ['pit bull', 'rottweiler'],
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    it('should validate compliant pet', () => {
+      const result = validatePetAgainstPolicy(
+        { type: 'dog', breed: 'Labrador', weight: 45 },
+        policy
+      );
+
+      expect(result.valid).toBe(true);
+      expect(result.violations).toHaveLength(0);
+    });
+
+    it('should detect weight violation', () => {
+      const result = validatePetAgainstPolicy(
+        { type: 'dog', breed: 'Great Dane', weight: 120 },
+        policy
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.violations).toContain('Pet weight 120lbs exceeds maximum 50lbs');
+    });
+
+    it('should detect breed restriction', () => {
+      const result = validatePetAgainstPolicy(
+        { type: 'dog', breed: 'Pit Bull', weight: 40 },
+        policy
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.violations.some((v) => v.includes('restricted'))).toBe(true);
+    });
+
+    it('should detect disallowed pet type', () => {
+      const result = validatePetAgainstPolicy(
+        { type: 'reptile', breed: 'Ball Python', weight: 5 },
+        policy
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.violations).toContain("Pet type 'reptile' is not allowed");
+    });
+
+    it('should exempt service animals from restrictions', () => {
+      const result = validatePetAgainstPolicy(
+        { type: 'dog', breed: 'Pit Bull', weight: 80, isServiceAnimal: true },
+        policy
+      );
+
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('calculatePetFees', () => {
+    const policy: PetPolicy = {
+      id: 'policy1',
+      propertyId: 'p1',
+      maxPets: 2,
+      allowedTypes: ['dog', 'cat'],
+      maxWeight: 50,
+      petDeposit: 300,
+      monthlyPetRent: 25,
+      oneTimePetFee: 100,
+      serviceAnimalExempt: true,
+      emotionalSupportExempt: true,
+      requiresVaccinations: true,
+      requiresLicense: false,
+      requiresInsurance: false,
+      insuranceMinCoverage: 100000,
+      restrictedBreeds: [],
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    it('should calculate fees for regular pets', () => {
+      const fees = calculatePetFees(policy, false, false);
+
+      expect(fees.deposit).toBe(300);
+      expect(fees.monthlyRent).toBe(25);
+      expect(fees.oneTimeFee).toBe(100);
+    });
+
+    it('should waive fees for service animals', () => {
+      const fees = calculatePetFees(policy, true, false);
+
+      expect(fees.deposit).toBe(0);
+      expect(fees.monthlyRent).toBe(0);
+      expect(fees.oneTimeFee).toBe(0);
+    });
+
+    it('should waive fees for emotional support animals', () => {
+      const fees = calculatePetFees(policy, false, true);
+
+      expect(fees.deposit).toBe(0);
+      expect(fees.monthlyRent).toBe(0);
+      expect(fees.oneTimeFee).toBe(0);
+    });
+  });
+
+  describe('getVaccinationStatus', () => {
+    it('should detect expired vaccinations', () => {
+      const pastDate = new Date();
+      pastDate.setMonth(pastDate.getMonth() - 3);
+
+      petVaccinationRecords.set('v1', {
+        id: 'v1',
+        petId: 'pet1',
+        type: 'rabies',
+        vaccineName: 'Rabies 3yr',
+        administeredDate: '2022-01-01',
+        expirationDate: pastDate.toISOString().split('T')[0],
+        veterinarianName: 'Dr. Smith',
+        verified: true,
+        createdAt: '',
+      });
+
+      const status = getVaccinationStatus('pet1');
+
+      expect(status.upToDate).toBe(false);
+      expect(status.expired).toHaveLength(1);
+    });
+
+    it('should detect expiring soon vaccinations', () => {
+      const soonDate = new Date();
+      soonDate.setDate(soonDate.getDate() + 15);
+
+      petVaccinationRecords.set('v1', {
+        id: 'v1',
+        petId: 'pet1',
+        type: 'rabies',
+        vaccineName: 'Rabies 3yr',
+        administeredDate: '2022-01-01',
+        expirationDate: soonDate.toISOString().split('T')[0],
+        veterinarianName: 'Dr. Smith',
+        verified: true,
+        createdAt: '',
+      });
+
+      const status = getVaccinationStatus('pet1');
+
+      expect(status.upToDate).toBe(true); // still valid
+      expect(status.expiringSoon).toHaveLength(1);
+    });
+
+    it('should detect missing required vaccinations', () => {
+      // No vaccinations added
+      const status = getVaccinationStatus('pet1');
+
+      expect(status.upToDate).toBe(false);
+      expect(status.missing).toContain('rabies');
+    });
+  });
+
+  describe('getIncidentHistory', () => {
+    it('should calculate incident history correctly', () => {
+      petIncidentStore.set('i1', {
+        id: 'i1',
+        petId: 'pet1',
+        propertyId: 'p1',
+        reportedBy: 'manager',
+        incidentType: 'noise',
+        severity: 'minor',
+        description: 'Barking',
+        incidentDate: '2024-01-01',
+        location: 'Unit 101',
+        fineAmount: 50,
+        finePaid: true,
+        resolved: true,
+        createdAt: '',
+      });
+
+      petIncidentStore.set('i2', {
+        id: 'i2',
+        petId: 'pet1',
+        propertyId: 'p1',
+        reportedBy: 'neighbor',
+        incidentType: 'aggression',
+        severity: 'moderate',
+        description: 'Lunged at another dog',
+        incidentDate: '2024-02-01',
+        location: 'Common area',
+        fineAmount: 100,
+        finePaid: false,
+        resolved: false,
+        createdAt: '',
+      });
+
+      const history = getIncidentHistory('pet1');
+
+      expect(history.totalIncidents).toBe(2);
+      expect(history.byType.noise).toBe(1);
+      expect(history.byType.aggression).toBe(1);
+      expect(history.totalFines).toBe(150);
+      expect(history.unpaidFines).toBe(100);
+    });
+  });
+
+  describe('calculateRiskScore', () => {
+    it('should calculate risk score based on multiple factors', () => {
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1);
+
+      petStore.set('pet1', {
+        id: 'pet1',
+        leaseId: 'l1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        name: 'Buddy',
+        type: 'dog',
+        breed: 'Labrador',
+        weight: 70,
+        age: 3,
+        color: 'Yellow',
+        isServiceAnimal: false,
+        isEmotionalSupport: false,
+        status: 'approved',
+        registrationDate: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      // Add current vaccination
+      petVaccinationRecords.set('v1', {
+        id: 'v1',
+        petId: 'pet1',
+        type: 'rabies',
+        vaccineName: 'Rabies 3yr',
+        administeredDate: '2024-01-01',
+        expirationDate: futureDate.toISOString().split('T')[0],
+        veterinarianName: 'Dr. Smith',
+        verified: true,
+        createdAt: '',
+      });
+
+      const result = calculateRiskScore('pet1');
+
+      expect(result.score).toBe(100); // Perfect score with no incidents
+      expect(result.factors).toHaveLength(0);
+    });
+
+    it('should deduct points for incidents and unpaid fines', () => {
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1);
+
+      petStore.set('pet1', {
+        id: 'pet1',
+        leaseId: 'l1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        name: 'Buddy',
+        type: 'dog',
+        breed: 'Labrador',
+        weight: 70,
+        age: 3,
+        color: 'Yellow',
+        isServiceAnimal: false,
+        isEmotionalSupport: false,
+        status: 'approved',
+        registrationDate: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      petVaccinationRecords.set('v1', {
+        id: 'v1',
+        petId: 'pet1',
+        type: 'rabies',
+        vaccineName: 'Rabies 3yr',
+        administeredDate: '2024-01-01',
+        expirationDate: futureDate.toISOString().split('T')[0],
+        veterinarianName: 'Dr. Smith',
+        verified: true,
+        createdAt: '',
+      });
+
+      petIncidentStore.set('i1', {
+        id: 'i1',
+        petId: 'pet1',
+        propertyId: 'p1',
+        reportedBy: 'manager',
+        incidentType: 'aggression',
+        severity: 'moderate',
+        description: 'Aggressive behavior',
+        incidentDate: '2024-02-01',
+        location: 'Common area',
+        fineAmount: 100,
+        finePaid: false,
+        resolved: false,
+        createdAt: '',
+      });
+
+      const result = calculateRiskScore('pet1');
+
+      expect(result.score).toBeLessThan(100);
+      expect(result.factors.some((f) => f.includes('incident'))).toBe(true);
+      expect(result.factors.some((f) => f.includes('unpaid'))).toBe(true);
+      expect(result.factors.some((f) => f.includes('aggression'))).toBe(true);
+    });
+  });
+
+  describe('getPropertyPetCensus', () => {
+    it('should calculate property pet census correctly', () => {
+      petStore.set('p1', {
+        id: 'p1',
+        leaseId: 'l1',
+        propertyId: 'prop1',
+        tenantId: 't1',
+        name: 'Buddy',
+        type: 'dog',
+        breed: 'Labrador',
+        weight: 70,
+        age: 3,
+        color: 'Yellow',
+        isServiceAnimal: false,
+        isEmotionalSupport: false,
+        status: 'approved',
+        registrationDate: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      petStore.set('p2', {
+        id: 'p2',
+        leaseId: 'l2',
+        propertyId: 'prop1',
+        tenantId: 't2',
+        name: 'Whiskers',
+        type: 'cat',
+        breed: 'Persian',
+        weight: 10,
+        age: 2,
+        color: 'White',
+        isServiceAnimal: false,
+        isEmotionalSupport: true,
+        status: 'approved',
+        registrationDate: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      petStore.set('p3', {
+        id: 'p3',
+        leaseId: 'l3',
+        propertyId: 'prop1',
+        tenantId: 't3',
+        name: 'Max',
+        type: 'dog',
+        breed: 'German Shepherd',
+        weight: 80,
+        age: 4,
+        color: 'Black',
+        isServiceAnimal: true,
+        isEmotionalSupport: false,
+        status: 'approved',
+        registrationDate: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const census = getPropertyPetCensus('prop1');
+
+      expect(census.totalPets).toBe(3);
+      expect(census.byType.dog).toBe(2);
+      expect(census.byType.cat).toBe(1);
+      expect(census.byStatus.approved).toBe(3);
+      expect(census.serviceAnimals).toBe(1);
+      expect(census.emotionalSupport).toBe(1);
+    });
+  });
+});
+
+// ===========================================================================
+// PARKING MANAGEMENT TESTS
+// ===========================================================================
+
+describe('Parking Management', () => {
+  beforeEach(() => {
+    parkingLotStore.clear();
+    parkingSpaceStore.clear();
+    vehicleStore.clear();
+    parkingPermitStore.clear();
+    guestPassStore.clear();
+    parkingViolationStore.clear();
+    towRecordStore.clear();
+  });
+
+  describe('generatePermitNumber', () => {
+    it('should generate permit numbers in correct format', () => {
+      const permit = generatePermitNumber();
+
+      expect(permit).toMatch(/^PMT-[A-Z0-9]{8}$/);
+    });
+
+    it('should generate unique permit numbers', () => {
+      const permit1 = generatePermitNumber();
+      const permit2 = generatePermitNumber();
+
+      expect(permit1).not.toBe(permit2);
+    });
+  });
+
+  describe('generatePassCode', () => {
+    it('should generate 6-character alphanumeric codes', () => {
+      const code = generatePassCode();
+
+      expect(code).toHaveLength(6);
+      expect(code).toMatch(/^[A-Z0-9]+$/);
+    });
+  });
+
+  describe('getLotOccupancy', () => {
+    it('should calculate lot occupancy correctly', () => {
+      parkingSpaceStore.set('s1', {
+        id: 's1',
+        lotId: 'lot1',
+        propertyId: 'p1',
+        spaceNumber: '001',
+        type: 'standard',
+        status: 'available',
+        createdAt: '',
+        updatedAt: '',
+      });
+      parkingSpaceStore.set('s2', {
+        id: 's2',
+        lotId: 'lot1',
+        propertyId: 'p1',
+        spaceNumber: '002',
+        type: 'standard',
+        status: 'assigned',
+        createdAt: '',
+        updatedAt: '',
+      });
+      parkingSpaceStore.set('s3', {
+        id: 's3',
+        lotId: 'lot1',
+        propertyId: 'p1',
+        spaceNumber: '003',
+        type: 'handicap',
+        status: 'reserved',
+        createdAt: '',
+        updatedAt: '',
+      });
+      parkingSpaceStore.set('s4', {
+        id: 's4',
+        lotId: 'lot1',
+        propertyId: 'p1',
+        spaceNumber: '004',
+        type: 'ev_charging',
+        status: 'maintenance',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const occupancy = getLotOccupancy('lot1');
+
+      expect(occupancy.total).toBe(4);
+      expect(occupancy.available).toBe(1);
+      expect(occupancy.assigned).toBe(1);
+      expect(occupancy.reserved).toBe(1);
+      expect(occupancy.maintenance).toBe(1);
+      expect(occupancy.occupancyRate).toBe(75); // 3/4 = 75%
+    });
+  });
+
+  describe('getSpacesByType', () => {
+    it('should group spaces by type with availability', () => {
+      parkingSpaceStore.set('s1', {
+        id: 's1',
+        lotId: 'lot1',
+        propertyId: 'p1',
+        spaceNumber: '001',
+        type: 'standard',
+        status: 'available',
+        createdAt: '',
+        updatedAt: '',
+      });
+      parkingSpaceStore.set('s2', {
+        id: 's2',
+        lotId: 'lot1',
+        propertyId: 'p1',
+        spaceNumber: '002',
+        type: 'standard',
+        status: 'assigned',
+        createdAt: '',
+        updatedAt: '',
+      });
+      parkingSpaceStore.set('s3', {
+        id: 's3',
+        lotId: 'lot1',
+        propertyId: 'p1',
+        spaceNumber: '003',
+        type: 'handicap',
+        status: 'available',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const byType = getSpacesByType('lot1');
+
+      expect(byType.standard.total).toBe(2);
+      expect(byType.standard.available).toBe(1);
+      expect(byType.handicap.total).toBe(1);
+      expect(byType.handicap.available).toBe(1);
+    });
+  });
+
+  describe('findAvailableSpace', () => {
+    it('should find available space of requested type', () => {
+      parkingSpaceStore.set('s1', {
+        id: 's1',
+        lotId: 'lot1',
+        propertyId: 'p1',
+        spaceNumber: '001',
+        type: 'standard',
+        status: 'assigned',
+        createdAt: '',
+        updatedAt: '',
+      });
+      parkingSpaceStore.set('s2', {
+        id: 's2',
+        lotId: 'lot1',
+        propertyId: 'p1',
+        spaceNumber: '002',
+        type: 'ev_charging',
+        status: 'available',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const space = findAvailableSpace('lot1', 'ev_charging');
+
+      expect(space).not.toBeNull();
+      expect(space?.type).toBe('ev_charging');
+    });
+
+    it('should return null when no space available', () => {
+      parkingSpaceStore.set('s1', {
+        id: 's1',
+        lotId: 'lot1',
+        propertyId: 'p1',
+        spaceNumber: '001',
+        type: 'standard',
+        status: 'assigned',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const space = findAvailableSpace('lot1', 'standard');
+
+      expect(space).toBeNull();
+    });
+  });
+
+  describe('isPermitValid', () => {
+    it('should return true for active permit within date range', () => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const permit: ParkingPermit = {
+        id: 'permit1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        leaseId: 'l1',
+        vehicleId: 'v1',
+        permitNumber: 'PMT-12345678',
+        type: 'assigned',
+        status: 'active',
+        startDate: '2024-01-01',
+        endDate: tomorrow.toISOString().split('T')[0],
+        monthlyFee: 50,
+        issuedAt: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(isPermitValid(permit)).toBe(true);
+    });
+
+    it('should return false for expired permit', () => {
+      const permit: ParkingPermit = {
+        id: 'permit1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        leaseId: 'l1',
+        vehicleId: 'v1',
+        permitNumber: 'PMT-12345678',
+        type: 'assigned',
+        status: 'active',
+        startDate: '2023-01-01',
+        endDate: '2023-12-31',
+        monthlyFee: 50,
+        issuedAt: '2023-01-01',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(isPermitValid(permit)).toBe(false);
+    });
+
+    it('should return false for suspended permit', () => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const permit: ParkingPermit = {
+        id: 'permit1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        leaseId: 'l1',
+        vehicleId: 'v1',
+        permitNumber: 'PMT-12345678',
+        type: 'assigned',
+        status: 'suspended',
+        startDate: '2024-01-01',
+        endDate: tomorrow.toISOString().split('T')[0],
+        monthlyFee: 50,
+        issuedAt: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(isPermitValid(permit)).toBe(false);
+    });
+  });
+
+  describe('isGuestPassValid', () => {
+    it('should return true for pass within validity window', () => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const pass: GuestPass = {
+        id: 'pass1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        guestName: 'John Doe',
+        vehicleLicensePlate: 'ABC123',
+        passCode: 'XYZ789',
+        validFrom: yesterday.toISOString(),
+        validTo: tomorrow.toISOString(),
+        isUsed: false,
+        createdAt: '',
+      };
+
+      expect(isGuestPassValid(pass)).toBe(true);
+    });
+
+    it('should return false for expired pass', () => {
+      const twoDaysAgo = new Date();
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      const pass: GuestPass = {
+        id: 'pass1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        guestName: 'John Doe',
+        vehicleLicensePlate: 'ABC123',
+        passCode: 'XYZ789',
+        validFrom: twoDaysAgo.toISOString(),
+        validTo: yesterday.toISOString(),
+        isUsed: false,
+        createdAt: '',
+      };
+
+      expect(isGuestPassValid(pass)).toBe(false);
+    });
+  });
+
+  describe('getViolationFineAmount', () => {
+    it('should return correct fine amounts', () => {
+      expect(getViolationFineAmount('no_permit')).toBe(50);
+      expect(getViolationFineAmount('fire_lane')).toBe(150);
+      expect(getViolationFineAmount('handicap')).toBe(250);
+      expect(getViolationFineAmount('blocking')).toBe(75);
+    });
+  });
+
+  describe('calculateViolationStats', () => {
+    it('should calculate violation statistics correctly', () => {
+      parkingViolationStore.set('v1', {
+        id: 'v1',
+        propertyId: 'p1',
+        licensePlate: 'ABC123',
+        violationType: 'no_permit',
+        status: 'paid',
+        description: 'No permit displayed',
+        issuedAt: '2024-06-01',
+        issuedBy: 'security',
+        fineAmount: 50,
+        dueDate: '2024-07-01',
+        paidAt: '2024-06-15',
+        createdAt: '',
+      });
+
+      parkingViolationStore.set('v2', {
+        id: 'v2',
+        propertyId: 'p1',
+        licensePlate: 'DEF456',
+        violationType: 'fire_lane',
+        status: 'fine_due',
+        description: 'Parked in fire lane',
+        issuedAt: '2024-06-15',
+        issuedBy: 'security',
+        fineAmount: 150,
+        dueDate: '2024-07-15',
+        createdAt: '',
+      });
+
+      parkingViolationStore.set('v3', {
+        id: 'v3',
+        propertyId: 'p1',
+        licensePlate: 'GHI789',
+        violationType: 'abandoned',
+        status: 'towed',
+        description: 'Abandoned vehicle',
+        issuedAt: '2024-06-20',
+        issuedBy: 'security',
+        fineAmount: 100,
+        dueDate: '2024-07-20',
+        createdAt: '',
+      });
+
+      const stats = calculateViolationStats('p1', '2024-06-01', '2024-06-30');
+
+      expect(stats.total).toBe(3);
+      expect(stats.byType.no_permit).toBe(1);
+      expect(stats.byType.fire_lane).toBe(1);
+      expect(stats.byType.abandoned).toBe(1);
+      expect(stats.totalFines).toBe(300);
+      expect(stats.collectedFines).toBe(50);
+      expect(stats.outstandingFines).toBe(250);
+      expect(stats.towedVehicles).toBe(1);
+    });
+  });
+
+  describe('calculateParkingRevenue', () => {
+    it('should calculate parking revenue from permits and fines', () => {
+      parkingPermitStore.set('p1', {
+        id: 'p1',
+        propertyId: 'prop1',
+        tenantId: 't1',
+        leaseId: 'l1',
+        vehicleId: 'v1',
+        permitNumber: 'PMT-12345678',
+        type: 'assigned',
+        status: 'active',
+        startDate: '2024-01-01',
+        endDate: '2024-12-31',
+        monthlyFee: 50,
+        issuedAt: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      parkingViolationStore.set('v1', {
+        id: 'v1',
+        propertyId: 'prop1',
+        licensePlate: 'ABC123',
+        violationType: 'no_permit',
+        status: 'paid',
+        description: 'No permit',
+        issuedAt: '2024-03-01',
+        issuedBy: 'security',
+        fineAmount: 50,
+        dueDate: '2024-04-01',
+        paidAt: '2024-03-15',
+        createdAt: '',
+      });
+
+      const revenue = calculateParkingRevenue('prop1', '2024-01-01', '2024-06-30');
+
+      expect(revenue.permitRevenue).toBeGreaterThan(0);
+      expect(revenue.violationRevenue).toBe(50);
+      expect(revenue.totalRevenue).toBe(revenue.permitRevenue + revenue.violationRevenue);
+      expect(revenue.permitCount).toBe(1);
+    });
+  });
+
+  describe('getActivePermitsForTenant', () => {
+    it('should return only valid active permits', () => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      parkingPermitStore.set('p1', {
+        id: 'p1',
+        propertyId: 'prop1',
+        tenantId: 't1',
+        leaseId: 'l1',
+        vehicleId: 'v1',
+        permitNumber: 'PMT-11111111',
+        type: 'assigned',
+        status: 'active',
+        startDate: '2024-01-01',
+        endDate: tomorrow.toISOString().split('T')[0],
+        monthlyFee: 50,
+        issuedAt: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      parkingPermitStore.set('p2', {
+        id: 'p2',
+        propertyId: 'prop1',
+        tenantId: 't1',
+        leaseId: 'l1',
+        vehicleId: 'v2',
+        permitNumber: 'PMT-22222222',
+        type: 'general',
+        status: 'expired',
+        startDate: '2023-01-01',
+        endDate: '2023-12-31',
+        monthlyFee: 25,
+        issuedAt: '2023-01-01',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const activePermits = getActivePermitsForTenant('t1');
+
+      expect(activePermits).toHaveLength(1);
+      expect(activePermits[0].permitNumber).toBe('PMT-11111111');
     });
   });
 });
