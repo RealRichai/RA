@@ -3,8 +3,13 @@ import type { FastifyInstance } from 'fastify';
 
 import { metricsRoutes } from '../plugins/metrics';
 
+import { apiKeyAdminRoutes } from './admin/api-keys';
 import { auditLogRoutes } from './admin/audit-logs';
+import { emailTemplateAdminRoutes } from './admin/email-templates';
+import { featureFlagAdminRoutes } from './admin/feature-flags';
 import { jobRoutes } from './admin/jobs';
+import { rateLimitAdminRoutes } from './admin/rate-limits';
+import { webhookAdminRoutes } from './admin/webhooks';
 import { aiRoutes } from './ai/routes';
 import { analyticsRoutes } from './analytics/routes';
 import { authRoutes } from './auth/routes';
@@ -60,6 +65,11 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
       await api.register(jobRoutes, { prefix: '/admin/jobs' });
+      await api.register(webhookAdminRoutes, { prefix: '/admin/webhooks' });
+      await api.register(rateLimitAdminRoutes, { prefix: '/admin/rate-limits' });
+      await api.register(apiKeyAdminRoutes, { prefix: '/admin/api-keys' });
+      await api.register(emailTemplateAdminRoutes, { prefix: '/admin/email-templates' });
+      await api.register(featureFlagAdminRoutes, { prefix: '/admin/feature-flags' });
     },
     { prefix }
   );
