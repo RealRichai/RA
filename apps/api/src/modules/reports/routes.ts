@@ -5,7 +5,13 @@
  * Supports vacancy reports, rent roll, P&L statements, and custom reports.
  */
 
-import { prisma } from '@realriches/database';
+import {
+  prisma,
+  Prisma,
+  type ReportType as PrismaReportType,
+  type ReportFrequency as PrismaReportFrequency,
+  type ReportFormat as PrismaReportFormat,
+} from '@realriches/database';
 import { generatePrefixedId, logger, AppError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -522,8 +528,10 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      const schedules = Array.from(reportSchedules.values())
-        .filter(s => s.userId === request.user!.id);
+      const schedules = await prisma.reportSchedule.findMany({
+        where: { userId: request.user!.id },
+        orderBy: { createdAt: 'desc' },
+      });
 
       return reply.send({
         success: true,
@@ -557,28 +565,32 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const data = CreateScheduleSchema.parse(request.body);
-      const now = new Date();
 
-      const schedule: ReportSchedule = {
-        id: generatePrefixedId('rpt'),
-        userId: request.user.id,
-        name: data.name,
-        reportType: data.reportType,
+      // Calculate next run date using temporary schedule object
+      const tempSchedule = {
         frequency: data.frequency,
         dayOfWeek: data.dayOfWeek,
         dayOfMonth: data.dayOfMonth,
         timeOfDay: data.timeOfDay,
-        format: data.format,
-        recipients: data.recipients,
-        filters: data.filters || {},
-        isActive: true,
-        createdAt: now,
-        updatedAt: now,
-        nextRunAt: undefined,
       };
+      const nextRunAt = calculateNextRunDate(tempSchedule as ReportSchedule);
 
-      schedule.nextRunAt = calculateNextRunDate(schedule);
-      reportSchedules.set(schedule.id, schedule);
+      const schedule = await prisma.reportSchedule.create({
+        data: {
+          userId: request.user.id,
+          name: data.name,
+          reportType: data.reportType as PrismaReportType,
+          frequency: data.frequency as PrismaReportFrequency,
+          dayOfWeek: data.dayOfWeek,
+          dayOfMonth: data.dayOfMonth,
+          timeOfDay: data.timeOfDay,
+          format: data.format as PrismaReportFormat,
+          recipients: data.recipients,
+          filters: data.filters || {},
+          isActive: true,
+          nextRunAt,
+        },
+      });
 
       logger.info({ scheduleId: schedule.id, reportType: schedule.reportType }, 'Report schedule created');
 
@@ -617,15 +629,37 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { scheduleId } = request.params;
-      const schedule = reportSchedules.get(scheduleId);
+      const existing = await prisma.reportSchedule.findUnique({
+        where: { id: scheduleId },
+      });
 
-      if (!schedule || schedule.userId !== request.user.id) {
+      if (!existing || existing.userId !== request.user.id) {
         throw new AppError('NOT_FOUND', 'Schedule not found', 404);
       }
 
       const data = UpdateScheduleSchema.parse(request.body);
-      Object.assign(schedule, data, { updatedAt: new Date() });
-      schedule.nextRunAt = calculateNextRunDate(schedule);
+
+      // Build update data
+      const updateData: Prisma.ReportScheduleUpdateInput = {};
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.reportType !== undefined) updateData.reportType = data.reportType as PrismaReportType;
+      if (data.frequency !== undefined) updateData.frequency = data.frequency as PrismaReportFrequency;
+      if (data.dayOfWeek !== undefined) updateData.dayOfWeek = data.dayOfWeek;
+      if (data.dayOfMonth !== undefined) updateData.dayOfMonth = data.dayOfMonth;
+      if (data.timeOfDay !== undefined) updateData.timeOfDay = data.timeOfDay;
+      if (data.format !== undefined) updateData.format = data.format as PrismaReportFormat;
+      if (data.recipients !== undefined) updateData.recipients = data.recipients;
+      if (data.filters !== undefined) updateData.filters = data.filters;
+      if (data.isActive !== undefined) updateData.isActive = data.isActive;
+
+      // Recalculate next run date
+      const mergedSchedule = { ...existing, ...data };
+      updateData.nextRunAt = calculateNextRunDate(mergedSchedule as ReportSchedule);
+
+      const schedule = await prisma.reportSchedule.update({
+        where: { id: scheduleId },
+        data: updateData,
+      });
 
       return reply.send({
         success: true,
@@ -659,13 +693,15 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { scheduleId } = request.params;
-      const schedule = reportSchedules.get(scheduleId);
+      const existing = await prisma.reportSchedule.findUnique({
+        where: { id: scheduleId },
+      });
 
-      if (!schedule || schedule.userId !== request.user.id) {
+      if (!existing || existing.userId !== request.user.id) {
         throw new AppError('NOT_FOUND', 'Schedule not found', 404);
       }
 
-      reportSchedules.delete(scheduleId);
+      await prisma.reportSchedule.delete({ where: { id: scheduleId } });
 
       return reply.send({
         success: true,
@@ -776,20 +812,28 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { scheduleId, limit = 20 } = request.query;
-      const userScheduleIds = Array.from(reportSchedules.values())
-        .filter(s => s.userId === request.user!.id)
-        .map(s => s.id);
 
-      let runs = Array.from(reportRuns.values())
-        .filter(r => userScheduleIds.includes(r.scheduleId));
+      // Build where clause to get runs for user's schedules
+      const whereClause: Prisma.ReportRunWhereInput = {
+        schedule: {
+          userId: request.user!.id,
+        },
+      };
 
       if (scheduleId) {
-        runs = runs.filter(r => r.scheduleId === scheduleId);
+        whereClause.scheduleId = scheduleId;
       }
 
-      runs = runs
-        .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
-        .slice(0, limit);
+      const runs = await prisma.reportRun.findMany({
+        where: whereClause,
+        orderBy: { startedAt: 'desc' },
+        take: limit,
+        include: {
+          schedule: {
+            select: { name: true, reportType: true },
+          },
+        },
+      });
 
       return reply.send({
         success: true,

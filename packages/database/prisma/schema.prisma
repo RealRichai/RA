@@ -83,6 +83,7 @@ model User {
   deviceRegistrations        DeviceRegistration[]
   owners                     Owner[]
   comparableSearches         ComparableSearch[]
+  reportSchedules            ReportSchedule[]
 
   @@index([email])
   @@index([role])
@@ -7630,4 +7631,94 @@ model AmenityUsageLog {
   @@index([tenantId])
   @@index([date])
   @@map("amenity_usage_logs")
+}
+
+// =============================================================================
+// Scheduled Reports Models
+// =============================================================================
+
+enum ReportType {
+  vacancy
+  rent_roll
+  profit_loss
+  maintenance
+  lease_expiry
+  payment_aging
+  custom
+
+  @@map("report_type")
+}
+
+enum ReportFrequency {
+  daily
+  weekly
+  monthly
+  quarterly
+
+  @@map("report_frequency")
+}
+
+enum ReportFormat {
+  pdf
+  csv
+  excel
+
+  @@map("report_format")
+}
+
+enum ReportRunStatus {
+  pending
+  running
+  completed
+  failed
+
+  @@map("report_run_status")
+}
+
+// ReportSchedule Model
+model ReportSchedule {
+  id          String          @id @default(uuid()) @db.Uuid
+  userId      String          @map("user_id") @db.Uuid
+  name        String
+  reportType  ReportType      @map("report_type")
+  frequency   ReportFrequency
+  dayOfWeek   Int?            @map("day_of_week") // 0-6 for weekly
+  dayOfMonth  Int?            @map("day_of_month") // 1-31 for monthly
+  timeOfDay   String          @map("time_of_day") // HH:MM format
+  format      ReportFormat    @default(pdf)
+  recipients  Json            @default("[]") // string[] of emails
+  filters     Json            @default("{}") // Record<string, unknown>
+  isActive    Boolean         @default(true) @map("is_active")
+  lastRunAt   DateTime?       @map("last_run_at")
+  nextRunAt   DateTime?       @map("next_run_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs        ReportRun[]
+
+  @@index([userId])
+  @@index([isActive])
+  @@index([nextRunAt])
+  @@map("report_schedules")
+}
+
+// ReportRun Model
+model ReportRun {
+  id             String          @id @default(uuid()) @db.Uuid
+  scheduleId     String          @map("schedule_id") @db.Uuid
+  status         ReportRunStatus @default(pending)
+  startedAt      DateTime        @default(now()) @map("started_at")
+  completedAt    DateTime?       @map("completed_at")
+  fileUrl        String?         @map("file_url")
+  error          String?
+  recipientsSent Int             @default(0) @map("recipients_sent")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  schedule       ReportSchedule  @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("report_runs")
 }
