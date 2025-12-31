@@ -58,6 +58,92 @@ function toNumber(value: unknown): number {
   return Number(value) || 0;
 }
 
+export interface InspectionItem {
+  name: string;
+  condition: ItemCondition;
+  notes?: string | null;
+  requiresRepair?: boolean;
+  estimatedRepairCost?: number;
+}
+
+export interface InspectionRoom {
+  roomType: RoomType;
+  roomName: string;
+  items: InspectionItem[];
+  condition?: ItemCondition;
+}
+
+const conditionScores: Record<ItemCondition, number> = {
+  excellent: 5,
+  good: 4,
+  fair: 3,
+  poor: 2,
+  damaged: 1,
+  missing: 0,
+};
+
+const conditionFromScore = (score: number): ItemCondition => {
+  if (score >= 4.5) return 'excellent';
+  if (score >= 3.5) return 'good';
+  if (score >= 2.5) return 'fair';
+  if (score >= 1.5) return 'poor';
+  return 'damaged';
+};
+
+export function calculateOverallCondition(items: InspectionItem[]): ItemCondition {
+  if (items.length === 0) return 'good';
+
+  const totalScore = items.reduce((sum, item) => sum + conditionScores[item.condition], 0);
+  const avgScore = totalScore / items.length;
+  return conditionFromScore(avgScore);
+}
+
+export function generateSummary(rooms: InspectionRoom[]): InspectionSummary {
+  const allItems = rooms.flatMap(r => r.items);
+  const conditionBreakdown: Record<ItemCondition, number> = {
+    excellent: 0,
+    good: 0,
+    fair: 0,
+    poor: 0,
+    damaged: 0,
+    missing: 0,
+  };
+
+  let itemsRequiringRepair = 0;
+  let estimatedTotalRepairCost = 0;
+
+  for (const item of allItems) {
+    conditionBreakdown[item.condition]++;
+    if (item.requiresRepair) {
+      itemsRequiringRepair++;
+      estimatedTotalRepairCost += item.estimatedRepairCost || 0;
+    }
+  }
+
+  const overallCondition = calculateOverallCondition(allItems);
+
+  const recommendations: string[] = [];
+  if (conditionBreakdown.damaged > 0) {
+    recommendations.push(`${conditionBreakdown.damaged} item(s) require immediate repair`);
+  }
+  if (conditionBreakdown.poor > 0) {
+    recommendations.push(`${conditionBreakdown.poor} item(s) in poor condition should be addressed`);
+  }
+  if (conditionBreakdown.missing > 0) {
+    recommendations.push(`${conditionBreakdown.missing} item(s) are missing and need replacement`);
+  }
+
+  return {
+    totalRooms: rooms.length,
+    totalItems: allItems.length,
+    conditionBreakdown,
+    itemsRequiringRepair,
+    estimatedTotalRepairCost,
+    overallCondition,
+    recommendations,
+  };
+}
+
 // Schemas
 const scheduleInspectionSchema = z.object({
   propertyId: z.string().uuid(),
@@ -122,81 +208,6 @@ const createTemplateSchema = z.object({
   })),
   isDefault: z.boolean().default(false),
 });
-
-// Helper functions
-function calculateOverallCondition(items: Array<{ condition: ItemCondition }>): ItemCondition {
-  if (items.length === 0) return 'good';
-
-  const conditionScores: Record<ItemCondition, number> = {
-    excellent: 5,
-    good: 4,
-    fair: 3,
-    poor: 2,
-    damaged: 1,
-    missing: 0,
-  };
-
-  const totalScore = items.reduce((sum, item) => sum + conditionScores[item.condition], 0);
-  const avgScore = totalScore / items.length;
-
-  if (avgScore >= 4.5) return 'excellent';
-  if (avgScore >= 3.5) return 'good';
-  if (avgScore >= 2.5) return 'fair';
-  if (avgScore >= 1.5) return 'poor';
-  return 'damaged';
-}
-
-function generateSummary(rooms: Array<{
-  items: Array<{
-    condition: ItemCondition;
-    requiresRepair: boolean;
-    estimatedRepairCost: number | null;
-  }>;
-}>): InspectionSummary {
-  const allItems = rooms.flatMap((r) => r.items);
-
-  const conditionBreakdown: Record<ItemCondition, number> = {
-    excellent: 0,
-    good: 0,
-    fair: 0,
-    poor: 0,
-    damaged: 0,
-    missing: 0,
-  };
-
-  for (const item of allItems) {
-    conditionBreakdown[item.condition]++;
-  }
-
-  const itemsRequiringRepair = allItems.filter((i) => i.requiresRepair).length;
-  const estimatedTotalRepairCost = allItems
-    .filter((i) => i.requiresRepair && i.estimatedRepairCost)
-    .reduce((sum, i) => sum + (i.estimatedRepairCost || 0), 0);
-
-  const recommendations: string[] = [];
-  if (conditionBreakdown.damaged > 0) {
-    recommendations.push(`${conditionBreakdown.damaged} item(s) require immediate attention due to damage`);
-  }
-  if (conditionBreakdown.missing > 0) {
-    recommendations.push(`${conditionBreakdown.missing} item(s) are missing and need replacement`);
-  }
-  if (itemsRequiringRepair > 0) {
-    recommendations.push(`${itemsRequiringRepair} item(s) require repair, estimated cost: $${estimatedTotalRepairCost}`);
-  }
-  if (conditionBreakdown.poor > 3) {
-    recommendations.push('Consider scheduling routine maintenance to address multiple items in poor condition');
-  }
-
-  return {
-    totalRooms: rooms.length,
-    totalItems: allItems.length,
-    conditionBreakdown,
-    itemsRequiringRepair,
-    estimatedTotalRepairCost,
-    overallCondition: calculateOverallCondition(allItems),
-    recommendations,
-  };
-}
 
 // Route handlers
 export async function inspectionRoutes(app: FastifyInstance): Promise<void> {

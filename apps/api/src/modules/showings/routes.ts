@@ -230,6 +230,82 @@ export async function findAvailableAgent(
   return null;
 }
 
+export interface Showing {
+  id: string;
+  status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
+  scheduledAt: Date;
+  feedback?: {
+    rating?: number;
+    interested?: boolean;
+  } | null;
+}
+
+export interface ListingAvailability {
+  id: string;
+  listingId: string;
+  propertyId: string;
+  defaultDuration: number;
+  bufferTime: number;
+  minNoticeHours: number;
+  maxAdvanceDays: number;
+  allowSelfSchedule: boolean;
+  allowSelfGuided: boolean;
+  requireApproval: boolean;
+  weeklySchedule: Array<{
+    dayOfWeek: DayOfWeek;
+    startTime: string;
+    endTime: string;
+    status: 'available' | 'blocked' | 'tentative';
+  }>;
+}
+
+export function calculateShowingStats(showings: Showing[]): {
+  total: number;
+  completed: number;
+  cancelled: number;
+  noShow: number;
+  feedbackCount: number;
+  averageRating: number;
+  conversionRate: number;
+} {
+  if (showings.length === 0) {
+    return {
+      total: 0,
+      completed: 0,
+      cancelled: 0,
+      noShow: 0,
+      feedbackCount: 0,
+      averageRating: 0,
+      conversionRate: 0,
+    };
+  }
+
+  const completed = showings.filter(s => s.status === 'completed').length;
+  const cancelled = showings.filter(s => s.status === 'cancelled').length;
+  const noShow = showings.filter(s => s.status === 'no_show').length;
+
+  const withFeedback = showings.filter(s => s.feedback?.rating !== undefined);
+  const feedbackCount = withFeedback.length;
+  const averageRating = feedbackCount > 0
+    ? Math.round(withFeedback.reduce((sum, s) => sum + (s.feedback?.rating || 0), 0) / feedbackCount)
+    : 0;
+
+  const interestedCount = withFeedback.filter(s => s.feedback?.interested === true).length;
+  const conversionRate = feedbackCount > 0
+    ? Math.round((interestedCount / feedbackCount) * 100)
+    : 0;
+
+  return {
+    total: showings.length,
+    completed,
+    cancelled,
+    noShow,
+    feedbackCount,
+    averageRating,
+    conversionRate,
+  };
+}
+
 // ============================================================================
 // Validation Schemas
 // ============================================================================

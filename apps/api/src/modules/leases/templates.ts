@@ -276,13 +276,164 @@ export function evaluateCondition(condition: ClauseCondition, variables: Record<
   }
 }
 
-export function shouldIncludeClause(conditions: ClauseCondition[], variables: Record<string, string | number | boolean | Date>): boolean {
-  if (conditions.length === 0) {
+export function shouldIncludeClause(
+  clauseOrConditions: TemplateClause | ClauseCondition[],
+  variables: Record<string, string | number | boolean | Date>
+): boolean {
+  const conditions = Array.isArray(clauseOrConditions)
+    ? clauseOrConditions
+    : clauseOrConditions.conditions;
+
+  if (!conditions || conditions.length === 0) {
     return true;
   }
 
   return conditions.every((condition) => evaluateCondition(condition, variables));
 }
+
+// Export clauses Map for testing purposes
+export const clauses = new Map<string, Clause>();
+
+// Initialize default clauses in the Map for testing
+const initClausesMap = () => {
+  const defaultClauses: Clause[] = [
+    {
+      id: 'c-parties',
+      name: 'parties',
+      title: 'Parties to the Agreement',
+      category: 'general',
+      content: 'This Residential Lease Agreement ("Agreement") is entered into as of {{lease_start_date}} by and between {{landlord_name}} ("Landlord") and {{tenant_names}} ("Tenant(s)") for the property located at {{property_address}} ("Premises").',
+      summary: 'Identifies the landlord, tenant(s), and property address',
+      jurisdiction: null,
+      jurisdictionType: null,
+      requirement: 'required',
+      variables: ['lease_start_date', 'landlord_name', 'tenant_names', 'property_address'],
+      dependencies: [],
+      incompatibleWith: [],
+      effectiveDate: null,
+      expiryDate: null,
+      legalReference: null,
+      version: 1,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: 'c-lease-term',
+      name: 'lease_term',
+      title: 'Lease Term',
+      category: 'general',
+      content: 'The term of this Lease shall commence on {{lease_start_date}} and shall terminate on {{lease_end_date}}.',
+      summary: 'Specifies the start and end dates of the lease',
+      jurisdiction: null,
+      jurisdictionType: null,
+      requirement: 'required',
+      variables: ['lease_start_date', 'lease_end_date'],
+      dependencies: [],
+      incompatibleWith: [],
+      effectiveDate: null,
+      expiryDate: null,
+      legalReference: null,
+      version: 1,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: 'c-rent',
+      name: 'rent_payment',
+      title: 'Rent Payment',
+      category: 'rent',
+      content: 'Tenant agrees to pay Landlord the sum of {{monthly_rent}} per month as rent for the Premises.',
+      summary: 'Specifies monthly rent amount and payment terms',
+      jurisdiction: null,
+      jurisdictionType: null,
+      requirement: 'required',
+      variables: ['monthly_rent', 'rent_due_day', 'payment_address'],
+      dependencies: [],
+      incompatibleWith: [],
+      effectiveDate: null,
+      expiryDate: null,
+      legalReference: null,
+      version: 1,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: 'c-security-deposit',
+      name: 'security_deposit',
+      title: 'Security Deposit',
+      category: 'security_deposit',
+      content: 'Upon execution of this Agreement, Tenant shall deposit with Landlord the sum of {{security_deposit_amount}} as a security deposit.',
+      summary: 'Specifies security deposit amount and terms',
+      jurisdiction: null,
+      jurisdictionType: null,
+      requirement: 'required',
+      variables: ['security_deposit_amount'],
+      dependencies: [],
+      incompatibleWith: [],
+      effectiveDate: null,
+      expiryDate: null,
+      legalReference: null,
+      version: 1,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: 'c-nyc-rent-stabilization',
+      name: 'nyc_rent_stabilization',
+      title: 'NYC Rent Stabilization Notice',
+      category: 'compliance',
+      content: 'This unit is subject to NYC Rent Stabilization laws. The legal regulated rent is {{legal_rent}}.',
+      summary: 'Required NYC rent stabilization disclosure',
+      jurisdiction: 'NYC',
+      jurisdictionType: 'city',
+      requirement: 'conditional',
+      variables: ['legal_rent'],
+      dependencies: [],
+      incompatibleWith: [],
+      effectiveDate: null,
+      expiryDate: null,
+      legalReference: 'NYC Admin Code §26-501 et seq.',
+      version: 1,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: 'c-pet-policy',
+      name: 'pet_policy',
+      title: 'Pet Policy',
+      category: 'pets',
+      content: 'Tenant {{pets_allowed}} keep pets on the Premises. {{pet_restrictions}}',
+      summary: 'Defines pet policy and restrictions',
+      jurisdiction: null,
+      jurisdictionType: null,
+      requirement: 'conditional',
+      variables: ['pets_allowed', 'pet_restrictions'],
+      dependencies: [],
+      incompatibleWith: [],
+      effectiveDate: null,
+      expiryDate: null,
+      legalReference: null,
+      version: 1,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  ];
+
+  for (const clause of defaultClauses) {
+    clauses.set(clause.id, clause);
+  }
+};
+
+initClausesMap();
+
+// Export templates Map for testing purposes
+export const templates = new Map<string, LeaseTemplate>();
 
 // Default clauses data
 const defaultClausesData = [

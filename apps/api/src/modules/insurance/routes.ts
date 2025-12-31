@@ -41,6 +41,97 @@ function toNumber(value: unknown): number {
   return Number(value) || 0;
 }
 
+export interface InsurancePolicy {
+  id: string;
+  propertyId?: string | null;
+  policyType: PolicyType;
+  policyNumber: string;
+  carrier: string;
+  expirationDate: Date;
+  coverageAmount: number;
+  renewalReminder?: number;
+  autoRenew?: boolean;
+}
+
+export function daysUntil(date: Date): number {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
+  const diffMs = target.getTime() - now.getTime();
+  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+}
+
+export function createExpirationAlert(policy: InsurancePolicy): { type: string; priority: AlertPriority; message: string } | null {
+  const days = daysUntil(policy.expirationDate);
+  const renewalReminder = policy.renewalReminder || 30;
+
+  if (days < 0) {
+    return {
+      type: 'expiration',
+      priority: 'critical',
+      message: `Policy ${policy.policyNumber} has expired`,
+    };
+  }
+
+  if (days <= 7) {
+    return {
+      type: 'expiration',
+      priority: 'high',
+      message: `Policy ${policy.policyNumber} expires in ${days} days`,
+    };
+  }
+
+  if (days <= renewalReminder) {
+    return {
+      type: 'renewal',
+      priority: 'medium',
+      message: `Policy ${policy.policyNumber} expires in ${days} days - renewal reminder`,
+    };
+  }
+
+  return null;
+}
+
+export async function analyzeCoverage(propertyId: string, propertyValue: number) {
+  const policies = await prisma.insurancePolicy.findMany({
+    where: { propertyId, status: 'active' },
+  });
+
+  const totalCoverage = policies.reduce((sum, p) => sum + toNumber(p.coverageAmount), 0);
+  const coverageRatio = propertyValue > 0 ? totalCoverage / propertyValue : 0;
+
+  const policyTypes = policies.map(p => p.policyType);
+  const requiredTypes: PolicyType[] = ['property', 'liability'];
+  const recommendedTypes: PolicyType[] = ['umbrella', 'flood'];
+
+  const missingRequired = requiredTypes.filter(t => !policyTypes.includes(t as PrismaInsurancePolicyType));
+  const missingRecommended = recommendedTypes.filter(t => !policyTypes.includes(t as PrismaInsurancePolicyType));
+
+  const coverageGaps: string[] = [];
+  if (coverageRatio < 0.8) {
+    coverageGaps.push('Underinsured: coverage is less than 80% of property value');
+  }
+  missingRequired.forEach(t => coverageGaps.push(`Missing required ${t} coverage`));
+
+  const recommendations: string[] = [];
+  if (coverageRatio < 1.0) {
+    recommendations.push('Consider increasing coverage to 100% of property value');
+  }
+  if (propertyValue > 1000000 && !policyTypes.includes('umbrella' as PrismaInsurancePolicyType)) {
+    recommendations.push('Consider umbrella policy for high-value property');
+  }
+  missingRecommended.forEach(t => recommendations.push(`Consider adding ${t} coverage`));
+
+  return {
+    totalCoverage,
+    coverageRatio,
+    coverageGaps,
+    recommendations,
+    policiesAnalyzed: policies.length,
+  };
+}
+
 // Schemas
 const createPolicySchema = z.object({
   propertyId: z.string().uuid().optional(),

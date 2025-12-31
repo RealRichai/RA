@@ -14,6 +14,74 @@ function toNumber(value: unknown): number {
   return Number(value) || 0;
 }
 
+export function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+export function formatPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
+export async function getRentRollForProperty(propertyId: string) {
+  return prisma.rentRollEntry.findMany({
+    where: { propertyId },
+    orderBy: { unitNumber: 'asc' },
+  });
+}
+
+export async function getVacancyAnalysis(propertyId: string) {
+  const entries = await prisma.rentRollEntry.findMany({
+    where: { propertyId },
+  });
+
+  const vacant = entries.filter(e => e.occupancyStatus === 'vacant');
+  const total = entries.length;
+
+  return {
+    vacantUnits: vacant.length,
+    totalUnits: total,
+    vacancyRate: total > 0 ? (vacant.length / total) * 100 : 0,
+    potentialRevenueLoss: vacant.reduce((sum, e) => sum + toNumber(e.marketRent), 0),
+  };
+}
+
+export async function getCollectionsAnalysis(propertyId: string) {
+  const entries = await prisma.rentRollEntry.findMany({
+    where: { propertyId },
+  });
+
+  const withBalance = entries.filter(e => toNumber(e.balance) > 0);
+  const totalBalance = entries.reduce((sum, e) => sum + toNumber(e.balance), 0);
+
+  return {
+    unitsWithBalance: withBalance.length,
+    totalOutstandingBalance: totalBalance,
+    averageBalance: withBalance.length > 0 ? totalBalance / withBalance.length : 0,
+  };
+}
+
+export async function getRenewalAnalysis(propertyId: string) {
+  const entries = await prisma.rentRollEntry.findMany({
+    where: { propertyId, occupancyStatus: 'occupied' },
+  });
+
+  const now = new Date();
+  const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const in60Days = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
+  const in90Days = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+
+  return {
+    expiring30Days: entries.filter(e => e.leaseEnd && e.leaseEnd <= in30Days && e.leaseEnd > now).length,
+    expiring60Days: entries.filter(e => e.leaseEnd && e.leaseEnd <= in60Days && e.leaseEnd > now).length,
+    expiring90Days: entries.filter(e => e.leaseEnd && e.leaseEnd <= in90Days && e.leaseEnd > now).length,
+  };
+}
+
 interface RentRollSummary {
   totalUnits: number;
   occupiedUnits: number;

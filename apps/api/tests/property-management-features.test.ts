@@ -14,15 +14,12 @@ const paymentMethods = new Map<string, unknown>();
 const inspections = new Map<string, unknown>();
 const inspectionTemplates = new Map<string, unknown>();
 
-// Vendor stores
-const vendors = new Map<string, unknown>();
+// Vendor stores (vendors is imported from routes)
 const workOrders = new Map<string, unknown>();
 const invoices = new Map<string, unknown>();
 const ratings = new Map<string, unknown>();
 
-// Lease Template stores
-const leaseTemplates = new Map<string, unknown>();
-const clauses = new Map<string, unknown>();
+// Lease Template stores (leaseTemplates, clauses are imported from templates)
 const generatedLeases = new Map<string, unknown>();
 
 // Portfolio stores
@@ -113,29 +110,19 @@ const amenityWaitlists = new Map<string, unknown>();
 const amenityRecurringBookings = new Map<string, unknown>();
 const amenityUsageLogs = new Map<string, unknown>();
 
-// Package stores
-const packageLockers = new Map<string, unknown>();
+// Package stores (packageLockers is imported from routes)
 const packageStore = new Map<string, unknown>();
 const packagePickupLogs = new Map<string, unknown>();
 const packageProxyAuthorizations = new Map<string, unknown>();
 const packageForwardingAddresses = new Map<string, unknown>();
 
-// Pet stores
-const petStore = new Map<string, unknown>();
-const petBreedRestrictions = new Map<string, unknown>();
-const petPolicyStore = new Map<string, unknown>();
-const petVaccinationRecords = new Map<string, unknown>();
-const petIncidentStore = new Map<string, unknown>();
+// Pet stores (petStore, petBreedRestrictions, petPolicyStore, petVaccinationRecords, petIncidentStore are imported from routes)
 const petScreeningStore = new Map<string, unknown>();
 const petFeeStore = new Map<string, unknown>();
 
-// Parking stores
-const parkingLotStore = new Map<string, unknown>();
-const parkingSpaceStore = new Map<string, unknown>();
+// Parking stores (parkingLotStore, parkingSpaceStore, parkingPermitStore, guestPassStore, violationStore are imported from routes)
 const vehicleStore = new Map<string, unknown>();
-const parkingPermitStore = new Map<string, unknown>();
-const guestPassStore = new Map<string, unknown>();
-const parkingViolationStore = new Map<string, unknown>();
+const parkingViolationStore = violationStore;
 const towRecordStore = new Map<string, unknown>();
 
 // Storage stores
@@ -222,14 +209,17 @@ import {
   type InspectionRoom,
 } from '../src/modules/inspections/routes';
 
-import { findBestVendor } from '../src/modules/vendors/routes';
+import { findBestVendor, vendors } from '../src/modules/vendors/routes';
 
 import {
   interpolateVariables,
   evaluateCondition,
   shouldIncludeClause,
+  clauses,
+  templates as leaseTemplates,
   type ClauseCondition,
   type TemplateClause,
+  type Clause,
 } from '../src/modules/leases/templates';
 
 // Portfolio Dashboard imports
@@ -354,14 +344,39 @@ import { generateConfirmationCode as generateAmenityConfirmationCode } from '../
 // Package Tracking imports
 import {
   generateAccessCode,
-  findAvailableLocker,
+  findAvailableLockerSync as findAvailableLocker,
+  packageLockers,
   isPackageOverdue,
   calculatePackageStats,
-  getLockerUtilization,
   validateTrackingNumber,
-  type Package,
-  type PackageLocker,
 } from '../src/modules/packages/routes';
+
+// Package types
+interface Package {
+  id: string;
+  propertyId: string;
+  tenantId: string;
+  carrier: string;
+  trackingNumber: string;
+  size: string;
+  status: string;
+  receivedAt: string;
+  pickedUpAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  isOverdue?: boolean;
+}
+
+interface PackageLocker {
+  id: string;
+  propertyId: string;
+  lockerNumber: string;
+  size: string;
+  status: string;
+  location?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 // Pet Management imports
 import {
@@ -372,6 +387,11 @@ import {
   getIncidentHistory,
   calculateRiskScore,
   getPropertyPetCensus,
+  petBreedRestrictions,
+  petStore,
+  petPolicyStore,
+  petVaccinationRecords,
+  petIncidentStore,
   type Pet,
   type PetPolicy,
   type VaccinationRecord,
@@ -391,10 +411,15 @@ import {
   calculateViolationStats,
   getViolationFineAmount,
   calculateParkingRevenue,
+  parkingLotStore,
+  parkingSpaceStore,
+  parkingPermitStore,
+  guestPassStore,
+  violationStore,
   type ParkingLot,
   type ParkingSpace,
   type ParkingPermit,
-  type GuestPass,
+  type ParkingGuestPass as GuestPass,
   type ParkingViolation,
 } from '../src/modules/parking/routes';
 

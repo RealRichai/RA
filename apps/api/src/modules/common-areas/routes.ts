@@ -40,9 +40,15 @@ interface CommonAreaWithOperatingHours {
   cleanupTimeMinutes: number;
   cancellationHours: number;
   capacity: number;
-  hourlyRate: { toNumber: () => number } | null;
+  hourlyRate: { toNumber: () => number } | number | null;
   requiresDeposit: boolean;
-  depositAmount: { toNumber: () => number } | null;
+  depositAmount: { toNumber: () => number } | number | null;
+}
+
+function extractNumber(value: { toNumber: () => number } | number | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return value;
+  return value.toNumber();
 }
 
 export function getOperatingHoursForDay(
@@ -139,7 +145,7 @@ export function calculateReservationFee(
   const durationMinutes = endMinutes - startMinutes;
   const hours = Math.ceil(durationMinutes / 60);
 
-  const fee = hours * area.hourlyRate.toNumber();
+  const fee = hours * extractNumber(area.hourlyRate);
 
   return { fee, hours };
 }

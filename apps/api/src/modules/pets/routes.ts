@@ -13,10 +13,104 @@ import {
 } from '@realriches/database';
 
 // ============================================================================
+// Exported Maps for testing
+// ============================================================================
+export interface BreedRestriction {
+  id: string;
+  propertyId: string;
+  petType: string;
+  breed: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface Pet {
+  id: string;
+  tenantId: string;
+  propertyId: string;
+  unitId?: string;
+  name: string;
+  type: PetType;
+  breed?: string;
+  weight?: number;
+  age?: number;
+  isServiceAnimal?: boolean;
+  isEmotionalSupport?: boolean;
+  status?: string;
+}
+
+export interface PetPolicy {
+  id: string;
+  propertyId: string;
+  allowedTypes: PetType[];
+  maxWeight: number;
+  restrictedBreeds: string[];
+  serviceAnimalExempt: boolean;
+  emotionalSupportExempt: boolean;
+  petDeposit: number;
+  monthlyPetRent: number;
+  oneTimePetFee: number;
+  maxPets: number;
+}
+
+export interface VaccinationRecord {
+  id: string;
+  petId: string;
+  type: VaccinationType;
+  administeredDate: Date | string;
+  expirationDate: Date | string;
+  veterinarianName?: string;
+  isRequired: boolean;
+}
+
+export interface PetIncident {
+  id: string;
+  petId: string;
+  type: PetIncidentType;
+  severity: PetIncidentSeverity;
+  date: Date | string;
+  description: string;
+  fineAmount?: number;
+  finePaid?: boolean;
+  createdAt: Date | string;
+}
+
+// Exported Maps for test compatibility
+export const petBreedRestrictions = new Map<string, BreedRestriction>();
+export const petStore = new Map<string, Pet>();
+export const petPolicyStore = new Map<string, PetPolicy>();
+export const petVaccinationRecords = new Map<string, VaccinationRecord>();
+export const petIncidentStore = new Map<string, PetIncident>();
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
-export async function checkBreedRestriction(
+// Synchronous version for testing (uses Maps)
+export function checkBreedRestriction(
+  propertyId: string,
+  petType: PetType | string,
+  breed: string
+): { restricted: boolean; reason?: string } {
+  const restrictions = Array.from(petBreedRestrictions.values()).filter(
+    (r) => r.propertyId === propertyId && r.petType === petType
+  );
+
+  const normalizedBreed = breed.toLowerCase();
+  const matchingRestriction = restrictions.find(
+    (r) =>
+      normalizedBreed.includes(r.breed.toLowerCase()) || r.breed.toLowerCase().includes(normalizedBreed)
+  );
+
+  if (matchingRestriction) {
+    return { restricted: true, reason: matchingRestriction.reason };
+  }
+
+  return { restricted: false };
+}
+
+// Async version for production (uses Prisma)
+export async function checkBreedRestrictionAsync(
   propertyId: string,
   petType: PetType,
   breed: string
@@ -144,7 +238,172 @@ export function calculatePetFees(
   };
 }
 
-export async function getVaccinationStatus(petId: string): Promise<{
+// Synchronous version for testing (uses Maps)
+export function getVaccinationStatus(petId: string): {
+  upToDate: boolean;
+  expired: { id: string; type: VaccinationType; expirationDate: Date }[];
+  expiringSoon: { id: string; type: VaccinationType; expirationDate: Date }[];
+  missing: VaccinationType[];
+} {
+  const records = Array.from(petVaccinationRecords.values()).filter(r => r.petId === petId);
+  const today = new Date();
+  const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  const expired: { id: string; type: VaccinationType; expirationDate: Date }[] = [];
+  const expiringSoon: { id: string; type: VaccinationType; expirationDate: Date }[] = [];
+  const vaccineTypes = new Set<VaccinationType>();
+
+  for (const record of records) {
+    vaccineTypes.add(record.type);
+    const expDate = typeof record.expirationDate === 'string' ? new Date(record.expirationDate) : record.expirationDate;
+
+    if (expDate < today) {
+      expired.push({ id: record.id, type: record.type, expirationDate: expDate });
+    } else if (expDate < thirtyDaysFromNow) {
+      expiringSoon.push({ id: record.id, type: record.type, expirationDate: expDate });
+    }
+  }
+
+  const requiredVaccinations: VaccinationType[] = ['rabies'];
+  const missing = requiredVaccinations.filter((v) => !vaccineTypes.has(v));
+
+  return {
+    upToDate: expired.length === 0 && missing.length === 0,
+    expired,
+    expiringSoon,
+    missing,
+  };
+}
+
+// Synchronous version for testing (uses Maps)
+export function getIncidentHistory(petId: string): {
+  totalIncidents: number;
+  byType: Record<string, number>;
+  totalFines: number;
+  unpaidFines: number;
+} {
+  const incidents = Array.from(petIncidentStore.values()).filter(i => i.petId === petId);
+
+  const byType: Record<string, number> = {
+    noise: 0,
+    aggression: 0,
+    property_damage: 0,
+    waste: 0,
+    off_leash: 0,
+    other: 0,
+  };
+
+  let totalFines = 0;
+  let unpaidFines = 0;
+
+  for (const incident of incidents) {
+    byType[incident.type] = (byType[incident.type] || 0) + 1;
+    if (incident.fineAmount) {
+      totalFines += incident.fineAmount;
+      if (!incident.finePaid) {
+        unpaidFines += incident.fineAmount;
+      }
+    }
+  }
+
+  return {
+    totalIncidents: incidents.length,
+    byType,
+    totalFines,
+    unpaidFines,
+  };
+}
+
+// Synchronous version for testing (uses Maps)
+export function calculateRiskScore(petId: string): { score: number; factors: string[] } {
+  const pet = petStore.get(petId);
+  if (!pet) {
+    return { score: 0, factors: ['Pet not found'] };
+  }
+
+  let score = 100;
+  const factors: string[] = [];
+
+  const vaccStatus = getVaccinationStatus(petId);
+  if (!vaccStatus.upToDate) {
+    score -= 20;
+    factors.push('Vaccinations not up to date');
+  }
+  if (vaccStatus.expiringSoon.length > 0) {
+    score -= 5;
+    factors.push(`${vaccStatus.expiringSoon.length} vaccination(s) expiring soon`);
+  }
+
+  const incidents = getIncidentHistory(petId);
+  if (incidents.totalIncidents > 0) {
+    score -= incidents.totalIncidents * 10;
+    factors.push(`${incidents.totalIncidents} incident(s) on record`);
+  }
+  if (incidents.unpaidFines > 0) {
+    score -= 15;
+    factors.push(`$${incidents.unpaidFines} in unpaid fines`);
+  }
+
+  if (incidents.byType.aggression > 0) {
+    score -= incidents.byType.aggression * 15;
+    factors.push(`${incidents.byType.aggression} aggression incident(s)`);
+  }
+
+  score = Math.max(0, score);
+
+  return { score, factors };
+}
+
+// Synchronous version for testing (uses Maps)
+export function getPropertyPetCensus(propertyId: string): {
+  totalPets: number;
+  byType: Record<string, number>;
+  byStatus: Record<string, number>;
+  serviceAnimals: number;
+  emotionalSupport: number;
+} {
+  const propertyPets = Array.from(petStore.values()).filter(p => p.propertyId === propertyId);
+
+  const byType: Record<string, number> = {
+    dog: 0,
+    cat: 0,
+    bird: 0,
+    fish: 0,
+    reptile: 0,
+    small_mammal: 0,
+    other: 0,
+  };
+
+  const byStatus: Record<string, number> = {
+    pending_approval: 0,
+    approved: 0,
+    denied: 0,
+    removed: 0,
+  };
+
+  let serviceAnimals = 0;
+  let emotionalSupport = 0;
+
+  for (const pet of propertyPets) {
+    byType[pet.type] = (byType[pet.type] || 0) + 1;
+    if (pet.status) {
+      byStatus[pet.status] = (byStatus[pet.status] || 0) + 1;
+    }
+    if (pet.isServiceAnimal) serviceAnimals++;
+    if (pet.isEmotionalSupport) emotionalSupport++;
+  }
+
+  return {
+    totalPets: propertyPets.length,
+    byType,
+    byStatus,
+    serviceAnimals,
+    emotionalSupport,
+  };
+}
+
+// Async version for production (uses Prisma)
+async function getVaccinationStatusAsync(petId: string): Promise<{
   upToDate: boolean;
   expired: { id: string; type: VaccinationType; expirationDate: Date }[];
   expiringSoon: { id: string; type: VaccinationType; expirationDate: Date }[];
@@ -184,7 +443,7 @@ export async function getVaccinationStatus(petId: string): Promise<{
   };
 }
 
-export async function getIncidentHistory(petId: string): Promise<{
+async function getIncidentHistoryAsync(petId: string): Promise<{
   totalIncidents: number;
   byType: Record<PetIncidentType, number>;
   totalFines: number;
@@ -225,7 +484,7 @@ export async function getIncidentHistory(petId: string): Promise<{
   };
 }
 
-export async function calculateRiskScore(petId: string): Promise<{ score: number; factors: string[] }> {
+async function calculateRiskScoreAsync(petId: string): Promise<{ score: number; factors: string[] }> {
   const pet = await prisma.pet.findUnique({ where: { id: petId } });
   if (!pet) {
     return { score: 0, factors: ['Pet not found'] };
@@ -235,7 +494,7 @@ export async function calculateRiskScore(petId: string): Promise<{ score: number
   const factors: string[] = [];
 
   // Check vaccination status
-  const vaccStatus = await getVaccinationStatus(petId);
+  const vaccStatus = await getVaccinationStatusAsync(petId);
   if (!vaccStatus.upToDate) {
     score -= 20;
     factors.push('Vaccinations not up to date');
@@ -246,7 +505,7 @@ export async function calculateRiskScore(petId: string): Promise<{ score: number
   }
 
   // Check incident history
-  const incidents = await getIncidentHistory(petId);
+  const incidents = await getIncidentHistoryAsync(petId);
   if (incidents.totalIncidents > 0) {
     score -= incidents.totalIncidents * 10;
     factors.push(`${incidents.totalIncidents} incident(s) on record`);
@@ -268,7 +527,7 @@ export async function calculateRiskScore(petId: string): Promise<{ score: number
   return { score, factors };
 }
 
-export async function getPropertyPetCensus(propertyId: string): Promise<{
+async function getPropertyPetCensusAsync(propertyId: string): Promise<{
   totalPets: number;
   byType: Record<PetType, number>;
   byStatus: Record<PetStatus, number>;

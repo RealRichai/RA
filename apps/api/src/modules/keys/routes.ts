@@ -142,6 +142,106 @@ export async function getAccessActivitySummary(
   };
 }
 
+export interface PhysicalKey {
+  id: string;
+  keyNumber: string;
+  type: string;
+  status: 'in_stock' | 'assigned' | 'lost' | 'damaged' | 'destroyed';
+}
+
+export interface AccessDevice {
+  id: string;
+  deviceId: string;
+  status: 'active' | 'inactive' | 'suspended' | 'lost' | 'expired';
+  accessZones: string[];
+  expiresAt?: Date | null;
+}
+
+export interface AccessZone {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface TemporaryAccess {
+  id: string;
+  propertyId: string;
+  zoneIds: string[];
+  grantedTo: string;
+  accessCode?: string;
+  validFrom: Date;
+  validUntil: Date;
+  status: 'active' | 'used' | 'expired' | 'revoked';
+}
+
+export async function isAccessValid(
+  deviceId: string,
+  zoneId: string
+): Promise<{ valid: boolean; reason?: string }> {
+  const device = await prisma.accessDevice.findUnique({
+    where: { id: deviceId },
+  });
+
+  if (!device) {
+    return { valid: false, reason: 'Device not found' };
+  }
+
+  if (device.status !== 'active') {
+    return { valid: false, reason: `Device is ${device.status}` };
+  }
+
+  if (device.expiresAt && new Date(device.expiresAt) < new Date()) {
+    return { valid: false, reason: 'Device has expired' };
+  }
+
+  const zones = device.accessZones as string[];
+  if (!zones.includes(zoneId)) {
+    return { valid: false, reason: 'Not authorized for this zone' };
+  }
+
+  return { valid: true };
+}
+
+export async function checkTemporaryAccess(
+  accessCode: string,
+  zoneId: string
+): Promise<{ valid: boolean; access?: TemporaryAccess; reason?: string }> {
+  const access = await prisma.temporaryAccess.findFirst({
+    where: {
+      accessCode,
+      status: 'active',
+    },
+  });
+
+  if (!access) {
+    return { valid: false, reason: 'Access code not found or expired' };
+  }
+
+  const now = new Date();
+  if (now < access.validFrom || now > access.validUntil) {
+    return { valid: false, reason: 'Access code is outside valid time window' };
+  }
+
+  const zones = access.zoneIds as string[];
+  if (!zones.includes(zoneId)) {
+    return { valid: false, reason: 'Access code not valid for this zone' };
+  }
+
+  return {
+    valid: true,
+    access: {
+      id: access.id,
+      propertyId: access.propertyId,
+      zoneIds: zones,
+      grantedTo: access.grantedTo,
+      accessCode: access.accessCode || undefined,
+      validFrom: access.validFrom,
+      validUntil: access.validUntil,
+      status: access.status as TemporaryAccess['status'],
+    },
+  };
+}
+
 // ============================================================================
 // SCHEMAS
 // ============================================================================

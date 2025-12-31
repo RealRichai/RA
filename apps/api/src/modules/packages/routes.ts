@@ -51,21 +51,85 @@ export async function findAvailableLocker(
   return null;
 }
 
-export function isPackageOverdue(receivedAt: Date, status: PackageStatus, holdDays: number = 7): boolean {
+// Package type for function signatures
+interface PackageInput {
+  receivedAt: Date | string;
+  status: PackageStatus;
+}
+
+export function isPackageOverdue(
+  pkgOrReceivedAt: PackageInput | Date,
+  holdDaysOrStatus?: number | PackageStatus,
+  holdDays: number = 7
+): boolean {
+  let receivedAt: Date;
+  let status: PackageStatus;
+  let threshold: number;
+
+  if (pkgOrReceivedAt instanceof Date) {
+    // Called as (receivedAt: Date, status: PackageStatus, holdDays: number)
+    receivedAt = pkgOrReceivedAt;
+    status = holdDaysOrStatus as PackageStatus;
+    threshold = holdDays;
+  } else {
+    // Called as (pkg: Package, holdDays: number)
+    const pkg = pkgOrReceivedAt;
+    receivedAt = typeof pkg.receivedAt === 'string' ? new Date(pkg.receivedAt) : pkg.receivedAt;
+    status = pkg.status;
+    threshold = (holdDaysOrStatus as number) ?? 7;
+  }
+
   const now = new Date();
   const daysSinceReceived = Math.floor(
     (now.getTime() - receivedAt.getTime()) / (1000 * 60 * 60 * 24)
   );
-  return daysSinceReceived > holdDays && status !== 'picked_up' && status !== 'returned';
+  return daysSinceReceived > threshold && status !== 'picked_up' && status !== 'returned';
+}
+
+// Exported Map for tests to use
+export const packageLockers = new Map<string, { id: string; propertyId: string; lockerNumber: string; size: LockerSize; status: LockerStatus; location?: string }>();
+
+// Synchronous findAvailableLocker for tests (uses Map)
+export function findAvailableLockerSync(
+  propertyId: string,
+  size: PackageSize
+): { id: string; lockerNumber: string; size: LockerSize; location?: string } | null {
+  const sizeMapping: Record<PackageSize, LockerSize[]> = {
+    envelope: ['small', 'medium', 'large', 'extra_large'],
+    small: ['small', 'medium', 'large', 'extra_large'],
+    medium: ['medium', 'large', 'extra_large'],
+    large: ['large', 'extra_large'],
+    oversized: ['extra_large'],
+  };
+
+  const acceptableSizes = sizeMapping[size];
+
+  for (const acceptableSize of acceptableSizes) {
+    for (const locker of packageLockers.values()) {
+      if (
+        locker.propertyId === propertyId &&
+        locker.size === acceptableSize &&
+        locker.status === 'available'
+      ) {
+        return locker;
+      }
+    }
+  }
+
+  return null;
 }
 
 interface PackageData {
-  receivedAt: Date;
-  pickedUpAt: Date | null;
-  status: PackageStatus;
-  carrier: Carrier;
-  size: PackageSize;
-  isOverdue: boolean;
+  receivedAt: Date | string;
+  pickedUpAt?: Date | string | null;
+  status: PackageStatus | string;
+  carrier: Carrier | string;
+  size: PackageSize | string;
+  isOverdue?: boolean;
+}
+
+function toDate(value: Date | string): Date {
+  return typeof value === 'string' ? new Date(value) : value;
 }
 
 export function calculatePackageStats(
@@ -82,16 +146,16 @@ export function calculatePackageStats(
 } {
   let filtered = packageList;
   if (startDate) {
-    filtered = filtered.filter((p) => p.receivedAt >= new Date(startDate));
+    filtered = filtered.filter((p) => toDate(p.receivedAt) >= new Date(startDate));
   }
   if (endDate) {
-    filtered = filtered.filter((p) => p.receivedAt <= new Date(endDate));
+    filtered = filtered.filter((p) => toDate(p.receivedAt) <= new Date(endDate));
   }
 
   const pickedUp = filtered.filter((p) => p.status === 'picked_up' && p.pickedUpAt);
   const pickupTimes = pickedUp.map((p) => {
-    const received = p.receivedAt;
-    const picked = p.pickedUpAt!;
+    const received = toDate(p.receivedAt);
+    const picked = toDate(p.pickedUpAt!);
     return (picked.getTime() - received.getTime()) / (1000 * 60 * 60); // hours
   });
 

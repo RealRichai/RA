@@ -149,6 +149,19 @@ export function calculateUsage(current: number, previous: number): number {
   return Math.max(0, current - previous);
 }
 
+export interface UtilityBill {
+  id: string;
+  amount: number;
+  usage?: number;
+  statementDate: Date;
+}
+
+export function estimateMonthlyAverage(bills: UtilityBill[]): number {
+  if (bills.length === 0) return 0;
+  const total = bills.reduce((sum, b) => sum + b.amount, 0);
+  return total / bills.length;
+}
+
 // Schemas
 const createProviderSchema = z.object({
   name: z.string().min(1),

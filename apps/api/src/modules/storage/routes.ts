@@ -162,6 +162,41 @@ export async function calculateRevenue(
   };
 }
 
+export interface StorageRental {
+  id: string;
+  nextPaymentDue: Date | null;
+  status: 'active' | 'past_due' | 'lien' | 'auction' | 'terminated';
+}
+
+export interface StoragePromotion {
+  id: string;
+  discountType: 'percentage' | 'flat' | 'free_months';
+  discountValue: number;
+  freeMonths?: number;
+  isActive: boolean;
+}
+
+export function isRentalPastDue(rental: StorageRental): boolean {
+  if (!rental.nextPaymentDue) return false;
+  const now = new Date();
+  return rental.nextPaymentDue < now && rental.status !== 'terminated';
+}
+
+export function applyPromotion(monthlyRate: number, promotion: StoragePromotion): number {
+  if (!promotion.isActive) return monthlyRate;
+
+  switch (promotion.discountType) {
+    case 'percentage':
+      return monthlyRate * (1 - promotion.discountValue / 100);
+    case 'flat':
+      return Math.max(0, monthlyRate - promotion.discountValue);
+    case 'free_months':
+      return 0; // First month(s) free
+    default:
+      return monthlyRate;
+  }
+}
+
 // ============================================================================
 // SCHEMAS
 // ============================================================================
