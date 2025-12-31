@@ -32,12 +32,11 @@ import {
 } from '@realriches/revenue-engine';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 
+import { getWebhookSecret, isStripeConfigured, redactStripeData } from '../../lib/stripe';
 // Import to get type augmentation for rawBody
 import '../../plugins/raw-body';
 
 import { partnerWebhookRoutes } from './partner-webhooks';
-
-import { getWebhookSecret, isStripeConfigured, redactStripeData } from '../../lib/stripe';
 
 // =============================================================================
 // Sensitive Fields for Redaction
