@@ -354,7 +354,7 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const propertyId = request.query.propertyId;
-      const utilization = propertyId ? getLockerUtilization(propertyId) : null;
+      const utilization = propertyId ? await getLockerUtilizationAsync(propertyId) : null;
 
       return reply.send({ lockers: results, utilization });
     }
@@ -815,7 +815,7 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
         request.query.endDate
       );
 
-      const lockerUtil = getLockerUtilization(request.query.propertyId);
+      const lockerUtil = await getLockerUtilizationAsync(request.query.propertyId);
 
       return reply.send({ ...stats, lockerUtilization: lockerUtil });
     }

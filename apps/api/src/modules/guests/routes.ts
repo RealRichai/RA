@@ -366,12 +366,12 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
     const data = guestPassSchema.parse(request.body);
 
     // Check policy compliance
-    const stayDays = Math.ceil((new Date(data.validUntil).getTime() - new Date(data.validFrom).getTime()) / (1000 * 60 * 60 * 24));
-    const compliance = checkPolicyComplianceSync(
+    const compliance = await checkPolicyComplianceAsync(
       data.propertyId,
       data.unitId,
-      1, // default guest count
-      stayDays
+      new Date(data.validFrom),
+      new Date(data.validUntil),
+      data.purpose || 'visit'
     );
 
     if (!compliance.compliant) {
@@ -511,12 +511,12 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
     const newDate = new Date(newValidUntil);
 
     // Check policy compliance for extension
-    const extensionDays = Math.ceil((newDate.getTime() - new Date(pass.validFrom).getTime()) / (1000 * 60 * 60 * 24));
-    const compliance = checkPolicyComplianceSync(
+    const compliance = await checkPolicyComplianceAsync(
       pass.propertyId,
       pass.unitId,
-      1, // default guest count
-      extensionDays
+      pass.validFrom,
+      newDate,
+      pass.purpose || 'visit'
     );
 
     if (!compliance.compliant) {
@@ -830,13 +830,13 @@ export async function guestRoutes(app: FastifyInstance): Promise<void> {
   // Stats
   app.get('/stats/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const stats = getGuestStatsSync(propertyId);
+    const stats = await getGuestStatsAsync(propertyId);
     return reply.send(stats);
   });
 
   // Expire old passes (maintenance endpoint)
   app.post('/maintenance/expire-passes', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const expiredCount = expireOldPassesSync();
+    const expiredCount = await expireOldPassesAsync();
     return reply.send({ expiredCount });
   });
 }

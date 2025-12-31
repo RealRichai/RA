@@ -748,7 +748,7 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     const now = new Date();
 
     // Check breed restriction
-    const breedCheck = checkBreedRestriction(body.propertyId, body.type, body.breed);
+    const breedCheck = await checkBreedRestrictionAsync(body.propertyId, body.type, body.breed);
     if (breedCheck.restricted && !body.isServiceAnimal && !body.isEmotionalSupport) {
       return reply.status(400).send({
         error: 'Breed restricted',
@@ -865,9 +865,9 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Include additional details
-    const vaccStatus = getVaccinationStatus(petId);
-    const incidentHistory = getIncidentHistory(petId);
-    const riskScore = calculateRiskScore(petId);
+    const vaccStatus = await getVaccinationStatusAsync(petId);
+    const incidentHistory = await getIncidentHistoryAsync(petId);
+    const riskScore = await calculateRiskScoreAsync(petId);
 
     return reply.send({
       ...pet,
@@ -1062,7 +1062,7 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     const records = await prisma.vaccinationRecord.findMany({
       where: { petId },
     });
-    const status = getVaccinationStatus(petId);
+    const status = await getVaccinationStatusAsync(petId);
 
     return reply.send({ records, status });
   });
@@ -1165,7 +1165,7 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     const incidents = await prisma.petIncident.findMany({
       where: { petId },
     });
-    const history = getIncidentHistory(petId);
+    const history = await getIncidentHistoryAsync(petId);
 
     return reply.send({ incidents, summary: history });
   });
@@ -1350,7 +1350,7 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   // Get property pet census
   app.get('/census/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const census = getPropertyPetCensus(propertyId);
+    const census = await getPropertyPetCensusAsync(propertyId);
     return reply.send(census);
   });
 
@@ -1389,13 +1389,15 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
       },
     });
 
-    const assessments = propertyPets.map((pet) => ({
-      petId: pet.id,
-      petName: pet.name,
-      type: pet.type,
-      breed: pet.breed,
-      ...calculateRiskScore(pet.id),
-    }));
+    const assessments = await Promise.all(
+      propertyPets.map(async (pet) => ({
+        petId: pet.id,
+        petName: pet.name,
+        type: pet.type,
+        breed: pet.breed,
+        ...(await calculateRiskScoreAsync(pet.id)),
+      }))
+    );
 
     const highRisk = assessments.filter((a) => a.score < 50);
     const mediumRisk = assessments.filter((a) => a.score >= 50 && a.score < 75);
