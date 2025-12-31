@@ -6,11 +6,18 @@
  * - /health/live - Liveness probe (is process alive)
  * - /health/ready - Readiness probe (are dependencies healthy)
  * - /health/detailed - Full system status with metrics
+ * - /health/external - External API status (Stripe, partners)
+ * - /health/cache - Cache statistics
+ * - /health/queue - Job queue health
  */
 
 import { checkConnection } from '@realriches/database';
 import { logger } from '@realriches/utils';
+import { Queue } from 'bullmq';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+
+import { PartnerHealthJob } from '../../jobs/partner-health';
+import { isStripeConfigured, getStripe } from '../../lib/stripe';
 
 // =============================================================================
 // Types
@@ -268,6 +275,134 @@ function checkRateLimiter(app: FastifyInstance): DependencyCheck {
     return {
       status: 'degraded',
       message: 'Rate limiter check failed',
+      lastChecked: new Date().toISOString(),
+    };
+  }
+}
+
+async function checkStripe(): Promise<DependencyCheck> {
+  const start = Date.now();
+  try {
+    if (!isStripeConfigured()) {
+      return {
+        status: 'degraded',
+        message: 'Stripe not configured',
+        lastChecked: new Date().toISOString(),
+      };
+    }
+
+    const stripe = getStripe();
+    // Use a lightweight API call to verify connectivity
+    await withTimeout(
+      stripe.balance.retrieve(),
+      CHECK_TIMEOUT_MS,
+      null
+    );
+
+    return {
+      status: 'up',
+      latencyMs: Date.now() - start,
+      lastChecked: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      status: 'down',
+      latencyMs: Date.now() - start,
+      message: error instanceof Error ? error.message : 'Stripe check failed',
+      lastChecked: new Date().toISOString(),
+    };
+  }
+}
+
+async function checkCache(app: FastifyInstance): Promise<DependencyCheck & { stats?: Record<string, number> }> {
+  try {
+    if (!app.cache) {
+      return {
+        status: 'degraded',
+        message: 'Cache not initialized',
+        lastChecked: new Date().toISOString(),
+      };
+    }
+
+    const stats = app.cache.getStats();
+    const hitRate = stats.hits + stats.misses > 0
+      ? Math.round((stats.hits / (stats.hits + stats.misses)) * 100)
+      : 0;
+
+    // Degraded if error rate is high
+    let status: CheckStatus = 'up';
+    if (stats.errors > 100) {
+      status = 'degraded';
+    }
+
+    return {
+      status,
+      stats: {
+        hits: stats.hits,
+        misses: stats.misses,
+        sets: stats.sets,
+        deletes: stats.deletes,
+        errors: stats.errors,
+        hitRate,
+      },
+      lastChecked: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      status: 'down',
+      message: error instanceof Error ? error.message : 'Cache check failed',
+      lastChecked: new Date().toISOString(),
+    };
+  }
+}
+
+async function checkJobQueue(app: FastifyInstance): Promise<DependencyCheck & { stats?: Record<string, number> }> {
+  try {
+    const queue = new Queue('realriches:jobs', {
+      connection: app.redis,
+      prefix: 'rr',
+    });
+
+    const [waiting, active, completed, failed, delayed] = await Promise.all([
+      queue.getWaitingCount(),
+      queue.getActiveCount(),
+      queue.getCompletedCount(),
+      queue.getFailedCount(),
+      queue.getDelayedCount(),
+    ]);
+
+    await queue.close();
+
+    // Status based on queue health
+    let status: CheckStatus = 'up';
+    let message: string | undefined;
+
+    if (failed > 100) {
+      status = 'degraded';
+      message = `High failure count: ${failed}`;
+    }
+    if (waiting > 1000) {
+      status = 'degraded';
+      message = `Queue backlog: ${waiting} waiting`;
+    }
+
+    return {
+      status,
+      message,
+      stats: {
+        waiting,
+        active,
+        completed,
+        failed,
+        delayed,
+        total: waiting + active + completed + failed + delayed,
+      },
+      lastChecked: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      status: 'down',
+      message: error instanceof Error ? error.message : 'Queue check failed',
       lastChecked: new Date().toISOString(),
     };
   }
@@ -595,4 +730,280 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
       });
     }
   );
+
+  // ===========================================================================
+  // GET /health/external - External API health status
+  // ===========================================================================
+  app.get(
+    '/health/external',
+    {
+      schema: {
+        description: 'Check external API health (Stripe, partners)',
+        tags: ['Health'],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      // Require auth in production
+      const isProd = process.env['NODE_ENV'] === 'production';
+      if (isProd) {
+        try {
+          await app.authenticate(request, reply);
+          app.authorize(request, reply, { roles: ['admin'] });
+        } catch {
+          return reply.status(401).send({
+            success: false,
+            error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+          });
+        }
+      }
+
+      const [stripe, partnerStatuses] = await Promise.all([
+        checkStripe(),
+        PartnerHealthJob.getAllHealthStatus(),
+      ]);
+
+      // Build partner checks
+      const partners: Record<string, DependencyCheck> = {};
+      for (const status of partnerStatuses) {
+        partners[status.provider] = {
+          status: status.status === 'healthy' ? 'up' : status.status === 'degraded' ? 'degraded' : 'down',
+          latencyMs: status.avgResponseTimeMs,
+          message: status.consecutiveFailures > 0 ? `${status.consecutiveFailures} consecutive failures` : undefined,
+          lastChecked: status.lastCheck,
+        };
+      }
+
+      const allChecks = { stripe, ...partners };
+      const overallStatus = determineOverallStatus(allChecks);
+
+      return reply.send({
+        status: overallStatus,
+        timestamp: new Date().toISOString(),
+        services: {
+          stripe,
+          partners,
+        },
+        summary: {
+          total: Object.keys(allChecks).length,
+          healthy: Object.values(allChecks).filter((c) => c.status === 'up').length,
+          degraded: Object.values(allChecks).filter((c) => c.status === 'degraded').length,
+          down: Object.values(allChecks).filter((c) => c.status === 'down').length,
+        },
+      });
+    }
+  );
+
+  // ===========================================================================
+  // GET /health/cache - Cache health and statistics
+  // ===========================================================================
+  app.get(
+    '/health/cache',
+    {
+      schema: {
+        description: 'Get cache health and statistics',
+        tags: ['Health'],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      // Require auth in production
+      const isProd = process.env['NODE_ENV'] === 'production';
+      if (isProd) {
+        try {
+          await app.authenticate(request, reply);
+          app.authorize(request, reply, { roles: ['admin'] });
+        } catch {
+          return reply.status(401).send({
+            success: false,
+            error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+          });
+        }
+      }
+
+      const cacheCheck = await checkCache(app);
+
+      return reply.send({
+        status: cacheCheck.status,
+        timestamp: new Date().toISOString(),
+        ...cacheCheck,
+        recommendations: cacheCheck.stats ? getRecommendations(cacheCheck.stats) : [],
+      });
+    }
+  );
+
+  // ===========================================================================
+  // GET /health/queue - Job queue health and statistics
+  // ===========================================================================
+  app.get(
+    '/health/queue',
+    {
+      schema: {
+        description: 'Get job queue health and statistics',
+        tags: ['Health'],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      // Require auth in production
+      const isProd = process.env['NODE_ENV'] === 'production';
+      if (isProd) {
+        try {
+          await app.authenticate(request, reply);
+          app.authorize(request, reply, { roles: ['admin'] });
+        } catch {
+          return reply.status(401).send({
+            success: false,
+            error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+          });
+        }
+      }
+
+      const queueCheck = await checkJobQueue(app);
+
+      // Build queue health summary
+      const warnings: string[] = [];
+      if (queueCheck.stats) {
+        if (queueCheck.stats.failed > 50) {
+          warnings.push(`High failure count (${queueCheck.stats.failed}). Review failed jobs.`);
+        }
+        if (queueCheck.stats.waiting > 500) {
+          warnings.push(`Queue backlog detected (${queueCheck.stats.waiting} waiting). Consider scaling workers.`);
+        }
+        if (queueCheck.stats.delayed > 100) {
+          warnings.push(`Many delayed jobs (${queueCheck.stats.delayed}). Check scheduling.`);
+        }
+      }
+
+      return reply.send({
+        status: queueCheck.status,
+        timestamp: new Date().toISOString(),
+        ...queueCheck,
+        warnings,
+      });
+    }
+  );
+
+  // ===========================================================================
+  // GET /health/all - Comprehensive health check (all systems)
+  // ===========================================================================
+  app.get(
+    '/health/all',
+    {
+      schema: {
+        description: 'Comprehensive health check of all systems',
+        tags: ['Health'],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      // Always require auth for comprehensive check
+      try {
+        await app.authenticate(request, reply);
+        app.authorize(request, reply, { roles: ['admin'] });
+      } catch {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Admin authentication required' },
+        });
+      }
+
+      const startTime = Date.now();
+
+      // Run all checks in parallel
+      const [
+        database,
+        redis,
+        stripe,
+        cache,
+        queue,
+        partnerStatuses,
+        emailQueue,
+        jobScheduler,
+      ] = await Promise.all([
+        checkDatabase(),
+        checkRedis(app),
+        checkStripe(),
+        checkCache(app),
+        checkJobQueue(app),
+        PartnerHealthJob.getAllHealthStatus(),
+        checkEmailQueue(app),
+        checkJobScheduler(app),
+      ]);
+
+      const memory = checkMemory();
+      const rateLimiter = checkRateLimiter(app);
+
+      // Build partner summary
+      const partners: Record<string, DependencyCheck> = {};
+      for (const status of partnerStatuses) {
+        partners[status.provider] = {
+          status: status.status === 'healthy' ? 'up' : status.status === 'degraded' ? 'degraded' : 'down',
+          latencyMs: status.avgResponseTimeMs,
+          lastChecked: status.lastCheck,
+        };
+      }
+
+      // Determine overall status
+      const allChecks = {
+        database,
+        redis,
+        memory,
+        stripe,
+        cache,
+        queue,
+        emailQueue,
+        jobScheduler,
+        rateLimiter,
+        ...partners,
+      };
+
+      const overallStatus = determineOverallStatus(allChecks);
+      const checkDuration = Date.now() - startTime;
+
+      return reply.send({
+        status: overallStatus,
+        timestamp: new Date().toISOString(),
+        checkDurationMs: checkDuration,
+        infrastructure: {
+          database,
+          redis,
+          memory,
+        },
+        services: {
+          cache: { ...cache },
+          queue: { ...queue },
+          emailQueue,
+          jobScheduler,
+          rateLimiter,
+        },
+        external: {
+          stripe,
+          partners,
+        },
+        summary: {
+          total: Object.keys(allChecks).length,
+          healthy: Object.values(allChecks).filter((c) => c.status === 'up').length,
+          degraded: Object.values(allChecks).filter((c) => c.status === 'degraded').length,
+          down: Object.values(allChecks).filter((c) => c.status === 'down').length,
+        },
+      });
+    }
+  );
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+function getRecommendations(stats: Record<string, number>): string[] {
+  const recommendations: string[] = [];
+
+  if (stats.hitRate < 50) {
+    recommendations.push('Low cache hit rate. Consider caching more frequently accessed data.');
+  }
+  if (stats.errors > 10) {
+    recommendations.push('Cache errors detected. Check Redis connection stability.');
+  }
+  if (stats.hitRate > 95 && stats.hits > 10000) {
+    recommendations.push('Excellent cache performance!');
+  }
+
+  return recommendations;
 }
