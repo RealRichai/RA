@@ -653,10 +653,10 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
     let vendorId = body.vendorId;
 
     if (body.autoAssign) {
-      const bestVendor = findBestVendor(
+      const bestVendor = await findBestVendorAsync(
         workOrder.category as VendorCategory,
         workOrder.propertyId,
-        workOrder.priority as WorkOrderPriority
+        workOrder.priority === 'emergency'
       );
       if (!bestVendor) {
         return reply.status(400).send({

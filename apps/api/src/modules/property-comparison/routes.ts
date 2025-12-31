@@ -717,7 +717,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.post('/compare', async (request: FastifyRequest, reply: FastifyReply) => {
     const data = comparisonSchema.parse(request.body);
 
-    const results = comparePropertiesSync(data.propertyIds, data.metrics);
+    const results = await comparePropertiesAsync(data.propertyIds, data.metrics);
 
     const report = await prisma.comparisonReport.create({
       data: {
@@ -750,7 +750,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     const ids = propertyIds.split(',');
     const metricKeys = metrics ? metrics.split(',') : availableMetrics.map(m => m.key);
 
-    const results = comparePropertiesSync(ids, metricKeys);
+    const results = await comparePropertiesAsync(ids, metricKeys);
     return reply.send(results);
   });
 
@@ -804,7 +804,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
       ids = allMetrics.map(m => m.propertyId);
     }
 
-    const averages = calculatePortfolioAveragesSync(ids);
+    const averages = await calculatePortfolioAveragesAsync(ids);
     return reply.send(averages);
   });
 
@@ -845,7 +845,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     const { propertyId, metric } = request.params as { propertyId: string; metric: string };
     const { months } = request.query as { months?: string };
 
-    const trendData = generateTrendDataSync(propertyId, metric, months ? parseInt(months) : 12);
+    const trendData = await generateTrendDataAsync(propertyId, metric, months ? parseInt(months) : 12);
     return reply.send(trendData);
   });
 
@@ -857,7 +857,9 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     };
 
     const ids = propertyIds.split(',');
-    const trends = ids.map(id => generateTrendDataSync(id, metric, months ? parseInt(months) : 12));
+    const trends = await Promise.all(
+      ids.map(id => generateTrendDataAsync(id, metric, months ? parseInt(months) : 12))
+    );
 
     return reply.send(trends);
   });
@@ -912,7 +914,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
   app.get('/compare-to-benchmark/:propertyId/:benchmarkId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId, benchmarkId } = request.params as { propertyId: string; benchmarkId: string };
 
-    const comparison = compareToBenchmarkSync(propertyId, benchmarkId);
+    const comparison = await compareToBenchmarkAsync(propertyId, benchmarkId);
     if (Object.keys(comparison).length === 0) {
       return reply.status(404).send({ error: 'Property or benchmark not found' });
     }
@@ -989,14 +991,20 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
 
     const propertyIds = saved.propertyIds as string[];
     const metrics = saved.metrics as string[];
-    const results = comparePropertiesSync(propertyIds, metrics);
+    const results = await comparePropertiesAsync(propertyIds, metrics);
 
     // If benchmark specified, add benchmark comparison
     let benchmarkComparison: Record<string, Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }>> | undefined;
     if (saved.benchmarkId) {
+      const benchmarkResults = await Promise.all(
+        propertyIds.map(async propId => ({
+          propId,
+          comparison: await compareToBenchmarkAsync(propId, saved.benchmarkId!),
+        }))
+      );
       benchmarkComparison = {};
-      for (const propId of propertyIds) {
-        benchmarkComparison[propId] = compareToBenchmarkSync(propId, saved.benchmarkId);
+      for (const { propId, comparison } of benchmarkResults) {
+        benchmarkComparison[propId] = comparison;
       }
     }
 
@@ -1049,7 +1057,7 @@ export async function propertyComparisonRoutes(app: FastifyInstance): Promise<vo
     }
 
     const rankings = await rankPropertyInPortfolio(propertyId, ids);
-    const portfolioAvgs = calculatePortfolioAveragesSync(ids);
+    const portfolioAvgs = await calculatePortfolioAveragesAsync(ids);
 
     // Calculate grades based on percentile
     const grades: Record<string, string> = {};
