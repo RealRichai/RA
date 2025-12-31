@@ -16,7 +16,7 @@ import type { Redis } from 'ioredis';
 
 export interface JobDefinition {
   name: string;
-  handler: (job: Job) => Promise<void>;
+  handler: (job: Job) => Promise<unknown>;
   cron?: string;
   options?: {
     attempts?: number;

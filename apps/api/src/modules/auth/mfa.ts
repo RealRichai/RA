@@ -7,11 +7,12 @@
  * - MFA enforcement policies
  */
 
+import * as crypto from 'crypto';
+
 import { prisma } from '@realriches/database';
 import { logger, generateToken, sha256, AppError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Redis } from 'ioredis';
-import * as crypto from 'crypto';
 import { z } from 'zod';
 
 // =============================================================================

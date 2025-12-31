@@ -64,6 +64,7 @@ type Channel = typeof VALID_CHANNELS[number];
 // =============================================================================
 
 class WebSocketManager {
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
   private wss: WebSocketServer | null = null;
   private clients: Map<string, AuthenticatedWebSocket> = new Map();
   private channelSubscribers: Map<string, Set<string>> = new Map();
