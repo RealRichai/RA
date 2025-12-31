@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { metricsRoutes } from '../plugins/metrics';
 
 import { auditLogRoutes } from './admin/audit-logs';
+import { jobRoutes } from './admin/jobs';
 import { aiRoutes } from './ai/routes';
 import { analyticsRoutes } from './analytics/routes';
 import { authRoutes } from './auth/routes';
@@ -58,6 +59,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
+      await api.register(jobRoutes, { prefix: '/admin/jobs' });
     },
     { prefix }
   );
