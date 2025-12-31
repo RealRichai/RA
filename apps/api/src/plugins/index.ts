@@ -15,6 +15,7 @@ import { authPlugin } from './auth';
 import { emailPlugin } from './email';
 import { errorHandler } from './error-handler';
 import { jobsPlugin } from './jobs';
+import { metricsPlugin } from './metrics';
 import { rateLimitPlugin } from './rate-limit';
 import rawBodyPlugin from './raw-body';
 import { redisPlugin } from './redis';
@@ -104,6 +105,14 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
     redisPrefix: 'rl',
     includeHeaders: true,
     logExceeded: true,
+  });
+
+  // Prometheus metrics
+  await app.register(metricsPlugin, {
+    enabled: true,
+    collectDefaultMetrics: true,
+    collectBusinessMetrics: true,
+    businessMetricsInterval: 60000, // Refresh business metrics every minute
   });
 
   // Email service (depends on Redis)

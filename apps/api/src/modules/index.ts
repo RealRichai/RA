@@ -9,6 +9,7 @@ import { commercialRoutes } from './commercial/routes';
 import { complianceRoutes } from './compliance/routes';
 import { documentRoutes } from './documents/routes';
 import { healthRoutes } from './health/routes';
+import { metricsRoutes } from '../plugins/metrics';
 import { leaseRoutes } from './leases/routes';
 import { listingRoutes } from './listings/routes';
 import { maintenanceRoutes } from './maintenance/routes';
@@ -26,6 +27,9 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
 
   // Health check (no prefix)
   await app.register(healthRoutes);
+
+  // Metrics (no prefix, Prometheus format)
+  await app.register(metricsRoutes);
 
   // Webhooks (no auth, signature verification)
   await app.register(webhookRoutes, { prefix: '/webhooks' });
