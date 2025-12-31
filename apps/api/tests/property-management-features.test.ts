@@ -144,6 +144,73 @@ import {
   type Showing,
 } from '../src/modules/showings/routes';
 
+// Move-In/Move-Out Workflow imports
+import {
+  workflows,
+  checklistTemplates,
+  checklistItems,
+  conditionReports,
+  keyRecords,
+  depositRecords,
+  depositDeductions,
+  utilityTransfers,
+  calculateDepositRefund,
+  generateChecklistFromTemplate,
+  calculateWorkflowProgress,
+  compareConditions,
+  generateDepositItemization,
+  getDepositDeadline,
+  type DepositDeduction,
+} from '../src/modules/move-workflows/routes';
+
+// HOA/COA Management imports
+import {
+  associations,
+  assessments as hoaAssessments,
+  violations,
+  architecturalRequests,
+  boardMeetings,
+  associationDocuments,
+  calculateAssessmentSchedule,
+  calculateLateFee as calculateHOALateFee,
+  getViolationEscalationLevel,
+  calculateAnnualHOACost,
+  getAssessmentSummary,
+} from '../src/modules/hoa/routes';
+
+// Tax Document Management imports
+import {
+  taxYears,
+  taxRecipients,
+  taxDocuments,
+  taxPayments,
+  ownerTaxPackets,
+  depreciationItems,
+  calculateReportablePayments,
+  determineFormType,
+  calculateStraightLineDepreciation,
+  calculateMACRSDepreciation,
+  generateTaxSummary,
+  validateTIN,
+} from '../src/modules/tax-documents/routes';
+
+// Rental Assistance imports
+import {
+  programs as assistancePrograms,
+  applications as assistanceApplications,
+  vouchers,
+  inspections as assistanceInspections,
+  assistancePayments,
+  landlordCertifications,
+  complianceReports,
+  calculateHAPPayment,
+  isInspectionDue,
+  calculateInspectionPassRate,
+  getDeficiencySummary,
+  calculatePaymentSummary,
+  getVoucherExpirationDays,
+} from '../src/modules/rental-assistance/routes';
+
 describe('Automated Rent Collection', () => {
   beforeEach(() => {
     schedules.clear();
@@ -3546,6 +3613,834 @@ describe('Showing Scheduler', () => {
       expect(showings.get(showing.id)?.status).toBe('completed');
       expect(showings.get(showing.id)?.feedback?.rating).toBe(4);
       expect(showings.get(showing.id)?.feedback?.interested).toBe(true);
+    });
+  });
+});
+
+// ============================================================================
+// MOVE-IN/MOVE-OUT WORKFLOWS
+// ============================================================================
+
+describe('Move-In/Move-Out Workflows', () => {
+  beforeEach(() => {
+    workflows.clear();
+    checklistTemplates.clear();
+    checklistItems.clear();
+    conditionReports.clear();
+    keyRecords.clear();
+    depositRecords.clear();
+    depositDeductions.clear();
+    utilityTransfers.clear();
+  });
+
+  describe('calculateDepositRefund', () => {
+    it('should calculate full refund with no deductions', () => {
+      const deposit = {
+        id: 'dep_1',
+        leaseId: 'lease_1',
+        tenantId: 'tenant_1',
+        amount: 2000,
+        depositType: 'security' as const,
+        status: 'held' as const,
+        interestAccrued: 50,
+        deductions: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const result = calculateDepositRefund(deposit, []);
+
+      expect(result.totalDeductions).toBe(0);
+      expect(result.refundAmount).toBe(2050); // deposit + interest
+      expect(result.refundPercentage).toBeCloseTo(102.5, 1); // includes interest
+    });
+
+    it('should calculate partial refund with deductions', () => {
+      const deposit = {
+        id: 'dep_1',
+        leaseId: 'lease_1',
+        tenantId: 'tenant_1',
+        amount: 2000,
+        depositType: 'security' as const,
+        status: 'held' as const,
+        interestAccrued: 0,
+        deductions: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const deductions: DepositDeduction[] = [
+        { id: 'ded_1', depositId: 'dep_1', category: 'Cleaning', description: 'Deep clean', amount: 300, photos: [], createdAt: new Date().toISOString() },
+        { id: 'ded_2', depositId: 'dep_1', category: 'Repairs', description: 'Wall repair', amount: 200, photos: [], createdAt: new Date().toISOString() },
+      ];
+
+      const result = calculateDepositRefund(deposit, deductions);
+
+      expect(result.totalDeductions).toBe(500);
+      expect(result.refundAmount).toBe(1500);
+      expect(result.refundPercentage).toBe(75);
+    });
+
+    it('should not go below zero refund', () => {
+      const deposit = {
+        id: 'dep_1',
+        leaseId: 'lease_1',
+        tenantId: 'tenant_1',
+        amount: 500,
+        depositType: 'security' as const,
+        status: 'held' as const,
+        interestAccrued: 0,
+        deductions: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const deductions: DepositDeduction[] = [
+        { id: 'ded_1', depositId: 'dep_1', category: 'Damages', description: 'Major damage', amount: 1000, photos: [], createdAt: new Date().toISOString() },
+      ];
+
+      const result = calculateDepositRefund(deposit, deductions);
+
+      expect(result.totalDeductions).toBe(1000);
+      expect(result.refundAmount).toBe(0);
+    });
+  });
+
+  describe('calculateWorkflowProgress', () => {
+    it('should calculate progress correctly', () => {
+      const items = [
+        { id: '1', workflowId: 'w1', category: 'Keys', description: 'Return keys', status: 'completed' as const, photos: [], isRequired: true, order: 1 },
+        { id: '2', workflowId: 'w1', category: 'Keys', description: 'Mailbox key', status: 'completed' as const, photos: [], isRequired: true, order: 2 },
+        { id: '3', workflowId: 'w1', category: 'Utilities', description: 'Transfer utilities', status: 'pending' as const, photos: [], isRequired: true, order: 3 },
+        { id: '4', workflowId: 'w1', category: 'Clean', description: 'Final clean', status: 'failed' as const, photos: [], isRequired: true, order: 4 },
+      ];
+
+      const result = calculateWorkflowProgress(items);
+
+      expect(result.total).toBe(4);
+      expect(result.completed).toBe(2);
+      expect(result.pending).toBe(1);
+      expect(result.failed).toBe(1);
+      expect(result.percentage).toBe(50);
+    });
+
+    it('should handle empty checklist', () => {
+      const result = calculateWorkflowProgress([]);
+
+      expect(result.total).toBe(0);
+      expect(result.percentage).toBe(0);
+    });
+  });
+
+  describe('compareConditions', () => {
+    it('should detect no degradation', () => {
+      expect(compareConditions('good', 'good')).toEqual({ degraded: false, severity: 'none' });
+      expect(compareConditions('fair', 'good')).toEqual({ degraded: false, severity: 'none' }); // improved
+    });
+
+    it('should detect minor degradation', () => {
+      expect(compareConditions('excellent', 'good')).toEqual({ degraded: true, severity: 'minor' });
+      expect(compareConditions('good', 'fair')).toEqual({ degraded: true, severity: 'minor' });
+    });
+
+    it('should detect moderate degradation', () => {
+      expect(compareConditions('excellent', 'fair')).toEqual({ degraded: true, severity: 'moderate' });
+      expect(compareConditions('good', 'poor')).toEqual({ degraded: true, severity: 'moderate' });
+    });
+
+    it('should detect severe degradation', () => {
+      expect(compareConditions('excellent', 'poor')).toEqual({ degraded: true, severity: 'severe' });
+      expect(compareConditions('excellent', 'damaged')).toEqual({ degraded: true, severity: 'severe' });
+    });
+  });
+
+  describe('getDepositDeadline', () => {
+    it('should calculate deadline with default 30 days', () => {
+      const moveOutDate = '2024-06-15';
+      const deadline = getDepositDeadline(moveOutDate);
+      expect(deadline).toBe('2024-07-15');
+    });
+
+    it('should calculate deadline with custom days', () => {
+      const moveOutDate = '2024-06-15';
+      const deadline = getDepositDeadline(moveOutDate, 21);
+      expect(deadline).toBe('2024-07-06');
+    });
+  });
+
+  describe('generateDepositItemization', () => {
+    it('should generate correct itemization', () => {
+      const deposit = {
+        id: 'dep_1',
+        leaseId: 'lease_1',
+        tenantId: 'tenant_1',
+        amount: 2000,
+        depositType: 'security' as const,
+        status: 'held' as const,
+        interestAccrued: 25,
+        deductions: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const deductions: DepositDeduction[] = [
+        { id: 'ded_1', depositId: 'dep_1', category: 'Cleaning', description: 'Carpet cleaning', amount: 150, photos: [], createdAt: new Date().toISOString() },
+        { id: 'ded_2', depositId: 'dep_1', category: 'Repairs', description: 'Door repair', amount: 75, photos: [], createdAt: new Date().toISOString() },
+      ];
+
+      const itemization = generateDepositItemization(deposit, deductions);
+
+      expect(itemization.depositAmount).toBe(2000);
+      expect(itemization.interestAccrued).toBe(25);
+      expect(itemization.deductionItems).toHaveLength(2);
+      expect(itemization.totalDeductions).toBe(225);
+      expect(itemization.refundAmount).toBe(1800); // 2000 + 25 - 225
+    });
+  });
+});
+
+// ============================================================================
+// HOA/COA MANAGEMENT
+// ============================================================================
+
+describe('HOA/COA Management', () => {
+  beforeEach(() => {
+    associations.clear();
+    hoaAssessments.clear();
+    violations.clear();
+    architecturalRequests.clear();
+    boardMeetings.clear();
+    associationDocuments.clear();
+  });
+
+  describe('calculateAssessmentSchedule', () => {
+    it('should generate monthly schedule', () => {
+      const schedule = calculateAssessmentSchedule(300, 'monthly', '2024-01-01', 6);
+
+      expect(schedule).toHaveLength(6);
+      expect(schedule[0].amount).toBe(300);
+      expect(schedule[0].dueDate).toBe('2024-01-01');
+      expect(schedule[5].dueDate).toBe('2024-06-01');
+    });
+
+    it('should generate quarterly schedule', () => {
+      const schedule = calculateAssessmentSchedule(900, 'quarterly', '2024-01-01', 4);
+
+      expect(schedule).toHaveLength(4);
+      expect(schedule[0].dueDate).toBe('2024-01-01');
+      expect(schedule[1].dueDate).toBe('2024-04-01');
+      expect(schedule[2].dueDate).toBe('2024-07-01');
+      expect(schedule[3].dueDate).toBe('2024-10-01');
+    });
+
+    it('should generate annual schedule', () => {
+      const schedule = calculateAssessmentSchedule(3600, 'annual', '2024-01-01', 3);
+
+      expect(schedule).toHaveLength(3);
+      expect(schedule[0].dueDate).toBe('2024-01-01');
+      expect(schedule[1].dueDate).toBe('2025-01-01');
+      expect(schedule[2].dueDate).toBe('2026-01-01');
+    });
+  });
+
+  describe('calculateHOALateFee', () => {
+    it('should return 0 within grace period', () => {
+      const assessment = {
+        id: 'a1',
+        associationId: 'hoa_1',
+        propertyId: 'p1',
+        type: 'regular' as const,
+        description: 'Monthly',
+        amount: 300,
+        dueDate: new Date().toISOString().split('T')[0], // today
+        status: 'pending' as const,
+        paidAmount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      expect(calculateHOALateFee(assessment, 10, 15)).toBe(0);
+    });
+
+    it('should calculate late fee after grace period', () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 30); // 30 days ago
+
+      const assessment = {
+        id: 'a1',
+        associationId: 'hoa_1',
+        propertyId: 'p1',
+        type: 'regular' as const,
+        description: 'Monthly',
+        amount: 300,
+        dueDate: pastDate.toISOString().split('T')[0],
+        status: 'pending' as const,
+        paidAmount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      expect(calculateHOALateFee(assessment, 10, 15)).toBe(30); // 10% of 300
+    });
+
+    it('should return 0 for paid assessments', () => {
+      const assessment = {
+        id: 'a1',
+        associationId: 'hoa_1',
+        propertyId: 'p1',
+        type: 'regular' as const,
+        description: 'Monthly',
+        amount: 300,
+        dueDate: '2024-01-01',
+        status: 'paid' as const,
+        paidAmount: 300,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      expect(calculateHOALateFee(assessment)).toBe(0);
+    });
+  });
+
+  describe('getViolationEscalationLevel', () => {
+    it('should return level 1 for new violations', () => {
+      const violation = {
+        id: 'v1',
+        associationId: 'hoa_1',
+        propertyId: 'p1',
+        type: 'parking' as const,
+        description: 'Parked in fire lane',
+        reportedDate: new Date().toISOString(),
+        status: 'open' as const,
+        finePaid: false,
+        photos: [],
+        timeline: [{ id: 'e1', date: new Date().toISOString(), action: 'reported' }],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const result = getViolationEscalationLevel(violation);
+
+      expect(result.level).toBe(1);
+      expect(result.nextAction).toBe('Send warning letter');
+    });
+
+    it('should return level 2 after warning sent', () => {
+      const violation = {
+        id: 'v1',
+        associationId: 'hoa_1',
+        propertyId: 'p1',
+        type: 'parking' as const,
+        description: 'Parked in fire lane',
+        reportedDate: new Date().toISOString(),
+        status: 'warning_sent' as const,
+        finePaid: false,
+        photos: [],
+        timeline: [
+          { id: 'e1', date: new Date().toISOString(), action: 'reported' },
+          { id: 'e2', date: new Date().toISOString(), action: 'warning_sent' },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const result = getViolationEscalationLevel(violation);
+
+      expect(result.level).toBe(2);
+      expect(result.nextAction).toBe('Issue fine');
+    });
+
+    it('should return level 3 after fine issued and unpaid', () => {
+      const violation = {
+        id: 'v1',
+        associationId: 'hoa_1',
+        propertyId: 'p1',
+        type: 'parking' as const,
+        description: 'Parked in fire lane',
+        reportedDate: new Date().toISOString(),
+        status: 'fine_issued' as const,
+        finePaid: false,
+        fineAmount: 100,
+        photos: [],
+        timeline: [
+          { id: 'e1', date: new Date().toISOString(), action: 'reported' },
+          { id: 'e2', date: new Date().toISOString(), action: 'warning_sent' },
+          { id: 'e3', date: new Date().toISOString(), action: 'fine_issued' },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const result = getViolationEscalationLevel(violation);
+
+      expect(result.level).toBe(3);
+      expect(result.nextAction).toBe('Escalate to legal');
+    });
+  });
+
+  describe('calculateAnnualHOACost', () => {
+    it('should calculate annual cost from monthly assessments', () => {
+      const association = {
+        id: 'hoa_1',
+        name: 'Test HOA',
+        type: 'hoa' as const,
+        propertyId: 'p1',
+        regularAssessment: 300,
+        assessmentFrequency: 'monthly' as const,
+        specialAssessments: [],
+        rules: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const result = calculateAnnualHOACost(association);
+
+      expect(result.regularAssessments).toBe(3600); // 300 * 12
+      expect(result.specialAssessments).toBe(0);
+      expect(result.total).toBe(3600);
+    });
+
+    it('should include special assessments for current year', () => {
+      const currentYear = new Date().getFullYear();
+      const association = {
+        id: 'hoa_1',
+        name: 'Test HOA',
+        type: 'hoa' as const,
+        propertyId: 'p1',
+        regularAssessment: 300,
+        assessmentFrequency: 'monthly' as const,
+        specialAssessments: [
+          { id: 'sa1', description: 'Roof repair', amount: 500, dueDate: `${currentYear}-06-01`, reason: 'Maintenance', isOneTime: true },
+          { id: 'sa2', description: 'Pool upgrade', amount: 300, dueDate: `${currentYear}-09-01`, reason: 'Improvement', isOneTime: true },
+        ],
+        rules: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const result = calculateAnnualHOACost(association);
+
+      expect(result.regularAssessments).toBe(3600);
+      expect(result.specialAssessments).toBe(800);
+      expect(result.total).toBe(4400);
+    });
+  });
+
+  describe('getAssessmentSummary', () => {
+    it('should summarize assessments correctly', () => {
+      const now = new Date();
+      const pastDate = new Date(now);
+      pastDate.setMonth(pastDate.getMonth() - 2);
+
+      const assessmentList = [
+        { id: 'a1', associationId: 'h1', propertyId: 'p1', type: 'regular' as const, description: 'Jan', amount: 300, dueDate: '2024-01-01', status: 'paid' as const, paidAmount: 300, createdAt: '', updatedAt: '' },
+        { id: 'a2', associationId: 'h1', propertyId: 'p1', type: 'regular' as const, description: 'Feb', amount: 300, dueDate: '2024-02-01', status: 'paid' as const, paidAmount: 300, createdAt: '', updatedAt: '' },
+        { id: 'a3', associationId: 'h1', propertyId: 'p1', type: 'regular' as const, description: 'Mar', amount: 300, dueDate: pastDate.toISOString().split('T')[0], status: 'pending' as const, paidAmount: 0, createdAt: '', updatedAt: '' },
+      ];
+
+      const summary = getAssessmentSummary(assessmentList);
+
+      expect(summary.total).toBe(3);
+      expect(summary.paid).toBe(2);
+      expect(summary.totalAmount).toBe(900);
+      expect(summary.paidAmount).toBe(600);
+    });
+  });
+});
+
+// ============================================================================
+// TAX DOCUMENT MANAGEMENT
+// ============================================================================
+
+describe('Tax Document Management', () => {
+  beforeEach(() => {
+    taxYears.clear();
+    taxRecipients.clear();
+    taxDocuments.clear();
+    taxPayments.clear();
+    ownerTaxPackets.clear();
+    depreciationItems.clear();
+  });
+
+  describe('calculateReportablePayments', () => {
+    it('should group payments by recipient and filter by threshold', () => {
+      const payments = [
+        { id: 'p1', recipientId: 'r1', taxYearId: 'ty_2024', paymentDate: '2024-03-01', amount: 400, category: 'repairs', description: 'Plumbing', isReportable: true, createdAt: '' },
+        { id: 'p2', recipientId: 'r1', taxYearId: 'ty_2024', paymentDate: '2024-06-01', amount: 300, category: 'repairs', description: 'Electrical', isReportable: true, createdAt: '' },
+        { id: 'p3', recipientId: 'r2', taxYearId: 'ty_2024', paymentDate: '2024-04-01', amount: 200, category: 'repairs', description: 'Minor fix', isReportable: true, createdAt: '' },
+      ];
+
+      const result = calculateReportablePayments(payments, 600);
+
+      expect(result.size).toBe(1); // Only r1 meets threshold
+      expect(result.get('r1')?.total).toBe(700);
+      expect(result.get('r1')?.payments).toHaveLength(2);
+    });
+
+    it('should exclude non-reportable payments', () => {
+      const payments = [
+        { id: 'p1', recipientId: 'r1', taxYearId: 'ty_2024', paymentDate: '2024-03-01', amount: 1000, category: 'materials', description: 'Lumber', isReportable: false, createdAt: '' },
+      ];
+
+      const result = calculateReportablePayments(payments, 600);
+
+      expect(result.size).toBe(0);
+    });
+  });
+
+  describe('determineFormType', () => {
+    it('should return 1099-NEC for contractors', () => {
+      expect(determineFormType('contractor', 'services')).toBe('1099-NEC');
+    });
+
+    it('should return 1099-MISC for rent payments', () => {
+      expect(determineFormType('owner', 'rent')).toBe('1099-MISC');
+      expect(determineFormType('vendor', 'lease')).toBe('1099-MISC');
+    });
+
+    it('should return 1099-INT for interest', () => {
+      expect(determineFormType('tenant', 'interest')).toBe('1099-INT');
+    });
+  });
+
+  describe('calculateStraightLineDepreciation', () => {
+    it('should calculate annual depreciation correctly', () => {
+      const result = calculateStraightLineDepreciation(100000, 10000, 27.5, 5);
+
+      expect(result.annualDepreciation).toBeCloseTo(3272.73, 2);
+      expect(result.accumulatedDepreciation).toBeCloseTo(16363.64, 2);
+      expect(result.remainingValue).toBeCloseTo(83636.36, 2);
+    });
+
+    it('should not exceed depreciable base', () => {
+      const result = calculateStraightLineDepreciation(100000, 10000, 27.5, 30);
+
+      expect(result.accumulatedDepreciation).toBe(90000); // depreciable base
+      expect(result.remainingValue).toBe(10000); // salvage value
+    });
+  });
+
+  describe('calculateMACRSDepreciation', () => {
+    it('should calculate residential MACRS depreciation', () => {
+      const year1 = calculateMACRSDepreciation(100000, 'residential', 1);
+      const year2 = calculateMACRSDepreciation(100000, 'residential', 2);
+
+      expect(year1).toBe(3636); // 3.636% of 100000
+      expect(year2).toBe(3636);
+    });
+
+    it('should calculate commercial MACRS depreciation', () => {
+      const year1 = calculateMACRSDepreciation(100000, 'commercial', 1);
+
+      expect(year1).toBe(2564); // 2.564% of 100000
+    });
+
+    it('should return 0 for years beyond useful life', () => {
+      const year30 = calculateMACRSDepreciation(100000, 'residential', 30);
+
+      expect(year30).toBe(0); // 27.5 year property
+    });
+  });
+
+  describe('validateTIN', () => {
+    it('should validate SSN format', () => {
+      expect(validateTIN('123-45-6789', 'ssn')).toBe(true);
+      expect(validateTIN('123456789', 'ssn')).toBe(true);
+      expect(validateTIN('000-00-0000', 'ssn')).toBe(false); // all zeros
+      expect(validateTIN('666-45-6789', 'ssn')).toBe(false); // invalid area
+      expect(validateTIN('12345678', 'ssn')).toBe(false); // too short
+    });
+
+    it('should validate EIN format', () => {
+      expect(validateTIN('12-3456789', 'ein')).toBe(true);
+      expect(validateTIN('123456789', 'ein')).toBe(true);
+      expect(validateTIN('07-1234567', 'ein')).toBe(false); // invalid prefix
+      expect(validateTIN('1234567', 'ein')).toBe(false); // too short
+    });
+  });
+
+  describe('generateTaxSummary', () => {
+    it('should summarize tax documents by form type and status', () => {
+      const docs = [
+        { id: 'd1', taxYearId: 'ty_2024', year: 2024, formType: '1099-NEC' as const, recipientId: 'r1', payerId: 'p1', status: 'filed' as const, filingStatus: 'accepted' as const, totalAmount: 5000, breakdown: {}, createdAt: '', updatedAt: '' },
+        { id: 'd2', taxYearId: 'ty_2024', year: 2024, formType: '1099-NEC' as const, recipientId: 'r2', payerId: 'p1', status: 'approved' as const, filingStatus: 'pending' as const, totalAmount: 3000, breakdown: {}, createdAt: '', updatedAt: '' },
+        { id: 'd3', taxYearId: 'ty_2024', year: 2024, formType: '1099-MISC' as const, recipientId: 'r3', payerId: 'p1', status: 'draft' as const, filingStatus: 'not_filed' as const, totalAmount: 2000, breakdown: {}, createdAt: '', updatedAt: '' },
+      ];
+
+      const summary = generateTaxSummary(docs, 2024);
+
+      expect(summary.totalDocuments).toBe(3);
+      expect(summary.byFormType['1099-NEC']).toBe(2);
+      expect(summary.byFormType['1099-MISC']).toBe(1);
+      expect(summary.totalAmount).toBe(10000);
+      expect(summary.filedCount).toBe(1);
+      expect(summary.pendingCount).toBe(1);
+    });
+  });
+});
+
+// ============================================================================
+// RENTAL ASSISTANCE PROGRAMS
+// ============================================================================
+
+describe('Rental Assistance Programs', () => {
+  beforeEach(() => {
+    assistancePrograms.clear();
+    assistanceApplications.clear();
+    vouchers.clear();
+    assistanceInspections.clear();
+    assistancePayments.clear();
+    landlordCertifications.clear();
+    complianceReports.clear();
+  });
+
+  describe('calculateHAPPayment', () => {
+    it('should calculate HAP using 30% of income rule', () => {
+      const result = calculateHAPPayment(1500, 2000, 1600, 100);
+
+      // Tenant pays 30% of income = 600
+      // Gross rent = 1500 + 100 = 1600
+      // HAP = min(paymentStandard, grossRent) - tenantPortion = 1600 - 600 = 1000
+      expect(result.tenantPortion).toBe(600);
+      expect(result.grossRent).toBe(1600);
+      expect(result.hapAmount).toBe(1000);
+    });
+
+    it('should cap HAP at payment standard', () => {
+      const result = calculateHAPPayment(2000, 2000, 1500, 0);
+
+      // Gross rent = 2000, but payment standard is 1500
+      // Tenant portion = 600
+      // HAP = min(1500, 2000) - 600 = 900
+      expect(result.hapAmount).toBe(900);
+    });
+
+    it('should not go below zero HAP', () => {
+      const result = calculateHAPPayment(500, 5000, 1500, 0);
+
+      // Tenant portion = 1500 (30% of 5000)
+      // Gross rent = 500
+      // HAP would be negative, so 0
+      expect(result.hapAmount).toBe(0);
+    });
+  });
+
+  describe('isInspectionDue', () => {
+    it('should return true if no previous inspection', () => {
+      const voucher = {
+        id: 'v1',
+        programId: 'prog_1',
+        applicationId: 'app_1',
+        voucherNumber: 'V123',
+        tenantId: 't1',
+        propertyId: 'p1',
+        unitId: 'u1',
+        status: 'active' as const,
+        hapAmount: 1000,
+        tenantPortion: 500,
+        totalRent: 1500,
+        utilityAllowance: 100,
+        effectiveDate: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(isInspectionDue(voucher, undefined)).toBe(true);
+    });
+
+    it('should return true if inspection is overdue', () => {
+      const voucher = {
+        id: 'v1',
+        programId: 'prog_1',
+        applicationId: 'app_1',
+        voucherNumber: 'V123',
+        tenantId: 't1',
+        propertyId: 'p1',
+        unitId: 'u1',
+        status: 'active' as const,
+        hapAmount: 1000,
+        tenantPortion: 500,
+        totalRent: 1500,
+        utilityAllowance: 100,
+        effectiveDate: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const oldDate = new Date();
+      oldDate.setMonth(oldDate.getMonth() - 14);
+
+      const lastInspection = {
+        id: 'i1',
+        programId: 'prog_1',
+        propertyId: 'p1',
+        unitId: 'u1',
+        type: 'annual' as const,
+        scheduledDate: oldDate.toISOString(),
+        completedDate: oldDate.toISOString(),
+        deficiencies: [],
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(isInspectionDue(voucher, lastInspection, 12)).toBe(true);
+    });
+
+    it('should return false if inspection is current', () => {
+      const voucher = {
+        id: 'v1',
+        programId: 'prog_1',
+        applicationId: 'app_1',
+        voucherNumber: 'V123',
+        tenantId: 't1',
+        propertyId: 'p1',
+        unitId: 'u1',
+        status: 'active' as const,
+        hapAmount: 1000,
+        tenantPortion: 500,
+        totalRent: 1500,
+        utilityAllowance: 100,
+        effectiveDate: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const recentDate = new Date();
+      recentDate.setMonth(recentDate.getMonth() - 6);
+
+      const lastInspection = {
+        id: 'i1',
+        programId: 'prog_1',
+        propertyId: 'p1',
+        unitId: 'u1',
+        type: 'annual' as const,
+        scheduledDate: recentDate.toISOString(),
+        completedDate: recentDate.toISOString(),
+        deficiencies: [],
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(isInspectionDue(voucher, lastInspection, 12)).toBe(false);
+    });
+  });
+
+  describe('calculateInspectionPassRate', () => {
+    it('should calculate pass rate correctly', () => {
+      const inspectionList = [
+        { id: 'i1', programId: 'p1', propertyId: 'pr1', unitId: 'u1', type: 'annual' as const, scheduledDate: '', result: 'pass' as const, deficiencies: [], createdAt: '', updatedAt: '' },
+        { id: 'i2', programId: 'p1', propertyId: 'pr2', unitId: 'u2', type: 'annual' as const, scheduledDate: '', result: 'pass' as const, deficiencies: [], createdAt: '', updatedAt: '' },
+        { id: 'i3', programId: 'p1', propertyId: 'pr3', unitId: 'u3', type: 'annual' as const, scheduledDate: '', result: 'fail' as const, deficiencies: [], createdAt: '', updatedAt: '' },
+        { id: 'i4', programId: 'p1', propertyId: 'pr4', unitId: 'u4', type: 'annual' as const, scheduledDate: '', result: 'pass' as const, deficiencies: [], createdAt: '', updatedAt: '' },
+      ];
+
+      const result = calculateInspectionPassRate(inspectionList);
+
+      expect(result.total).toBe(4);
+      expect(result.passed).toBe(3);
+      expect(result.failed).toBe(1);
+      expect(result.passRate).toBe(75);
+    });
+
+    it('should handle empty list', () => {
+      const result = calculateInspectionPassRate([]);
+
+      expect(result.total).toBe(0);
+      expect(result.passRate).toBe(0);
+    });
+  });
+
+  describe('getDeficiencySummary', () => {
+    it('should summarize deficiencies by category and severity', () => {
+      const deficiencies = [
+        { id: 'd1', category: 'Plumbing', description: 'Leak', severity: 'major' as const, correctionVerified: false },
+        { id: 'd2', category: 'Electrical', description: 'Outlet', severity: 'minor' as const, correctionVerified: false },
+        { id: 'd3', category: 'Plumbing', description: 'Faucet', severity: 'minor' as const, correctedDate: '2024-01-15', correctionVerified: true },
+        { id: 'd4', category: 'Safety', description: 'Smoke detector', severity: 'life_threatening' as const, correctionVerified: false },
+      ];
+
+      const summary = getDeficiencySummary(deficiencies);
+
+      expect(summary.total).toBe(4);
+      expect(summary.byCategory['Plumbing']).toBe(2);
+      expect(summary.byCategory['Electrical']).toBe(1);
+      expect(summary.byCategory['Safety']).toBe(1);
+      expect(summary.bySeverity['minor']).toBe(2);
+      expect(summary.bySeverity['major']).toBe(1);
+      expect(summary.bySeverity['life_threatening']).toBe(1);
+      expect(summary.corrected).toBe(1);
+      expect(summary.pending).toBe(3);
+    });
+  });
+
+  describe('calculatePaymentSummary', () => {
+    it('should summarize payments correctly', () => {
+      const payments = [
+        { id: 'p1', voucherId: 'v1', programId: 'prog1', propertyId: 'pr1', landlordId: 'l1', period: '2024-01', hapAmount: 1000, adjustments: 0, netAmount: 1000, status: 'paid' as const, scheduledDate: '', paidDate: '2024-01-05', createdAt: '' },
+        { id: 'p2', voucherId: 'v2', programId: 'prog1', propertyId: 'pr2', landlordId: 'l1', period: '2024-01', hapAmount: 1200, adjustments: -50, netAmount: 1150, status: 'paid' as const, scheduledDate: '', paidDate: '2024-01-05', createdAt: '' },
+        { id: 'p3', voucherId: 'v3', programId: 'prog1', propertyId: 'pr3', landlordId: 'l1', period: '2024-01', hapAmount: 900, adjustments: 0, netAmount: 900, status: 'scheduled' as const, scheduledDate: '2024-01-10', createdAt: '' },
+      ];
+
+      const summary = calculatePaymentSummary(payments, '2024-01');
+
+      expect(summary.totalPayments).toBe(3);
+      expect(summary.totalAmount).toBe(3050);
+      expect(summary.paidAmount).toBe(2150);
+      expect(summary.pendingAmount).toBe(900);
+      expect(summary.averagePayment).toBeCloseTo(1016.67, 2);
+    });
+  });
+
+  describe('getVoucherExpirationDays', () => {
+    it('should calculate days until expiration', () => {
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 30);
+
+      const voucher = {
+        id: 'v1',
+        programId: 'prog_1',
+        applicationId: 'app_1',
+        voucherNumber: 'V123',
+        tenantId: 't1',
+        propertyId: 'p1',
+        unitId: 'u1',
+        status: 'active' as const,
+        hapAmount: 1000,
+        tenantPortion: 500,
+        totalRent: 1500,
+        utilityAllowance: 100,
+        effectiveDate: '2024-01-01',
+        expirationDate: futureDate.toISOString().split('T')[0],
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const days = getVoucherExpirationDays(voucher);
+
+      expect(days).toBeGreaterThanOrEqual(29);
+      expect(days).toBeLessThanOrEqual(31);
+    });
+
+    it('should return -1 for vouchers without expiration', () => {
+      const voucher = {
+        id: 'v1',
+        programId: 'prog_1',
+        applicationId: 'app_1',
+        voucherNumber: 'V123',
+        tenantId: 't1',
+        propertyId: 'p1',
+        unitId: 'u1',
+        status: 'active' as const,
+        hapAmount: 1000,
+        tenantPortion: 500,
+        totalRent: 1500,
+        utilityAllowance: 100,
+        effectiveDate: '2024-01-01',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(getVoucherExpirationDays(voucher)).toBe(-1);
     });
   });
 });
