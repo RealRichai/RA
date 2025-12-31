@@ -287,6 +287,95 @@ import {
   type ParkingViolation,
 } from '../src/modules/parking/routes';
 
+// Storage Unit Management imports
+import {
+  storageUnits,
+  storageRentals,
+  storagePayments,
+  storageAccessLogs,
+  storageWaitlists,
+  storagePromotions,
+  lienAuctions,
+  generateAccessCode as generateStorageAccessCode,
+  calculateSquareFeet,
+  calculateCubicFeet,
+  getUnitPricing,
+  getAvailableUnits,
+  isRentalPastDue,
+  getOccupancyStats as getStorageOccupancyStats,
+  applyPromotion,
+  type StorageUnit,
+  type StorageRental,
+  type StoragePromotion,
+} from '../src/modules/storage/routes';
+
+// Key & Access Management imports
+import {
+  physicalKeys,
+  accessDevices,
+  accessZones,
+  accessPoints,
+  keyAssignments,
+  accessAuditLogs,
+  lockoutEvents,
+  keyRequests,
+  temporaryAccesses,
+  generateKeyNumber,
+  generateAccessCode as generateKeyAccessCode,
+  generateDeviceId,
+  isAccessValid,
+  getKeyInventory,
+  getDeviceStats,
+  checkTemporaryAccess,
+  type PhysicalKey,
+  type AccessDevice,
+  type AccessZone,
+  type TemporaryAccess,
+} from '../src/modules/keys/routes';
+
+// Building Systems Monitoring imports
+import {
+  buildingSystems,
+  systemSensors,
+  sensorReadings,
+  systemAlerts,
+  maintenanceSchedules,
+  energyUsages,
+  systemDowntimes,
+  alertRules,
+  checkThresholds,
+  calculateSystemHealth,
+  getMaintenanceSummary,
+  getSystemUptime,
+  evaluateAlertRule,
+  type BuildingSystem,
+  type SystemSensor,
+  type SystemAlert,
+  type MaintenanceSchedule,
+  type AlertRule,
+} from '../src/modules/building-systems/routes';
+
+// Common Area Scheduling imports
+import {
+  commonAreas,
+  areaReservations,
+  areaWaitlists,
+  areaIncidents,
+  areaRatings,
+  communityEvents,
+  generateConfirmationCode as generateAreaConfirmationCode,
+  getOperatingHoursForDay,
+  isTimeSlotAvailable,
+  addMinutesToTime,
+  calculateReservationFee,
+  getAvailableSlots,
+  getAreaUtilization,
+  checkCancellationEligibility,
+  type CommonArea,
+  type AreaReservation,
+  type CommunityEvent,
+} from '../src/modules/common-areas/routes';
+
 describe('Automated Rent Collection', () => {
   beforeEach(() => {
     schedules.clear();
@@ -5712,6 +5801,1057 @@ describe('Parking Management', () => {
 
       expect(activePermits).toHaveLength(1);
       expect(activePermits[0].permitNumber).toBe('PMT-11111111');
+    });
+  });
+});
+
+// ===========================================================================
+// STORAGE UNIT MANAGEMENT TESTS
+// ===========================================================================
+
+describe('Storage Unit Management', () => {
+  beforeEach(() => {
+    storageUnits.clear();
+    storageRentals.clear();
+    storagePayments.clear();
+    storageAccessLogs.clear();
+    storageWaitlists.clear();
+    storagePromotions.clear();
+    lienAuctions.clear();
+  });
+
+  describe('generateAccessCode', () => {
+    it('should generate numeric codes of specified length', () => {
+      const code6 = generateStorageAccessCode(6);
+      const code8 = generateStorageAccessCode(8);
+
+      expect(code6).toHaveLength(6);
+      expect(code8).toHaveLength(8);
+      expect(code6).toMatch(/^\d+$/);
+      expect(code8).toMatch(/^\d+$/);
+    });
+  });
+
+  describe('calculateSquareFeet', () => {
+    it('should calculate area correctly', () => {
+      expect(calculateSquareFeet(5, 5)).toBe(25);
+      expect(calculateSquareFeet(10, 10)).toBe(100);
+      expect(calculateSquareFeet(10, 20)).toBe(200);
+    });
+  });
+
+  describe('calculateCubicFeet', () => {
+    it('should calculate volume correctly', () => {
+      expect(calculateCubicFeet(5, 5, 8)).toBe(200);
+      expect(calculateCubicFeet(10, 10, 10)).toBe(1000);
+    });
+  });
+
+  describe('getUnitPricing', () => {
+    it('should return correct base prices by size', () => {
+      expect(getUnitPricing('locker', 'standard')).toBe(25);
+      expect(getUnitPricing('5x5', 'standard')).toBe(50);
+      expect(getUnitPricing('10x10', 'standard')).toBe(125);
+      expect(getUnitPricing('10x20', 'standard')).toBe(225);
+    });
+
+    it('should apply type multipliers', () => {
+      expect(getUnitPricing('10x10', 'climate_controlled')).toBe(175); // 125 * 1.4
+      expect(getUnitPricing('10x10', 'outdoor')).toBe(100); // 125 * 0.8
+    });
+  });
+
+  describe('getAvailableUnits', () => {
+    it('should return available units matching criteria', () => {
+      storageUnits.set('u1', {
+        id: 'u1',
+        propertyId: 'p1',
+        unitNumber: 'A101',
+        size: '10x10',
+        type: 'standard',
+        status: 'available',
+        floor: 1,
+        dimensions: { width: 10, depth: 10, height: 8 },
+        squareFeet: 100,
+        cubicFeet: 800,
+        monthlyRate: 125,
+        features: [],
+        accessType: 'keypad',
+        hasElectricity: false,
+        insuranceRequired: true,
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      storageUnits.set('u2', {
+        id: 'u2',
+        propertyId: 'p1',
+        unitNumber: 'A102',
+        size: '10x10',
+        type: 'standard',
+        status: 'rented',
+        floor: 1,
+        dimensions: { width: 10, depth: 10, height: 8 },
+        squareFeet: 100,
+        cubicFeet: 800,
+        monthlyRate: 125,
+        features: [],
+        accessType: 'keypad',
+        hasElectricity: false,
+        insuranceRequired: true,
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const available = getAvailableUnits('p1', '10x10');
+
+      expect(available).toHaveLength(1);
+      expect(available[0].id).toBe('u1');
+    });
+  });
+
+  describe('isRentalPastDue', () => {
+    it('should return true for past due rentals', () => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      const rental: StorageRental = {
+        id: 'r1',
+        unitId: 'u1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        status: 'active',
+        startDate: '2024-01-01',
+        monthlyRate: 125,
+        paymentFrequency: 'monthly',
+        nextPaymentDate: yesterday.toISOString().split('T')[0],
+        autopayEnabled: false,
+        securityDeposit: 0,
+        moveInDate: '2024-01-01',
+        balance: 125,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(isRentalPastDue(rental)).toBe(true);
+    });
+
+    it('should return false for current rentals', () => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const rental: StorageRental = {
+        id: 'r1',
+        unitId: 'u1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        status: 'active',
+        startDate: '2024-01-01',
+        monthlyRate: 125,
+        paymentFrequency: 'monthly',
+        nextPaymentDate: tomorrow.toISOString().split('T')[0],
+        autopayEnabled: false,
+        securityDeposit: 0,
+        moveInDate: '2024-01-01',
+        balance: 0,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(isRentalPastDue(rental)).toBe(false);
+    });
+  });
+
+  describe('getOccupancyStats', () => {
+    it('should calculate occupancy statistics correctly', () => {
+      storageUnits.set('u1', {
+        id: 'u1',
+        propertyId: 'p1',
+        unitNumber: 'A101',
+        size: '10x10',
+        type: 'standard',
+        status: 'rented',
+        floor: 1,
+        dimensions: { width: 10, depth: 10, height: 8 },
+        squareFeet: 100,
+        cubicFeet: 800,
+        monthlyRate: 125,
+        features: [],
+        accessType: 'keypad',
+        hasElectricity: false,
+        insuranceRequired: true,
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      storageUnits.set('u2', {
+        id: 'u2',
+        propertyId: 'p1',
+        unitNumber: 'A102',
+        size: '5x5',
+        type: 'standard',
+        status: 'available',
+        floor: 1,
+        dimensions: { width: 5, depth: 5, height: 8 },
+        squareFeet: 25,
+        cubicFeet: 200,
+        monthlyRate: 50,
+        features: [],
+        accessType: 'keypad',
+        hasElectricity: false,
+        insuranceRequired: true,
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const stats = getStorageOccupancyStats('p1');
+
+      expect(stats.total).toBe(2);
+      expect(stats.rented).toBe(1);
+      expect(stats.available).toBe(1);
+      expect(stats.occupancyRate).toBe(50);
+    });
+  });
+
+  describe('applyPromotion', () => {
+    it('should apply percentage discount', () => {
+      const unit: StorageUnit = {
+        id: 'u1',
+        propertyId: 'p1',
+        unitNumber: 'A101',
+        size: '10x10',
+        type: 'standard',
+        status: 'available',
+        floor: 1,
+        dimensions: { width: 10, depth: 10, height: 8 },
+        squareFeet: 100,
+        cubicFeet: 800,
+        monthlyRate: 100,
+        features: [],
+        accessType: 'keypad',
+        hasElectricity: false,
+        insuranceRequired: true,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const promotion: StoragePromotion = {
+        id: 'promo1',
+        propertyId: 'p1',
+        name: '20% Off',
+        description: '20% discount',
+        discountType: 'percentage',
+        discountValue: 20,
+        applicableSizes: ['10x10'],
+        applicableTypes: ['standard'],
+        startDate: '2024-01-01',
+        endDate: '2024-12-31',
+        currentUses: 0,
+        isActive: true,
+        createdAt: '',
+      };
+
+      const result = applyPromotion(unit, promotion);
+
+      expect(result.discountedRate).toBe(80);
+      expect(result.savingsAmount).toBe(20);
+    });
+  });
+});
+
+// ===========================================================================
+// KEY & ACCESS MANAGEMENT TESTS
+// ===========================================================================
+
+describe('Key & Access Management', () => {
+  beforeEach(() => {
+    physicalKeys.clear();
+    accessDevices.clear();
+    accessZones.clear();
+    accessPoints.clear();
+    keyAssignments.clear();
+    accessAuditLogs.clear();
+    lockoutEvents.clear();
+    keyRequests.clear();
+    temporaryAccesses.clear();
+  });
+
+  describe('generateKeyNumber', () => {
+    it('should generate key numbers with correct format', () => {
+      const keyNum1 = generateKeyNumber();
+      const keyNum2 = generateKeyNumber();
+
+      expect(keyNum1).toMatch(/^KEY-\d{8}$/);
+      expect(keyNum2).toMatch(/^KEY-\d{8}$/);
+      expect(keyNum1).not.toBe(keyNum2);
+    });
+  });
+
+  describe('generateAccessCode', () => {
+    it('should generate numeric codes', () => {
+      const code = generateKeyAccessCode(6);
+
+      expect(code).toHaveLength(6);
+      expect(code).toMatch(/^\d+$/);
+    });
+  });
+
+  describe('generateDeviceId', () => {
+    it('should generate alphanumeric device IDs', () => {
+      const id1 = generateDeviceId();
+      const id2 = generateDeviceId();
+
+      expect(id1).toHaveLength(12);
+      expect(id1).toMatch(/^[A-Z0-9]+$/);
+      expect(id1).not.toBe(id2);
+    });
+  });
+
+  describe('isAccessValid', () => {
+    it('should validate access for authorized device', () => {
+      const device: AccessDevice = {
+        id: 'd1',
+        propertyId: 'p1',
+        deviceId: 'DEV123',
+        type: 'fob',
+        status: 'active',
+        accessLevel: 'resident',
+        accessZones: ['zone1'],
+        usageCount: 0,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const zone: AccessZone = {
+        id: 'zone1',
+        propertyId: 'p1',
+        name: 'Main Building',
+        type: 'building',
+        accessPoints: [],
+        requiredLevel: 'resident',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const result = isAccessValid(device, zone);
+
+      expect(result.valid).toBe(true);
+    });
+
+    it('should deny access for inactive device', () => {
+      const device: AccessDevice = {
+        id: 'd1',
+        propertyId: 'p1',
+        deviceId: 'DEV123',
+        type: 'fob',
+        status: 'inactive',
+        accessLevel: 'resident',
+        accessZones: ['zone1'],
+        usageCount: 0,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const zone: AccessZone = {
+        id: 'zone1',
+        propertyId: 'p1',
+        name: 'Main Building',
+        type: 'building',
+        accessPoints: [],
+        requiredLevel: 'resident',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const result = isAccessValid(device, zone);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason).toBe('Device is inactive');
+    });
+
+    it('should deny access for unauthorized zone', () => {
+      const device: AccessDevice = {
+        id: 'd1',
+        propertyId: 'p1',
+        deviceId: 'DEV123',
+        type: 'fob',
+        status: 'active',
+        accessLevel: 'resident',
+        accessZones: ['zone1'],
+        usageCount: 0,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const zone: AccessZone = {
+        id: 'zone2',
+        propertyId: 'p1',
+        name: 'Restricted Area',
+        type: 'restricted',
+        accessPoints: [],
+        requiredLevel: 'staff',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const result = isAccessValid(device, zone);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason).toBe('Device not authorized for this zone');
+    });
+  });
+
+  describe('getKeyInventory', () => {
+    it('should calculate key inventory correctly', () => {
+      physicalKeys.set('k1', {
+        id: 'k1',
+        propertyId: 'p1',
+        keyNumber: 'KEY-00000001',
+        type: 'unit',
+        status: 'assigned',
+        copies: 2,
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      physicalKeys.set('k2', {
+        id: 'k2',
+        propertyId: 'p1',
+        keyNumber: 'KEY-00000002',
+        type: 'master',
+        status: 'available',
+        copies: 1,
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const inventory = getKeyInventory('p1');
+
+      expect(inventory.total).toBe(3);
+      expect(inventory.byType.unit).toBe(2);
+      expect(inventory.byType.master).toBe(1);
+      expect(inventory.assignedCount).toBe(2);
+      expect(inventory.availableCount).toBe(1);
+    });
+  });
+
+  describe('checkTemporaryAccess', () => {
+    it('should validate active temporary access', () => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      temporaryAccesses.set('ta1', {
+        id: 'ta1',
+        propertyId: 'p1',
+        grantedTo: 'Guest',
+        grantedToType: 'guest',
+        grantedBy: 'staff1',
+        accessZones: ['zone1'],
+        accessCode: '12345678',
+        validFrom: yesterday.toISOString(),
+        validTo: tomorrow.toISOString(),
+        currentUses: 0,
+        status: 'active',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const result = checkTemporaryAccess('ta1');
+
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject expired temporary access', () => {
+      const twoDaysAgo = new Date();
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      temporaryAccesses.set('ta1', {
+        id: 'ta1',
+        propertyId: 'p1',
+        grantedTo: 'Guest',
+        grantedToType: 'guest',
+        grantedBy: 'staff1',
+        accessZones: ['zone1'],
+        validFrom: twoDaysAgo.toISOString(),
+        validTo: yesterday.toISOString(),
+        currentUses: 0,
+        status: 'active',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const result = checkTemporaryAccess('ta1');
+
+      expect(result.valid).toBe(false);
+      expect(result.reason).toBe('Access has expired');
+    });
+  });
+});
+
+// ===========================================================================
+// BUILDING SYSTEMS MONITORING TESTS
+// ===========================================================================
+
+describe('Building Systems Monitoring', () => {
+  beforeEach(() => {
+    buildingSystems.clear();
+    systemSensors.clear();
+    sensorReadings.clear();
+    systemAlerts.clear();
+    maintenanceSchedules.clear();
+    energyUsages.clear();
+    systemDowntimes.clear();
+    alertRules.clear();
+  });
+
+  describe('checkThresholds', () => {
+    it('should detect values below minimum threshold', () => {
+      const sensor: SystemSensor = {
+        id: 's1',
+        systemId: 'sys1',
+        propertyId: 'p1',
+        name: 'Temperature Sensor',
+        type: 'temperature',
+        unit: 'F',
+        location: 'Lobby',
+        minThreshold: 60,
+        maxThreshold: 80,
+        status: 'active',
+        isWireless: false,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const result = checkThresholds(sensor, 55);
+
+      expect(result.isAnomaly).toBe(true);
+      expect(result.severity).toBe('warning');
+    });
+
+    it('should detect values above maximum threshold', () => {
+      const sensor: SystemSensor = {
+        id: 's1',
+        systemId: 'sys1',
+        propertyId: 'p1',
+        name: 'Temperature Sensor',
+        type: 'temperature',
+        unit: 'F',
+        location: 'Lobby',
+        minThreshold: 60,
+        maxThreshold: 80,
+        status: 'active',
+        isWireless: false,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const result = checkThresholds(sensor, 85);
+
+      expect(result.isAnomaly).toBe(true);
+      expect(result.severity).toBe('warning');
+    });
+
+    it('should return no anomaly for values within range', () => {
+      const sensor: SystemSensor = {
+        id: 's1',
+        systemId: 'sys1',
+        propertyId: 'p1',
+        name: 'Temperature Sensor',
+        type: 'temperature',
+        unit: 'F',
+        location: 'Lobby',
+        minThreshold: 60,
+        maxThreshold: 80,
+        status: 'active',
+        isWireless: false,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const result = checkThresholds(sensor, 70);
+
+      expect(result.isAnomaly).toBe(false);
+    });
+  });
+
+  describe('calculateSystemHealth', () => {
+    it('should return healthy status for online system', () => {
+      buildingSystems.set('sys1', {
+        id: 'sys1',
+        propertyId: 'p1',
+        name: 'HVAC Unit 1',
+        type: 'hvac',
+        status: 'online',
+        location: 'Roof',
+        operatingHours: 1000,
+        isAutomated: true,
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const health = calculateSystemHealth('sys1');
+
+      expect(health.score).toBeGreaterThanOrEqual(80);
+      expect(health.status).toBe('healthy');
+    });
+
+    it('should return critical status for offline system', () => {
+      buildingSystems.set('sys1', {
+        id: 'sys1',
+        propertyId: 'p1',
+        name: 'HVAC Unit 1',
+        type: 'hvac',
+        status: 'offline',
+        location: 'Roof',
+        operatingHours: 1000,
+        isAutomated: true,
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const health = calculateSystemHealth('sys1');
+
+      expect(health.score).toBeLessThan(80);
+      expect(health.factors).toContain('System offline');
+    });
+  });
+
+  describe('evaluateAlertRule', () => {
+    it('should evaluate greater than condition', () => {
+      const rule: AlertRule = {
+        id: 'rule1',
+        propertyId: 'p1',
+        name: 'High Temp Alert',
+        isActive: true,
+        condition: {
+          metric: 'temperature',
+          operator: 'gt',
+          value: 80,
+        },
+        severity: 'warning',
+        notifications: {
+          channels: ['email'],
+          recipients: ['admin@test.com'],
+        },
+        cooldownMinutes: 15,
+        triggerCount: 0,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(evaluateAlertRule(rule, 's1', 85)).toBe(true);
+      expect(evaluateAlertRule(rule, 's1', 75)).toBe(false);
+    });
+
+    it('should evaluate between condition', () => {
+      const rule: AlertRule = {
+        id: 'rule1',
+        propertyId: 'p1',
+        name: 'Normal Range',
+        isActive: true,
+        condition: {
+          metric: 'temperature',
+          operator: 'between',
+          value: 60,
+          value2: 80,
+        },
+        severity: 'info',
+        notifications: {
+          channels: ['email'],
+          recipients: ['admin@test.com'],
+        },
+        cooldownMinutes: 15,
+        triggerCount: 0,
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      expect(evaluateAlertRule(rule, 's1', 70)).toBe(true);
+      expect(evaluateAlertRule(rule, 's1', 55)).toBe(false);
+      expect(evaluateAlertRule(rule, 's1', 85)).toBe(false);
+    });
+  });
+
+  describe('getSystemUptime', () => {
+    it('should calculate uptime correctly', () => {
+      buildingSystems.set('sys1', {
+        id: 'sys1',
+        propertyId: 'p1',
+        name: 'HVAC Unit 1',
+        type: 'hvac',
+        status: 'online',
+        location: 'Roof',
+        operatingHours: 1000,
+        isAutomated: true,
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const uptime = getSystemUptime('sys1', 30);
+
+      expect(uptime.uptimePercentage).toBe(100);
+      expect(uptime.totalDowntimeMinutes).toBe(0);
+      expect(uptime.incidents).toBe(0);
+    });
+  });
+});
+
+// ===========================================================================
+// COMMON AREA SCHEDULING TESTS
+// ===========================================================================
+
+describe('Common Area Scheduling', () => {
+  beforeEach(() => {
+    commonAreas.clear();
+    areaReservations.clear();
+    areaWaitlists.clear();
+    areaIncidents.clear();
+    areaRatings.clear();
+    communityEvents.clear();
+  });
+
+  describe('generateConfirmationCode', () => {
+    it('should generate 8-character alphanumeric codes', () => {
+      const code1 = generateAreaConfirmationCode();
+      const code2 = generateAreaConfirmationCode();
+
+      expect(code1).toHaveLength(8);
+      expect(code2).toHaveLength(8);
+      expect(code1).toMatch(/^[A-Z0-9]+$/);
+      expect(code1).not.toBe(code2);
+    });
+  });
+
+  describe('addMinutesToTime', () => {
+    it('should add minutes to time correctly', () => {
+      expect(addMinutesToTime('09:00', 30)).toBe('09:30');
+      expect(addMinutesToTime('09:30', 45)).toBe('10:15');
+      expect(addMinutesToTime('23:30', 60)).toBe('00:30');
+    });
+  });
+
+  describe('calculateReservationFee', () => {
+    it('should calculate fee based on hourly rate', () => {
+      const area: CommonArea = {
+        id: 'a1',
+        propertyId: 'p1',
+        name: 'Party Room',
+        type: 'party_room',
+        status: 'available',
+        location: '1st Floor',
+        capacity: 50,
+        amenities: [],
+        equipment: [],
+        rules: [],
+        requiresApproval: false,
+        requiresDeposit: true,
+        depositAmount: 200,
+        hourlyRate: 50,
+        advanceBookingDays: 30,
+        cancellationHours: 24,
+        cleanupTimeMinutes: 30,
+        operatingHours: [],
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const result = calculateReservationFee(area, '10:00', '14:00');
+
+      expect(result.hours).toBe(4);
+      expect(result.fee).toBe(200);
+    });
+
+    it('should return zero for areas without hourly rate', () => {
+      const area: CommonArea = {
+        id: 'a1',
+        propertyId: 'p1',
+        name: 'Lounge',
+        type: 'lounge',
+        status: 'available',
+        location: '1st Floor',
+        capacity: 20,
+        amenities: [],
+        equipment: [],
+        rules: [],
+        requiresApproval: false,
+        requiresDeposit: false,
+        advanceBookingDays: 30,
+        cancellationHours: 24,
+        cleanupTimeMinutes: 15,
+        operatingHours: [],
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const result = calculateReservationFee(area, '10:00', '14:00');
+
+      expect(result.fee).toBe(0);
+    });
+  });
+
+  describe('getOperatingHoursForDay', () => {
+    it('should return hours for specified day', () => {
+      const area: CommonArea = {
+        id: 'a1',
+        propertyId: 'p1',
+        name: 'Party Room',
+        type: 'party_room',
+        status: 'available',
+        location: '1st Floor',
+        capacity: 50,
+        amenities: [],
+        equipment: [],
+        rules: [],
+        requiresApproval: false,
+        requiresDeposit: false,
+        advanceBookingDays: 30,
+        cancellationHours: 24,
+        cleanupTimeMinutes: 30,
+        operatingHours: [
+          { dayOfWeek: 1, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 6, openTime: '10:00', closeTime: '23:00', isClosed: false },
+          { dayOfWeek: 0, openTime: '00:00', closeTime: '00:00', isClosed: true },
+        ],
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const monday = getOperatingHoursForDay(area, 1);
+      const saturday = getOperatingHoursForDay(area, 6);
+      const sunday = getOperatingHoursForDay(area, 0);
+
+      expect(monday?.openTime).toBe('08:00');
+      expect(saturday?.openTime).toBe('10:00');
+      expect(sunday?.isClosed).toBe(true);
+    });
+  });
+
+  describe('isTimeSlotAvailable', () => {
+    it('should return true for available slot', () => {
+      commonAreas.set('a1', {
+        id: 'a1',
+        propertyId: 'p1',
+        name: 'Party Room',
+        type: 'party_room',
+        status: 'available',
+        location: '1st Floor',
+        capacity: 50,
+        amenities: [],
+        equipment: [],
+        rules: [],
+        requiresApproval: false,
+        requiresDeposit: false,
+        advanceBookingDays: 30,
+        cancellationHours: 24,
+        cleanupTimeMinutes: 30,
+        operatingHours: [
+          { dayOfWeek: 0, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 1, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 2, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 3, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 4, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 5, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 6, openTime: '08:00', closeTime: '22:00', isClosed: false },
+        ],
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const dateStr = tomorrow.toISOString().split('T')[0];
+
+      const available = isTimeSlotAvailable('a1', dateStr, '10:00', '12:00');
+
+      expect(available).toBe(true);
+    });
+
+    it('should return false for conflicting reservation', () => {
+      commonAreas.set('a1', {
+        id: 'a1',
+        propertyId: 'p1',
+        name: 'Party Room',
+        type: 'party_room',
+        status: 'available',
+        location: '1st Floor',
+        capacity: 50,
+        amenities: [],
+        equipment: [],
+        rules: [],
+        requiresApproval: false,
+        requiresDeposit: false,
+        advanceBookingDays: 30,
+        cancellationHours: 24,
+        cleanupTimeMinutes: 0,
+        operatingHours: [
+          { dayOfWeek: 0, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 1, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 2, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 3, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 4, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 5, openTime: '08:00', closeTime: '22:00', isClosed: false },
+          { dayOfWeek: 6, openTime: '08:00', closeTime: '22:00', isClosed: false },
+        ],
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const dateStr = tomorrow.toISOString().split('T')[0];
+
+      areaReservations.set('r1', {
+        id: 'r1',
+        areaId: 'a1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        eventType: 'private',
+        status: 'confirmed',
+        date: dateStr,
+        startTime: '10:00',
+        endTime: '12:00',
+        expectedGuests: 20,
+        depositPaid: false,
+        depositRefunded: false,
+        feePaid: false,
+        confirmationCode: 'ABC12345',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const available = isTimeSlotAvailable('a1', dateStr, '11:00', '13:00');
+
+      expect(available).toBe(false);
+    });
+  });
+
+  describe('checkCancellationEligibility', () => {
+    it('should allow cancellation with refund before deadline', () => {
+      commonAreas.set('a1', {
+        id: 'a1',
+        propertyId: 'p1',
+        name: 'Party Room',
+        type: 'party_room',
+        status: 'available',
+        location: '1st Floor',
+        capacity: 50,
+        amenities: [],
+        equipment: [],
+        rules: [],
+        requiresApproval: false,
+        requiresDeposit: true,
+        depositAmount: 200,
+        advanceBookingDays: 30,
+        cancellationHours: 24,
+        cleanupTimeMinutes: 30,
+        operatingHours: [],
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const twoDaysFromNow = new Date();
+      twoDaysFromNow.setDate(twoDaysFromNow.getDate() + 2);
+      const dateStr = twoDaysFromNow.toISOString().split('T')[0];
+
+      const reservation: AreaReservation = {
+        id: 'r1',
+        areaId: 'a1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        eventType: 'private',
+        status: 'confirmed',
+        date: dateStr,
+        startTime: '14:00',
+        endTime: '18:00',
+        expectedGuests: 20,
+        depositPaid: true,
+        depositRefunded: false,
+        feePaid: false,
+        confirmationCode: 'ABC12345',
+        createdAt: '',
+        updatedAt: '',
+      };
+
+      const eligibility = checkCancellationEligibility(reservation);
+
+      expect(eligibility.eligible).toBe(true);
+      expect(eligibility.refundEligible).toBe(true);
+    });
+  });
+
+  describe('getAreaUtilization', () => {
+    it('should calculate utilization statistics', () => {
+      commonAreas.set('a1', {
+        id: 'a1',
+        propertyId: 'p1',
+        name: 'Party Room',
+        type: 'party_room',
+        status: 'available',
+        location: '1st Floor',
+        capacity: 50,
+        amenities: [],
+        equipment: [],
+        rules: [],
+        requiresApproval: false,
+        requiresDeposit: false,
+        advanceBookingDays: 30,
+        cancellationHours: 24,
+        cleanupTimeMinutes: 30,
+        operatingHours: [],
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      areaReservations.set('r1', {
+        id: 'r1',
+        areaId: 'a1',
+        propertyId: 'p1',
+        tenantId: 't1',
+        eventType: 'private',
+        status: 'completed',
+        date: '2024-06-01',
+        startTime: '10:00',
+        endTime: '14:00',
+        expectedGuests: 20,
+        actualGuests: 25,
+        depositPaid: false,
+        depositRefunded: false,
+        rentalFee: 200,
+        feePaid: true,
+        confirmationCode: 'ABC12345',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      areaReservations.set('r2', {
+        id: 'r2',
+        areaId: 'a1',
+        propertyId: 'p1',
+        tenantId: 't2',
+        eventType: 'private',
+        status: 'cancelled',
+        date: '2024-06-02',
+        startTime: '14:00',
+        endTime: '18:00',
+        expectedGuests: 30,
+        depositPaid: false,
+        depositRefunded: false,
+        feePaid: false,
+        confirmationCode: 'DEF67890',
+        createdAt: '',
+        updatedAt: '',
+      });
+
+      const utilization = getAreaUtilization('a1');
+
+      expect(utilization.totalReservations).toBe(2);
+      expect(utilization.completedReservations).toBe(1);
+      expect(utilization.cancelledReservations).toBe(1);
+      expect(utilization.totalRevenue).toBe(200);
     });
   });
 });

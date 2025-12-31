@@ -65,6 +65,10 @@ import { amenityRoutes } from './amenities/routes';
 import { packageRoutes } from './packages/routes';
 import { petRoutes } from './pets/routes';
 import { parkingRoutes } from './parking/routes';
+import { storageRoutes } from './storage/routes';
+import { keyRoutes } from './keys/routes';
+import { buildingSystemRoutes } from './building-systems/routes';
+import { commonAreaRoutes } from './common-areas/routes';
 
 export async function registerModules(app: FastifyInstance): Promise<void> {
   const config = getConfig();
@@ -132,6 +136,10 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(packageRoutes, { prefix: '/packages' });
       await api.register(petRoutes, { prefix: '/pets' });
       await api.register(parkingRoutes, { prefix: '/parking' });
+      await api.register(storageRoutes, { prefix: '/storage' });
+      await api.register(keyRoutes, { prefix: '/keys' });
+      await api.register(buildingSystemRoutes, { prefix: '/building-systems' });
+      await api.register(commonAreaRoutes, { prefix: '/common-areas' });
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
