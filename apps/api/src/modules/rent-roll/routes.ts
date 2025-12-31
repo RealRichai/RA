@@ -1,9 +1,9 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   type OccupancyStatus,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // Helper functions
 function toNumber(value: unknown): number {
@@ -24,12 +24,12 @@ export interface RentRollEntry {
   squareFeet?: number | null;
   bedrooms?: number;
   bathrooms?: number;
-  status?: OccupancyStatus | string;
-  occupancyStatus?: OccupancyStatus | string;
+  status?: OccupancyStatus;
+  occupancyStatus?: OccupancyStatus;
   marketRent: number;
   currentRent?: number;
-  monthlyRent?: unknown;
-  balance?: number | unknown;
+  monthlyRent?: number;
+  balance?: number;
   depositHeld?: number;
   deposit?: unknown;
   leaseEnd?: Date | null;
@@ -179,8 +179,8 @@ interface EntryData {
   balance?: unknown;
   deposit?: unknown;
   depositHeld?: number;
-  occupancyStatus?: OccupancyStatus | string;
-  status?: OccupancyStatus | string;
+  occupancyStatus?: OccupancyStatus;
+  status?: OccupancyStatus;
   leaseEnd?: Date | null;
 }
 

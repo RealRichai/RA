@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   Prisma,
@@ -12,6 +10,8 @@ import {
   type TemplateCategory as PrismaTemplateCategory,
   type BroadcastStatus as PrismaBroadcastStatus,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // Types
 export type MessageChannel = 'email' | 'sms' | 'in_app' | 'portal';

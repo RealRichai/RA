@@ -38,10 +38,12 @@ const smsMessages = new Map<string, unknown>();
 const messageTemplates = new Map<string, unknown>();
 const broadcasts = new Map<string, unknown>();
 
-// Insurance stores
-const policies = new Map<string, unknown>();
-const certificates = new Map<string, unknown>();
-const claims = new Map<string, unknown>();
+// Insurance stores - imported from module
+import {
+  policies,
+  certificates,
+  claims,
+} from '../src/modules/insurance/routes';
 const alerts = new Map<string, unknown>();
 
 // Utility stores
@@ -125,14 +127,16 @@ const vehicleStore = new Map<string, unknown>();
 const parkingViolationStore = violationStore;
 const towRecordStore = new Map<string, unknown>();
 
-// Storage stores
-const storageUnits = new Map<string, unknown>();
-const storageRentals = new Map<string, unknown>();
-const storagePayments = new Map<string, unknown>();
-const storageAccessLogs = new Map<string, unknown>();
-const storageWaitlists = new Map<string, unknown>();
-const storagePromotions = new Map<string, unknown>();
-const lienAuctions = new Map<string, unknown>();
+// Storage stores - imported from module
+import {
+  storageUnits,
+  storageRentals,
+  storagePayments,
+  storageAccessLogs,
+  storageWaitlists,
+  storagePromotions,
+  lienAuctions,
+} from '../src/modules/storage/routes';
 
 // Key & Access stores - imported from module
 import {
@@ -172,11 +176,11 @@ const areaRatings = new Map<string, unknown>();
 
 // Guest stores - imported from module
 import {
-  guestPassStore,
+  guestPassStore as guestModulePassStore,
   guestPolicies,
   guestParkingSpots,
 } from '../src/modules/guests/routes';
-const guestPassStore2 = guestPassStore; // Alias for backward compatibility
+const guestPassStore2 = guestModulePassStore; // Alias for backward compatibility
 const guestCheckIns = new Map<string, unknown>();
 const guestIncidents = new Map<string, unknown>();
 const guestNotifications = new Map<string, unknown>();
@@ -365,6 +369,7 @@ import {
   isPackageOverdue,
   calculatePackageStats,
   validateTrackingNumber,
+  getLockerUtilization,
 } from '../src/modules/packages/routes';
 
 // Package types
@@ -1003,6 +1008,24 @@ describe('Inspection Scheduling', () => {
   });
 
   describe('Inspection Templates', () => {
+    beforeEach(() => {
+      // Seed default apartment template
+      inspectionTemplates.set('tpl-apartment-default', {
+        id: 'tpl-apartment-default',
+        name: 'Standard Apartment Inspection',
+        propertyType: 'apartment',
+        isDefault: true,
+        rooms: [
+          { id: 'room-1', name: 'Living Room', items: ['Walls', 'Flooring', 'Windows', 'Light Fixtures'] },
+          { id: 'room-2', name: 'Kitchen', items: ['Appliances', 'Cabinets', 'Counters', 'Sink'] },
+          { id: 'room-3', name: 'Bedroom', items: ['Walls', 'Flooring', 'Closet', 'Windows'] },
+          { id: 'room-4', name: 'Bathroom', items: ['Toilet', 'Shower/Tub', 'Sink', 'Vanity'] },
+        ],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
     it('should have default apartment template', () => {
       const defaultTemplate = Array.from(inspectionTemplates.values()).find(
         (t) => t.isDefault && t.propertyType === 'apartment'
@@ -1742,6 +1765,42 @@ describe('Portfolio Dashboard', () => {
   });
 
   describe('Portfolio Data', () => {
+    beforeEach(() => {
+      // Seed portfolio properties
+      portfolioProperties.set('prop-1', {
+        propertyId: 'prop-1',
+        name: 'Test Property 1',
+        units: 10,
+        occupiedUnits: 8,
+        occupancyRate: 80,
+        revenue: 50000,
+        expenses: 20000,
+        noi: 30000,
+        value: 5000000,
+        capRate: 7.2,
+      });
+      portfolioProperties.set('prop-2', {
+        propertyId: 'prop-2',
+        name: 'Test Property 2',
+        units: 20,
+        occupiedUnits: 18,
+        occupancyRate: 90,
+        revenue: 100000,
+        expenses: 40000,
+        noi: 60000,
+        value: 10000000,
+        capRate: 7.2,
+      });
+
+      // Seed occupancy history (12 months)
+      occupancyHistory.set('prop-1', [85, 85, 82, 80, 78, 80, 82, 85, 88, 90, 88, 80]);
+      occupancyHistory.set('prop-2', [90, 91, 92, 90, 88, 90, 91, 92, 93, 94, 92, 90]);
+
+      // Seed revenue history (12 months)
+      revenueHistory.set('prop-1', [48000, 49000, 50000, 50000, 48000, 50000, 51000, 52000, 53000, 54000, 52000, 50000]);
+      revenueHistory.set('prop-2', [95000, 96000, 98000, 100000, 98000, 100000, 102000, 104000, 105000, 106000, 104000, 100000]);
+    });
+
     it('should have initial mock properties', () => {
       expect(portfolioProperties.size).toBeGreaterThan(0);
     });
@@ -1772,6 +1831,34 @@ describe('Portfolio Dashboard', () => {
   });
 
   describe('Portfolio Aggregation', () => {
+    beforeEach(() => {
+      // Seed portfolio properties
+      portfolioProperties.set('prop-1', {
+        propertyId: 'prop-1',
+        name: 'Test Property 1',
+        units: 10,
+        occupiedUnits: 8,
+        occupancyRate: 80,
+        revenue: 50000,
+        expenses: 20000,
+        noi: 30000,
+        value: 5000000,
+        capRate: 7.2,
+      });
+      portfolioProperties.set('prop-2', {
+        propertyId: 'prop-2',
+        name: 'Test Property 2',
+        units: 20,
+        occupiedUnits: 18,
+        occupancyRate: 90,
+        revenue: 100000,
+        expenses: 40000,
+        noi: 60000,
+        value: 10000000,
+        capRate: 7.2,
+      });
+    });
+
     it('should aggregate across properties', () => {
       const props = Array.from(portfolioProperties.values());
       const totalUnits = props.reduce((sum, p) => sum + p.units, 0);
@@ -1994,6 +2081,25 @@ describe('Applicant Screening', () => {
   });
 
   describe('Screening Criteria', () => {
+    beforeEach(() => {
+      // Seed default screening criteria
+      screeningCriteria.set('default', {
+        id: 'default',
+        name: 'Default Screening Criteria',
+        isDefault: true,
+        minCreditScore: 650,
+        minIncomeToRentRatio: 3,
+        maxDebtToIncomeRatio: 0.43,
+        requireEmploymentVerification: true,
+        requireLandlordReferences: true,
+        minLandlordReferences: 1,
+        requireBackgroundCheck: true,
+        allowCosigner: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
     it('should have default screening criteria', () => {
       expect(screeningCriteria.size).toBeGreaterThan(0);
       const defaultC = screeningCriteria.get('default');
@@ -2293,6 +2399,40 @@ describe('Communication Hub', () => {
   });
 
   describe('Message Templates', () => {
+    beforeEach(() => {
+      // Seed default templates
+      messageTemplates.set('tpl-rent-reminder', {
+        id: 'tpl-rent-reminder',
+        name: 'Rent Reminder',
+        category: 'payment',
+        subject: 'Rent Due Reminder',
+        body: 'Dear {{tenant_name}}, your rent of {{amount}} is due on {{due_date}}.',
+        variables: ['tenant_name', 'amount', 'due_date'],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      messageTemplates.set('tpl-payment-received', {
+        id: 'tpl-payment-received',
+        name: 'Payment Received',
+        category: 'payment',
+        subject: 'Payment Confirmation',
+        body: 'Thank you {{tenant_name}}, we received your payment of {{amount}}.',
+        variables: ['tenant_name', 'amount'],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      messageTemplates.set('tpl-welcome', {
+        id: 'tpl-welcome',
+        name: 'Welcome Message',
+        category: 'general',
+        subject: 'Welcome to {{property_name}}',
+        body: 'Welcome to your new home, {{tenant_name}}!',
+        variables: ['property_name', 'tenant_name'],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
     it('should have default templates', () => {
       expect(messageTemplates.size).toBeGreaterThan(0);
     });

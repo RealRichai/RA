@@ -1,10 +1,10 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   Prisma,
   type VendorInvoiceStatus as PrismaVendorInvoiceStatus,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // Types
 export type VendorStatus = 'active' | 'inactive' | 'suspended' | 'pending_approval';
@@ -75,9 +75,9 @@ export const vendors = new Map<string, Vendor>();
 
 // Synchronous findBestVendor for testing (uses Map)
 export function findBestVendor(
-  category: VendorCategory | string,
+  category: VendorCategory,
   propertyId: string,
-  priority: WorkOrderPriority | string
+  priority: WorkOrderPriority
 ): Vendor | null {
   const isEmergency = priority === 'emergency';
 
@@ -657,7 +657,7 @@ export async function vendorRoutes(app: FastifyInstance): Promise<void> {
     let vendorId = body.vendorId;
 
     if (body.autoAssign) {
-      const bestVendor = await findBestVendor(
+      const bestVendor = findBestVendor(
         workOrder.category as VendorCategory,
         workOrder.propertyId,
         workOrder.priority as WorkOrderPriority

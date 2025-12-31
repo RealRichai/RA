@@ -1,6 +1,3 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { z } from 'zod';
-
 import {
   prisma,
   type AssistanceProgramType,
@@ -12,6 +9,9 @@ import {
   type CertificationType,
   type CertificationStatus,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+
 
 // ============================================================================
 // TYPES

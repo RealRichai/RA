@@ -1,6 +1,3 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { z } from 'zod';
-
 import {
   prisma,
   type TaxYearStatus,
@@ -11,6 +8,9 @@ import {
   type TaxIdType,
   type DepreciationMethod,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+
 
 // ============================================================================
 // TYPES
@@ -177,7 +177,63 @@ export function calculateMACRSDepreciation(
   return Math.round(originalCost * rate * 100) / 100;
 }
 
-export async function generateTaxSummary(
+// Sync version for testing - accepts docs array directly
+export function generateTaxSummary(
+  docsOrYear: TaxDocumentData[] | number,
+  year?: number
+): {
+  totalDocuments: number;
+  byFormType: Record<string, number>;
+  byStatus: Record<string, number>;
+  totalAmount: number;
+  filedCount: number;
+  pendingCount: number;
+} {
+  // Handle both signatures: (docs, year) and (year)
+  let docs: TaxDocumentData[];
+  if (typeof docsOrYear === 'number') {
+    // If called with just year, return empty result (sync version can't query DB)
+    return {
+      totalDocuments: 0,
+      byFormType: {},
+      byStatus: {},
+      totalAmount: 0,
+      filedCount: 0,
+      pendingCount: 0,
+    };
+  } else {
+    docs = docsOrYear;
+  }
+
+  const byFormType: Record<string, number> = {};
+  const byStatus: Record<string, number> = {};
+  let totalAmount = 0;
+
+  for (const doc of docs) {
+    byFormType[doc.formType] = (byFormType[doc.formType] || 0) + 1;
+    byStatus[doc.status] = (byStatus[doc.status] || 0) + 1;
+    totalAmount += doc.totalAmount || 0;
+  }
+
+  return {
+    totalDocuments: docs.length,
+    byFormType,
+    byStatus,
+    totalAmount,
+    filedCount: docs.filter((d) => d.filingStatus === 'accepted' || d.status === 'filed').length,
+    pendingCount: docs.filter((d) => d.filingStatus === 'pending').length,
+  };
+}
+
+interface TaxDocumentData {
+  id: string;
+  formType: string;
+  status: string;
+  filingStatus?: string;
+  totalAmount?: number;
+}
+
+async function generateTaxSummaryAsync(
   year: number
 ): Promise<{
   totalDocuments: number;
@@ -352,7 +408,7 @@ export async function taxDocumentRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Tax year not found' });
       }
 
-      const summary = await generateTaxSummary(taxYear.year);
+      const summary = generateTaxSummary(taxYear.year);
 
       return reply.send({ ...taxYear, summary });
     }

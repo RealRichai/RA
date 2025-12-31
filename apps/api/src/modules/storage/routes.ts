@@ -1,5 +1,3 @@
-import { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   type StorageUnitStatus,
@@ -8,6 +6,8 @@ import {
   type StoragePaymentStatus,
   type LienAuctionStatus,
 } from '@realriches/database';
+import { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -61,7 +61,7 @@ export interface StorageUnit {
   unitNumber: string;
   size: string;
   type: string;
-  status: StorageUnitStatus | string;
+  status: StorageUnitStatus;
   monthlyRate?: number;
   createdAt: string;
   updatedAt: string;
@@ -69,6 +69,11 @@ export interface StorageUnit {
 
 export const storageUnits = new Map<string, StorageUnit>();
 export const storageRentals = new Map<string, StorageRental>();
+export const storagePayments = new Map<string, unknown>();
+export const storageAccessLogs = new Map<string, unknown>();
+export const storageWaitlists = new Map<string, unknown>();
+export const storagePromotions = new Map<string, unknown>();
+export const lienAuctions = new Map<string, unknown>();
 
 // Synchronous getAvailableUnits for testing
 export function getAvailableUnits(
@@ -259,27 +264,54 @@ export interface StoragePromotion {
 }
 
 export function isRentalPastDue(rental: StorageRental): boolean {
-  if (!rental.nextPaymentDue) return false;
+  // Support both nextPaymentDue and nextPaymentDate
+  const dueDateValue = rental.nextPaymentDue || (rental as unknown as { nextPaymentDate?: string | Date }).nextPaymentDate;
+  if (!dueDateValue) return false;
   const now = new Date();
-  const dueDate = typeof rental.nextPaymentDue === 'string'
-    ? new Date(rental.nextPaymentDue)
-    : rental.nextPaymentDue;
+  const dueDate = typeof dueDateValue === 'string'
+    ? new Date(dueDateValue)
+    : dueDateValue;
   return dueDate < now && rental.status !== 'terminated';
 }
 
-export function applyPromotion(monthlyRate: number, promotion: StoragePromotion): number {
-  if (!promotion.isActive) return monthlyRate;
+export function applyPromotion(
+  unitOrRate: StorageUnit | number,
+  promotion: StoragePromotion
+): { discountedRate: number; savingsAmount: number } | number {
+  // Get the monthly rate from unit or use the number directly
+  const monthlyRate = typeof unitOrRate === 'number'
+    ? unitOrRate
+    : unitOrRate.monthlyRate || 0;
 
+  if (!promotion.isActive) {
+    if (typeof unitOrRate === 'number') {
+      return monthlyRate;
+    }
+    return { discountedRate: monthlyRate, savingsAmount: 0 };
+  }
+
+  let discountedRate: number;
   switch (promotion.discountType) {
     case 'percentage':
-      return monthlyRate * (1 - promotion.discountValue / 100);
+      discountedRate = monthlyRate * (1 - promotion.discountValue / 100);
+      break;
     case 'flat':
-      return Math.max(0, monthlyRate - promotion.discountValue);
+      discountedRate = Math.max(0, monthlyRate - promotion.discountValue);
+      break;
     case 'free_months':
-      return 0; // First month(s) free
+      discountedRate = 0; // First month(s) free
+      break;
     default:
-      return monthlyRate;
+      discountedRate = monthlyRate;
   }
+
+  const savingsAmount = monthlyRate - discountedRate;
+
+  // Return object if called with unit, number if called with rate
+  if (typeof unitOrRate === 'number') {
+    return discountedRate;
+  }
+  return { discountedRate, savingsAmount };
 }
 
 // ============================================================================

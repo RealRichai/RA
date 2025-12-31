@@ -1,5 +1,3 @@
-import { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   type CommonAreaType,
@@ -13,6 +11,8 @@ import {
   type CommunityEventType,
   type CommunityEventStatus,
 } from '@realriches/database';
+import { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 
 // ============================================================================
 // EXPORTED TYPES FOR TESTING
@@ -22,8 +22,8 @@ export interface CommonArea {
   id: string;
   propertyId: string;
   name: string;
-  type: CommonAreaType | string;
-  status: CommonAreaStatus | string;
+  type: CommonAreaType;
+  status: CommonAreaStatus;
   capacity: number;
   hourlyRate?: number | null;
   requiresDeposit?: boolean;
@@ -41,7 +41,7 @@ export interface AreaReservation {
   date: string;
   startTime: string;
   endTime: string;
-  status: ReservationStatus | string;
+  status: ReservationStatus;
   createdAt: Date;
   fee?: number;
   deposit?: number;
@@ -51,8 +51,8 @@ export interface CommunityEvent {
   id: string;
   areaId: string;
   name: string;
-  type: CommunityEventType | string;
-  status: CommunityEventStatus | string;
+  type: CommunityEventType;
+  status: CommunityEventStatus;
   startDate: Date;
   endDate: Date;
 }
@@ -85,25 +85,30 @@ export function isTimeSlotAvailableSync(
   return conflicting.length === 0;
 }
 
-export function getAreaUtilizationSync(areaId: string, startDate: string, endDate: string): {
+export function getAreaUtilizationSync(areaId: string, startDate?: string, endDate?: string): {
   totalReservations: number;
   completedReservations: number;
   cancelledReservations: number;
+  totalRevenue: number;
   averageOccupancy: number;
   peakHours: { hour: number; count: number }[];
   utilizationByDay: Record<string, number>;
 } {
-  const reservations = Array.from(areaReservations.values()).filter(r =>
-    r.areaId === areaId && r.date >= startDate && r.date <= endDate
-  );
+  let reservations = Array.from(areaReservations.values()).filter(r => r.areaId === areaId);
+
+  if (startDate && endDate) {
+    reservations = reservations.filter(r => r.date >= startDate && r.date <= endDate);
+  }
 
   const completed = reservations.filter(r => r.status === 'completed').length;
   const cancelled = reservations.filter(r => r.status === 'cancelled').length;
+  const totalRevenue = reservations.reduce((sum, r) => sum + (r.rentalFee || 0), 0);
 
   return {
     totalReservations: reservations.length,
     completedReservations: completed,
     cancelledReservations: cancelled,
+    totalRevenue,
     averageOccupancy: 0,
     peakHours: [],
     utilizationByDay: {},
@@ -111,16 +116,23 @@ export function getAreaUtilizationSync(areaId: string, startDate: string, endDat
 }
 
 export function checkCancellationEligibilitySync(
-  reservationId: string
-): { eligible: boolean; refundPercentage: number; deadline: Date | null; reason?: string } {
-  const reservation = areaReservations.get(reservationId);
+  reservationIdOrObj: string | AreaReservation
+): { eligible: boolean; refundEligible: boolean; refundPercentage: number; deadline: Date | null; reason?: string } {
+  let reservation: AreaReservation | undefined;
+
+  if (typeof reservationIdOrObj === 'string') {
+    reservation = areaReservations.get(reservationIdOrObj);
+  } else {
+    reservation = reservationIdOrObj;
+  }
+
   if (!reservation) {
-    return { eligible: false, refundPercentage: 0, deadline: null, reason: 'Reservation not found' };
+    return { eligible: false, refundEligible: false, refundPercentage: 0, deadline: null, reason: 'Reservation not found' };
   }
 
   const area = commonAreas.get(reservation.areaId);
   if (!area) {
-    return { eligible: false, refundPercentage: 0, deadline: null, reason: 'Area not found' };
+    return { eligible: false, refundEligible: false, refundPercentage: 0, deadline: null, reason: 'Area not found' };
   }
 
   const reservationDateTime = new Date(`${reservation.date}T${reservation.startTime}`);
@@ -129,11 +141,11 @@ export function checkCancellationEligibilitySync(
   const cancellationHours = area.cancellationHours || 24;
 
   if (hoursUntil >= cancellationHours) {
-    return { eligible: true, refundPercentage: 100, deadline: reservationDateTime };
+    return { eligible: true, refundEligible: true, refundPercentage: 100, deadline: reservationDateTime };
   } else if (hoursUntil >= 0) {
-    return { eligible: true, refundPercentage: 50, deadline: reservationDateTime };
+    return { eligible: true, refundEligible: true, refundPercentage: 50, deadline: reservationDateTime };
   } else {
-    return { eligible: false, refundPercentage: 0, deadline: null, reason: 'Reservation already past' };
+    return { eligible: false, refundEligible: false, refundPercentage: 0, deadline: null, reason: 'Reservation already past' };
   }
 }
 

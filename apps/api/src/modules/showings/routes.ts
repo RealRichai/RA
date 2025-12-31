@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   Prisma,
@@ -7,6 +5,8 @@ import {
   type ContactMethod as PrismaContactMethod,
   type CalendarProviderEnum as PrismaCalendarProvider,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // ============================================================================
 // Types

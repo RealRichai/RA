@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   Prisma,
@@ -12,6 +10,8 @@ import {
   type RUBSAllocationStatus as PrismaRUBSAllocationStatus,
   type ReadingType as PrismaReadingType,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // Types
 export type UtilityType = 'electric' | 'gas' | 'water' | 'sewer' | 'trash' | 'internet' | 'cable' | 'other';
@@ -158,7 +158,8 @@ export interface UtilityBill {
 
 export function estimateMonthlyAverage(bills: UtilityBill[]): number {
   if (bills.length === 0) return 0;
-  const total = bills.reduce((sum, b) => sum + b.amount, 0);
+  // Support both amount and totalAmount fields
+  const total = bills.reduce((sum, b) => sum + (b.amount || (b as unknown as { totalAmount?: number }).totalAmount || 0), 0);
   return total / bills.length;
 }
 

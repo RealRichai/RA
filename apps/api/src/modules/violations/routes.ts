@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   type ViolationType,
@@ -14,6 +12,8 @@ import {
   type ResolutionType,
   type EvidenceType,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 function toNumber(value: unknown): number {
   if (typeof value === 'number') return value;
@@ -30,13 +30,13 @@ export interface LeaseViolation {
   unitId: string;
   leaseId: string;
   tenantId: string;
-  violationType: ViolationType | string;
-  severity: ViolationSeverity | string;
+  violationType: ViolationType;
+  severity: ViolationSeverity;
   description: string;
   occurredAt: Date;
   reportedAt: Date;
   reportedBy: string;
-  status: ViolationStatus | string;
+  status: ViolationStatus;
   notices?: unknown[];
   fines?: unknown[];
   hearings?: unknown[];
@@ -47,7 +47,7 @@ export interface LeaseViolation {
 export interface ViolationPolicy {
   id: string;
   propertyId: string;
-  violationType: ViolationType | string;
+  violationType: ViolationType;
   curePeriodDays: number;
   firstOffenseFine?: number;
   repeatOffenseFine?: number;
@@ -61,9 +61,9 @@ export interface ViolationPolicy {
 export interface ViolationNotice {
   id: string;
   violationId: string;
-  noticeType: NoticeType | string;
+  noticeType: NoticeType;
   content: string;
-  deliveryMethod: DeliveryMethod | string;
+  deliveryMethod: DeliveryMethod;
   curePeriodDays?: number;
   createdAt: Date;
 }
@@ -74,7 +74,7 @@ export interface ViolationFine {
   amount: number;
   reason: string;
   dueDate: Date;
-  status: FineStatus | string;
+  status: FineStatus;
   paidAmount?: number;
   createdAt: Date;
 }
@@ -83,8 +83,8 @@ export interface ViolationTemplate {
   id: string;
   name: string;
   content: string;
-  violationType?: ViolationType | string;
-  noticeType?: NoticeType | string;
+  violationType?: ViolationType;
+  noticeType?: NoticeType;
 }
 
 // Exported Maps for testing

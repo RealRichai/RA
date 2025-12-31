@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   type GuestPassType,
@@ -12,6 +10,8 @@ import {
   type GuestIncidentSeverity,
   type GuestIncidentStatus,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // Exported types for testing
 export interface GuestPass {
@@ -19,8 +19,8 @@ export interface GuestPass {
   propertyId: string;
   unitId: string;
   guestName: string;
-  status: GuestPassStatus | string;
-  passType: GuestPassType | string;
+  status: GuestPassStatus;
+  passType: GuestPassType;
   validFrom: Date;
   validUntil: Date;
   recurringDays?: number[];
@@ -57,11 +57,13 @@ export function getGuestStatsSync(propertyId: string): {
   parkingSpotsTotal: number;
   checkInsToday: number;
 } {
-  const now = new Date();
-  const activePasses = Array.from(guestPassStore.values()).filter(
-    p => p.propertyId === propertyId && p.status === 'active' &&
-      new Date(p.validFrom) <= now && new Date(p.validUntil) >= now
-  );
+  const nowMs = Date.now();
+  const activePasses = Array.from(guestPassStore.values()).filter(p => {
+    if (p.propertyId !== propertyId || p.status !== 'active') return false;
+    const validFromMs = p.validFrom instanceof Date ? p.validFrom.getTime() : new Date(p.validFrom).getTime();
+    const validUntilMs = p.validUntil instanceof Date ? p.validUntil.getTime() : new Date(p.validUntil).getTime();
+    return validFromMs <= nowMs && validUntilMs >= nowMs;
+  });
 
   const allParking = Array.from(guestParkingSpots.values()).filter(p => p.propertyId === propertyId);
   const availableParking = allParking.filter(p => p.status === 'available');
@@ -103,11 +105,12 @@ export function checkPolicyComplianceSync(
 }
 
 export function expireOldPassesSync(): number {
-  const now = new Date();
+  const nowMs = Date.now();
   let expiredCount = 0;
 
   for (const [id, pass] of guestPassStore.entries()) {
-    if (pass.status === 'active' && new Date(pass.validUntil) < now) {
+    const validUntilMs = pass.validUntil instanceof Date ? pass.validUntil.getTime() : new Date(pass.validUntil).getTime();
+    if (pass.status === 'active' && validUntilMs < nowMs) {
       pass.status = 'expired';
       guestPassStore.set(id, pass);
       expiredCount++;

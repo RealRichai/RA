@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   Prisma,
@@ -12,6 +10,8 @@ import {
   type MoveDepositStatus as PrismaMoveDepositStatus,
   type MoveUtilityTransferStatus as PrismaUtilityTransferStatus,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 
 // ============================================================================
 // TYPES

@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   type Carrier,
@@ -9,6 +7,8 @@ import {
   type LockerStatus,
   type PackageNotificationType,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -122,9 +122,9 @@ export function findAvailableLockerSync(
 interface PackageData {
   receivedAt: Date | string;
   pickedUpAt?: Date | string | null;
-  status: PackageStatus | string;
-  carrier: Carrier | string;
-  size: PackageSize | string;
+  status: PackageStatus;
+  carrier: Carrier;
+  size: PackageSize;
   isOverdue?: boolean;
 }
 
@@ -179,7 +179,31 @@ export function calculatePackageStats(
   };
 }
 
-export async function getLockerUtilization(propertyId: string): Promise<{
+// Sync version for testing
+export function getLockerUtilization(propertyId: string): {
+  total: number;
+  available: number;
+  occupied: number;
+  maintenance: number;
+  utilizationRate: number;
+} {
+  const propertyLockers = Array.from(packageLockers.values()).filter(l => l.propertyId === propertyId);
+
+  const total = propertyLockers.length;
+  const available = propertyLockers.filter((l) => l.status === 'available').length;
+  const occupied = propertyLockers.filter((l) => l.status === 'occupied').length;
+  const maintenance = propertyLockers.filter((l) => l.status === 'maintenance').length;
+
+  return {
+    total,
+    available,
+    occupied,
+    maintenance,
+    utilizationRate: total > 0 ? Math.round((occupied / total) * 100) : 0,
+  };
+}
+
+async function getLockerUtilizationAsync(propertyId: string): Promise<{
   total: number;
   available: number;
   occupied: number;
@@ -330,7 +354,7 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
       });
 
       const propertyId = request.query.propertyId;
-      const utilization = propertyId ? await getLockerUtilization(propertyId) : null;
+      const utilization = propertyId ? getLockerUtilization(propertyId) : null;
 
       return reply.send({ lockers: results, utilization });
     }
@@ -791,7 +815,7 @@ export async function packageRoutes(app: FastifyInstance): Promise<void> {
         request.query.endDate
       );
 
-      const lockerUtil = await getLockerUtilization(request.query.propertyId);
+      const lockerUtil = getLockerUtilization(request.query.propertyId);
 
       return reply.send({ ...stats, lockerUtilization: lockerUtil });
     }

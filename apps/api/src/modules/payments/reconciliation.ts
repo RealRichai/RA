@@ -371,7 +371,7 @@ export async function reconciliationRoutes(app: FastifyInstance): Promise<void> 
         const match = await findMatchingPayment(transactionData, userRules, request.user.id);
         let status: BankTransactionStatus = 'pending';
         let discrepancyType: DiscrepancyType | null = null;
-        let discrepancyNotes: string | null = null;
+        const discrepancyNotes: string | null = null;
         let expectedAmount: number | null = null;
 
         if (match.paymentId && match.confidence >= 80) {

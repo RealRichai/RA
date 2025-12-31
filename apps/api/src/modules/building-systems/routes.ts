@@ -1,5 +1,3 @@
-import { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   type BuildingSystemType,
@@ -17,6 +15,8 @@ import {
   type RuleOperator,
   type ReadingQuality,
 } from '@realriches/database';
+import { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 
 // ============================================================================
 // EXPORTED TYPES FOR TESTING
@@ -26,8 +26,8 @@ export interface BuildingSystem {
   id: string;
   propertyId: string;
   name: string;
-  type: BuildingSystemType | string;
-  status: BuildingSystemStatus | string;
+  type: BuildingSystemType;
+  status: BuildingSystemStatus;
   nextServiceDate?: Date | null;
 }
 
@@ -35,8 +35,8 @@ export interface SystemSensor {
   id: string;
   systemId: string;
   name: string;
-  type: SensorType | string;
-  status: SensorStatus | string;
+  type: SensorType;
+  status: SensorStatus;
   unit: string;
   minThreshold?: number | null;
   maxThreshold?: number | null;
@@ -46,8 +46,8 @@ export interface SystemSensor {
 export interface SystemAlert {
   id: string;
   systemId: string;
-  severity: SystemAlertSeverity | string;
-  status: SystemAlertStatus | string;
+  severity: SystemAlertSeverity;
+  status: SystemAlertStatus;
   message: string;
   createdAt: Date;
 }
@@ -55,21 +55,38 @@ export interface SystemAlert {
 export interface MaintenanceSchedule {
   id: string;
   systemId: string;
-  type: SystemMaintenanceType | string;
-  status: SystemMaintenanceStatus | string;
+  type: SystemMaintenanceType;
+  status: SystemMaintenanceStatus;
   scheduledDate: Date;
   description?: string;
 }
 
 export interface AlertRule {
   id: string;
-  sensorId: string;
-  operator: RuleOperator | string;
-  value: number;
-  value2?: number | null;
-  severity: SystemAlertSeverity | string;
-  message: string;
+  propertyId: string;
+  name: string;
   isActive: boolean;
+  condition: {
+    metric: string;
+    operator: RuleOperator;
+    value: number;
+    value2?: number | null;
+  };
+  severity: SystemAlertSeverity;
+  notifications?: {
+    channels: string[];
+    recipients: string[];
+  };
+  cooldownMinutes?: number;
+  triggerCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  // Legacy fields for backwards compatibility
+  sensorId?: string;
+  operator?: RuleOperator;
+  value?: number;
+  value2?: number | null;
+  message?: string;
 }
 
 // Exported Maps for testing
@@ -498,9 +515,25 @@ async function getSystemUptimeAsync(systemId: string, days: number = 30): Promis
 }
 
 export function evaluateAlertRule(
-  condition: { operator: RuleOperator; value: number; value2?: number | null },
-  value: number
+  ruleOrCondition: AlertRule | { operator: RuleOperator; value: number; value2?: number | null },
+  sensorIdOrValue: string | number,
+  valueArg?: number
 ): boolean {
+  // Handle both signatures: (rule, sensorId, value) and (condition, value)
+  let condition: { operator: RuleOperator; value: number; value2?: number | null };
+  let value: number;
+
+  if (typeof sensorIdOrValue === 'number') {
+    // Old signature: (condition, value)
+    condition = ruleOrCondition as { operator: RuleOperator; value: number; value2?: number | null };
+    value = sensorIdOrValue;
+  } else {
+    // New signature: (rule, sensorId, value)
+    const rule = ruleOrCondition as AlertRule;
+    condition = rule.condition;
+    value = valueArg!;
+  }
+
   switch (condition.operator) {
     case 'gt':
       return value > condition.value;

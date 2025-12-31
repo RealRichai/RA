@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   Prisma,
@@ -13,6 +11,8 @@ import {
   type HOAMeetingStatus as PrismaHOAMeetingStatus,
   type HOADocumentType as PrismaHOADocumentType,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 
 // Helper to convert Prisma Decimal to number
 function toNumber(value: unknown): number {

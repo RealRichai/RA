@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   Prisma,
@@ -8,6 +6,8 @@ import {
   type ScreeningTypeEnum as PrismaScreeningType,
   type ScreeningReportStatus as PrismaReportStatus,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // Types
 export type ScreeningProvider = 'transunion' | 'experian' | 'equifax' | 'checkr' | 'mock';

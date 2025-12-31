@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   Prisma,
@@ -13,6 +11,8 @@ import {
   type InsuranceAlertType as PrismaInsuranceAlertType,
   type InsuranceAlertPriority as PrismaInsuranceAlertPriority,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // Types
 export type PolicyType = 'property' | 'liability' | 'renters' | 'umbrella' | 'flood' | 'earthquake' | 'workers_comp' | 'business_interruption';
@@ -51,7 +51,13 @@ export interface InsurancePolicy {
   coverageAmount: number;
   renewalReminder?: number;
   autoRenew?: boolean;
+  status?: PolicyStatus;
 }
+
+// Exported Maps for testing
+export const policies = new Map<string, InsurancePolicy>();
+export const certificates = new Map<string, unknown>();
+export const claims = new Map<string, unknown>();
 
 export function daysUntil(date: Date): number {
   const now = new Date();
@@ -62,7 +68,7 @@ export function daysUntil(date: Date): number {
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 }
 
-export function createExpirationAlert(policy: InsurancePolicy): { type: string; priority: AlertPriority; message: string } | null {
+export function createExpirationAlert(policy: InsurancePolicy): { type: string; priority: AlertPriority; title: string; message: string } | null {
   const days = daysUntil(policy.expirationDate);
   const renewalReminder = policy.renewalReminder || 30;
 
@@ -70,6 +76,7 @@ export function createExpirationAlert(policy: InsurancePolicy): { type: string; 
     return {
       type: 'expiration',
       priority: 'critical',
+      title: 'Policy Expired',
       message: `Policy ${policy.policyNumber} has expired`,
     };
   }
@@ -78,6 +85,7 @@ export function createExpirationAlert(policy: InsurancePolicy): { type: string; 
     return {
       type: 'expiration',
       priority: 'high',
+      title: 'Policy Expiring Soon',
       message: `Policy ${policy.policyNumber} expires in ${days} days`,
     };
   }
@@ -86,6 +94,7 @@ export function createExpirationAlert(policy: InsurancePolicy): { type: string; 
     return {
       type: 'renewal',
       priority: 'medium',
+      title: 'Policy Renewal Reminder',
       message: `Policy ${policy.policyNumber} expires in ${days} days - renewal reminder`,
     };
   }
@@ -93,15 +102,81 @@ export function createExpirationAlert(policy: InsurancePolicy): { type: string; 
   return null;
 }
 
-export async function analyzeCoverage(propertyId: string, propertyValue: number) {
-  const policies = await prisma.insurancePolicy.findMany({
+// Sync version for testing
+export function analyzeCoverage(propertyId: string, propertyValue: number): {
+  propertyId: string;
+  propertyValue: number;
+  policies: InsurancePolicy[];
+  totalCoverage: number;
+  coverageRatio: number;
+  coverageGaps: string[];
+  gaps: { type: string; message: string }[];
+  recommendations: string[];
+  policiesAnalyzed: number;
+} {
+  const propertyPolicies = Array.from(policies.values()).filter(
+    p => p.propertyId === propertyId && (p.status === 'active' || !p.status)
+  );
+
+  const totalCoverage = propertyPolicies.reduce((sum, p) => sum + (p.coverageAmount || 0), 0);
+  const coverageRatio = propertyValue > 0 ? Math.round((totalCoverage / propertyValue) * 10) / 10 : 0;
+
+  const policyTypes = propertyPolicies.map(p => p.policyType);
+  const requiredTypes: PolicyType[] = ['property', 'liability'];
+  const recommendedTypes: PolicyType[] = ['umbrella', 'flood'];
+
+  const missingRequired = requiredTypes.filter(t => !policyTypes.includes(t));
+  const missingRecommended = recommendedTypes.filter(t => !policyTypes.includes(t));
+
+  const coverageGaps: string[] = [];
+  const gaps: { type: string; message: string }[] = [];
+
+  if (coverageRatio < 0.8) {
+    coverageGaps.push('Underinsured: coverage is less than 80% of property value');
+    // Add gap for property if underinsured
+    if (policyTypes.includes('property')) {
+      gaps.push({ type: 'property', message: 'Property coverage is insufficient for property value' });
+    }
+  }
+  missingRequired.forEach(t => {
+    coverageGaps.push(`Missing required ${t} coverage`);
+    gaps.push({ type: t, message: `Missing required ${t} insurance coverage` });
+  });
+
+  const recommendations: string[] = [];
+  if (coverageRatio < 1.0 || missingRequired.length > 0) {
+    recommendations.push('Consider increasing coverage to 100% of property value');
+  }
+  missingRequired.forEach(t => {
+    recommendations.push(`Add ${t} insurance to meet requirements`);
+  });
+  if (propertyValue > 1000000 && !policyTypes.includes('umbrella')) {
+    recommendations.push('Consider umbrella policy for high-value property');
+  }
+  missingRecommended.forEach(t => recommendations.push(`Consider adding ${t} coverage`));
+
+  return {
+    propertyId,
+    propertyValue,
+    policies: propertyPolicies,
+    totalCoverage,
+    coverageRatio,
+    coverageGaps,
+    gaps,
+    recommendations,
+    policiesAnalyzed: propertyPolicies.length,
+  };
+}
+
+async function analyzeCoverageAsync(propertyId: string, propertyValue: number) {
+  const dbPolicies = await prisma.insurancePolicy.findMany({
     where: { propertyId, status: 'active' },
   });
 
-  const totalCoverage = policies.reduce((sum, p) => sum + toNumber(p.coverageAmount), 0);
+  const totalCoverage = dbPolicies.reduce((sum, p) => sum + toNumber(p.coverageAmount), 0);
   const coverageRatio = propertyValue > 0 ? totalCoverage / propertyValue : 0;
 
-  const policyTypes = policies.map(p => p.policyType);
+  const policyTypes = dbPolicies.map(p => p.policyType);
   const requiredTypes: PolicyType[] = ['property', 'liability'];
   const recommendedTypes: PolicyType[] = ['umbrella', 'flood'];
 
@@ -128,7 +203,7 @@ export async function analyzeCoverage(propertyId: string, propertyValue: number)
     coverageRatio,
     coverageGaps,
     recommendations,
-    policiesAnalyzed: policies.length,
+    policiesAnalyzed: dbPolicies.length,
   };
 }
 

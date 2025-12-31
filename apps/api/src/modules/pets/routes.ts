@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   type PetType,
@@ -11,6 +9,8 @@ import {
   type PetFeeStatus,
   type PetScreeningRiskLevel,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // ============================================================================
 // Exported Maps for testing
@@ -66,9 +66,9 @@ export interface VaccinationRecord {
 export interface PetIncident {
   id: string;
   petId: string;
-  type?: PetIncidentType | string;
-  incidentType?: PetIncidentType | string;
-  severity: PetIncidentSeverity | string;
+  type?: PetIncidentType;
+  incidentType?: PetIncidentType;
+  severity: PetIncidentSeverity;
   date?: Date | string;
   incidentDate?: Date | string;
   description: string;
@@ -91,7 +91,7 @@ export const petIncidentStore = new Map<string, PetIncident>();
 // Synchronous version for testing (uses Maps)
 export function checkBreedRestriction(
   propertyId: string,
-  petType: PetType | string,
+  petType: PetType,
   breed: string
 ): { restricted: boolean; reason?: string } {
   const restrictions = Array.from(petBreedRestrictions.values()).filter(
@@ -748,7 +748,7 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     const now = new Date();
 
     // Check breed restriction
-    const breedCheck = await checkBreedRestriction(body.propertyId, body.type, body.breed);
+    const breedCheck = checkBreedRestriction(body.propertyId, body.type, body.breed);
     if (breedCheck.restricted && !body.isServiceAnimal && !body.isEmotionalSupport) {
       return reply.status(400).send({
         error: 'Breed restricted',
@@ -865,9 +865,9 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Include additional details
-    const vaccStatus = await getVaccinationStatus(petId);
-    const incidentHistory = await getIncidentHistory(petId);
-    const riskScore = await calculateRiskScore(petId);
+    const vaccStatus = getVaccinationStatus(petId);
+    const incidentHistory = getIncidentHistory(petId);
+    const riskScore = calculateRiskScore(petId);
 
     return reply.send({
       ...pet,
@@ -1062,7 +1062,7 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     const records = await prisma.vaccinationRecord.findMany({
       where: { petId },
     });
-    const status = await getVaccinationStatus(petId);
+    const status = getVaccinationStatus(petId);
 
     return reply.send({ records, status });
   });
@@ -1165,7 +1165,7 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
     const incidents = await prisma.petIncident.findMany({
       where: { petId },
     });
-    const history = await getIncidentHistory(petId);
+    const history = getIncidentHistory(petId);
 
     return reply.send({ incidents, summary: history });
   });
@@ -1350,7 +1350,7 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
   // Get property pet census
   app.get('/census/:propertyId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { propertyId } = request.params as { propertyId: string };
-    const census = await getPropertyPetCensus(propertyId);
+    const census = getPropertyPetCensus(propertyId);
     return reply.send(census);
   });
 
@@ -1389,15 +1389,13 @@ export async function petRoutes(app: FastifyInstance): Promise<void> {
       },
     });
 
-    const assessments = await Promise.all(
-      propertyPets.map(async (pet) => ({
-        petId: pet.id,
-        petName: pet.name,
-        type: pet.type,
-        breed: pet.breed,
-        ...(await calculateRiskScore(pet.id)),
-      }))
-    );
+    const assessments = propertyPets.map((pet) => ({
+      petId: pet.id,
+      petName: pet.name,
+      type: pet.type,
+      breed: pet.breed,
+      ...calculateRiskScore(pet.id),
+    }));
 
     const highRisk = assessments.filter((a) => a.score < 50);
     const mediumRisk = assessments.filter((a) => a.score >= 50 && a.score < 75);

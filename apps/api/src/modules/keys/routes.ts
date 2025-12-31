@@ -1,5 +1,3 @@
-import { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   type KeyType,
@@ -14,6 +12,8 @@ import {
   type LockoutStatus,
   type TemporaryAccessStatus,
 } from '@realriches/database';
+import { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 
 // ============================================================================
 // EXPORTED TYPES FOR TESTING
@@ -23,8 +23,8 @@ export interface PhysicalKey {
   id: string;
   propertyId: string;
   keyNumber: string;
-  type: KeyType | string;
-  status: KeyStatus | string;
+  type: KeyType;
+  status: KeyStatus;
   copies: number;
 }
 
@@ -32,8 +32,8 @@ export interface AccessDevice {
   id: string;
   propertyId: string;
   deviceId: string;
-  type: AccessDeviceType | string;
-  status: AccessDeviceStatus | string;
+  type: AccessDeviceType;
+  status: AccessDeviceStatus;
   zoneIds?: string[];
   expiresAt?: Date;
 }
@@ -42,7 +42,7 @@ export interface AccessZone {
   id: string;
   propertyId: string;
   name: string;
-  type: AccessZoneType | string;
+  type: AccessZoneType;
 }
 
 export interface TemporaryAccess {
@@ -51,7 +51,7 @@ export interface TemporaryAccess {
   name?: string;
   grantedTo?: string;
   accessCode?: string;
-  status: TemporaryAccessStatus | string;
+  status: TemporaryAccessStatus;
   validFrom: Date | string;
   validUntil?: Date | string;
   validTo?: Date | string;
@@ -94,7 +94,7 @@ export function getKeyInventorySync(propertyId: string): {
 
 interface AccessValidDevice {
   id: string;
-  status: AccessDeviceStatus | string;
+  status: AccessDeviceStatus;
   accessZones?: string[];
   zoneIds?: string[];
   expiresAt?: Date;

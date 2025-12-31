@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   Prisma,
@@ -11,6 +9,8 @@ import {
   type SignerType as PrismaSignerType,
   type SignatureStatusEnum as PrismaSignatureStatus,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // Types
 export type TemplateStatus = 'draft' | 'active' | 'archived';

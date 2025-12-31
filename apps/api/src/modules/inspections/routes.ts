@@ -1,5 +1,3 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import {
   prisma,
   Prisma,
@@ -8,6 +6,8 @@ import {
   type ItemCondition as PrismaItemCondition,
   type RoomType as PrismaRoomType,
 } from '@realriches/database';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 // Types
 export type InspectionType = 'move_in' | 'move_out' | 'routine' | 'pre_listing' | 'annual' | 'complaint';
@@ -124,7 +124,7 @@ export function generateSummary(rooms: InspectionRoom[]): InspectionSummary {
 
   const recommendations: string[] = [];
   if (conditionBreakdown.damaged > 0) {
-    recommendations.push(`${conditionBreakdown.damaged} item(s) require immediate repair`);
+    recommendations.push(`${conditionBreakdown.damaged} item(s) with damage require immediate repair`);
   }
   if (conditionBreakdown.poor > 0) {
     recommendations.push(`${conditionBreakdown.poor} item(s) in poor condition should be addressed`);
