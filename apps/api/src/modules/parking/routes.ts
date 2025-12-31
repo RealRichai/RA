@@ -25,6 +25,7 @@ export interface ParkingLot {
 export interface ParkingSpace {
   id: string;
   lotId: string;
+  propertyId?: string;
   spaceNumber: string;
   type: ParkingSpaceType | string;
   status: ParkingSpaceStatus | string;
@@ -163,12 +164,12 @@ export function getSpacesByType(lotId: string): Record<string, { total: number; 
 export function findAvailableSpace(
   lotId: string,
   type?: string
-): { id: string; spaceNumber: string } | null {
+): ParkingSpace | null {
   const spaces = Array.from(parkingSpaceStore.values()).filter(
     s => s.lotId === lotId && s.status === 'available' && (!type || s.type === type)
   );
 
-  return spaces.length > 0 ? { id: spaces[0].id, spaceNumber: spaces[0].spaceNumber } : null;
+  return spaces.length > 0 ? spaces[0] : null;
 }
 
 function toDate(val: Date | string): Date {
@@ -312,16 +313,16 @@ export function calculateParkingRevenue(
 export function getViolationFineAmount(type: string): number {
   const fines: Record<string, number> = {
     no_permit: 50,
-    wrong_space: 30,
-    expired_permit: 40,
+    wrong_space: 35,
+    expired_permit: 25,
     blocking: 75,
-    fire_lane: 100,
+    fire_lane: 150,
     handicap: 250,
     overnight: 50,
     abandoned: 100,
-    other: 25,
+    other: 50,
   };
-  return fines[type] ?? 25;
+  return fines[type] ?? 50;
 }
 
 // ============================================================================

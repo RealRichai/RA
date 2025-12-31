@@ -134,63 +134,79 @@ const storageWaitlists = new Map<string, unknown>();
 const storagePromotions = new Map<string, unknown>();
 const lienAuctions = new Map<string, unknown>();
 
-// Key & Access stores
-const physicalKeys = new Map<string, unknown>();
-const accessDevices = new Map<string, unknown>();
-const accessZones = new Map<string, unknown>();
+// Key & Access stores - imported from module
+import {
+  physicalKeys,
+  accessDevices,
+  accessZones,
+  temporaryAccesses,
+} from '../src/modules/keys/routes';
 const accessPoints = new Map<string, unknown>();
 const keyAssignments = new Map<string, unknown>();
 const accessAuditLogs = new Map<string, unknown>();
 const lockoutEvents = new Map<string, unknown>();
 const keyRequests = new Map<string, unknown>();
-const temporaryAccesses = new Map<string, unknown>();
 
-// Building Systems stores
-const buildingSystems = new Map<string, unknown>();
-const systemSensors = new Map<string, unknown>();
+// Building Systems stores - imported from module
+import {
+  buildingSystems,
+  systemSensors,
+  systemAlerts,
+  maintenanceSchedules,
+  systemDowntimes as buildingSystemDowntimes,
+} from '../src/modules/building-systems/routes';
 const sensorReadings = new Map<string, unknown>();
-const systemAlerts = new Map<string, unknown>();
-const maintenanceSchedules = new Map<string, unknown>();
 const energyUsages = new Map<string, unknown>();
 const systemDowntimes = new Map<string, unknown>();
 const alertRules = new Map<string, unknown>();
 
-// Common Area stores
-const commonAreas = new Map<string, unknown>();
-const areaReservations = new Map<string, unknown>();
+// Common Area stores - imported from module
+import {
+  commonAreas,
+  areaReservations,
+  communityEvents,
+} from '../src/modules/common-areas/routes';
 const areaWaitlists = new Map<string, unknown>();
 const areaIncidents = new Map<string, unknown>();
 const areaRatings = new Map<string, unknown>();
-const communityEvents = new Map<string, unknown>();
 
-// Guest stores
-const guestPassStore2 = new Map<string, unknown>();
+// Guest stores - imported from module
+import {
+  guestPassStore,
+  guestPolicies,
+  guestParkingSpots,
+} from '../src/modules/guests/routes';
+const guestPassStore2 = guestPassStore; // Alias for backward compatibility
 const guestCheckIns = new Map<string, unknown>();
-const guestParkingSpots = new Map<string, unknown>();
-const guestPolicies = new Map<string, unknown>();
 const guestIncidents = new Map<string, unknown>();
 const guestNotifications = new Map<string, unknown>();
 
-// Violation stores
-const leaseViolations = new Map<string, unknown>();
-const violationNotices = new Map<string, unknown>();
-const violationFines = new Map<string, unknown>();
+// Violation stores - imported from module
+import {
+  leaseViolations,
+  violationPolicies,
+  violationFines,
+  violationNotices,
+  violationTemplates,
+} from '../src/modules/violations/routes';
 const violationHearings = new Map<string, unknown>();
-const violationTemplates = new Map<string, unknown>();
-const violationPolicies = new Map<string, unknown>();
 
-// Rent Roll stores
-const rentRollEntries = new Map<string, unknown>();
-const rentRollSnapshots = new Map<string, unknown>();
-const scheduledReports = new Map<string, unknown>();
+// Rent Roll stores - imported from module
+import {
+  rentRollEntries,
+  rentRollSnapshots,
+  scheduledReports,
+} from '../src/modules/rent-roll/routes';
 const reportExecutions = new Map<string, unknown>();
 const rentRollChanges = new Map<string, unknown>();
 
-// Property Comparison stores
-const propertyMetrics = new Map<string, unknown>();
-const comparisonReports = new Map<string, unknown>();
-const benchmarks = new Map<string, unknown>();
-const savedComparisons = new Map<string, unknown>();
+// Property Comparison stores - imported from module
+import {
+  propertyMetrics,
+  benchmarks,
+  comparisonReports,
+  savedComparisons,
+} from '../src/modules/property-comparison/routes';
 
 // ============================================================================
 // FUNCTION & TYPE IMPORTS FROM MODULES

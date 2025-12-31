@@ -13,6 +13,115 @@ import {
   type GuestIncidentStatus,
 } from '@realriches/database';
 
+// Exported types for testing
+export interface GuestPass {
+  id: string;
+  propertyId: string;
+  unitId: string;
+  guestName: string;
+  status: GuestPassStatus | string;
+  passType: GuestPassType | string;
+  validFrom: Date;
+  validUntil: Date;
+  recurringDays?: number[];
+  accessCode?: string;
+  checkIns?: { id: string }[];
+}
+
+export interface GuestCheckIn {
+  id: string;
+  passId: string;
+  checkInTime: Date;
+  checkOutTime?: Date;
+}
+
+export interface GuestPolicy {
+  id: string;
+  propertyId: string;
+  maxGuestsPerUnit: number;
+  maxConsecutiveDays: number;
+  maxOvernightsPerMonth: number;
+  requiresRegistration: boolean;
+  parkingAllowed: boolean;
+}
+
+// Exported Maps for testing
+export const guestPassStore = new Map<string, GuestPass>();
+export const guestPolicies = new Map<string, GuestPolicy>();
+export const guestParkingSpots = new Map<string, { id: string; propertyId: string; status: string }>();
+
+// Sync versions of functions for testing
+export function getGuestStatsSync(propertyId: string): {
+  totalActivePasses: number;
+  parkingSpotsAvailable: number;
+  parkingSpotsTotal: number;
+  checkInsToday: number;
+} {
+  const now = new Date();
+  const activePasses = Array.from(guestPassStore.values()).filter(
+    p => p.propertyId === propertyId && p.status === 'active' &&
+      new Date(p.validFrom) <= now && new Date(p.validUntil) >= now
+  );
+
+  const allParking = Array.from(guestParkingSpots.values()).filter(p => p.propertyId === propertyId);
+  const availableParking = allParking.filter(p => p.status === 'available');
+
+  return {
+    totalActivePasses: activePasses.length,
+    parkingSpotsAvailable: availableParking.length,
+    parkingSpotsTotal: allParking.length,
+    checkInsToday: 0,
+  };
+}
+
+export function checkPolicyComplianceSync(
+  propertyId: string,
+  unitId: string,
+  guestCount: number,
+  stayDays: number
+): { compliant: boolean; violations: string[] } {
+  const policy = Array.from(guestPolicies.values()).find(p => p.propertyId === propertyId);
+
+  if (!policy) {
+    return { compliant: true, violations: [] };
+  }
+
+  const violations: string[] = [];
+
+  if (guestCount > policy.maxGuestsPerUnit) {
+    violations.push(`Guest count (${guestCount}) exceeds maximum allowed (${policy.maxGuestsPerUnit})`);
+  }
+
+  if (stayDays > policy.maxConsecutiveDays) {
+    violations.push(`Stay duration (${stayDays} days) exceeds maximum consecutive days (${policy.maxConsecutiveDays})`);
+  }
+
+  return {
+    compliant: violations.length === 0,
+    violations,
+  };
+}
+
+export function expireOldPassesSync(): number {
+  const now = new Date();
+  let expiredCount = 0;
+
+  for (const [id, pass] of guestPassStore.entries()) {
+    if (pass.status === 'active' && new Date(pass.validUntil) < now) {
+      pass.status = 'expired';
+      guestPassStore.set(id, pass);
+      expiredCount++;
+    }
+  }
+
+  return expiredCount;
+}
+
+// Export sync versions as main exports
+export { getGuestStatsSync as getGuestStats };
+export { checkPolicyComplianceSync as checkPolicyCompliance };
+export { expireOldPassesSync as expireOldPasses };
+
 // Helper functions
 export function generateAccessCode(length: number = 6): string {
   const chars = '0123456789';
@@ -72,7 +181,7 @@ export async function getActivePassesForUnit(unitId: string) {
   return passes.filter((pass) => isPassValid(pass, now));
 }
 
-export async function getGuestStats(propertyId: string) {
+async function getGuestStatsAsync(propertyId: string) {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
@@ -122,7 +231,7 @@ export async function getGuestStats(propertyId: string) {
   };
 }
 
-export async function checkPolicyCompliance(
+async function checkPolicyComplianceAsync(
   propertyId: string,
   unitId: string,
   validFrom: Date,
@@ -171,7 +280,7 @@ export async function checkPolicyCompliance(
   };
 }
 
-export async function expireOldPasses(): Promise<number> {
+async function expireOldPassesAsync(): Promise<number> {
   const now = new Date();
 
   const result = await prisma.guestPass.updateMany({

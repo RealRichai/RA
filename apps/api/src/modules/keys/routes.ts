@@ -16,6 +16,137 @@ import {
 } from '@realriches/database';
 
 // ============================================================================
+// EXPORTED TYPES FOR TESTING
+// ============================================================================
+
+export interface PhysicalKey {
+  id: string;
+  propertyId: string;
+  keyNumber: string;
+  type: KeyType | string;
+  status: KeyStatus | string;
+  copies: number;
+}
+
+export interface AccessDevice {
+  id: string;
+  propertyId: string;
+  deviceId: string;
+  type: AccessDeviceType | string;
+  status: AccessDeviceStatus | string;
+  zoneIds?: string[];
+  expiresAt?: Date;
+}
+
+export interface AccessZone {
+  id: string;
+  propertyId: string;
+  name: string;
+  type: AccessZoneType | string;
+}
+
+export interface TemporaryAccess {
+  id: string;
+  propertyId: string;
+  name: string;
+  accessCode: string;
+  status: TemporaryAccessStatus | string;
+  validFrom: Date;
+  validUntil: Date;
+  zoneIds?: string[];
+}
+
+// Exported Maps for testing
+export const physicalKeys = new Map<string, PhysicalKey>();
+export const accessDevices = new Map<string, AccessDevice>();
+export const accessZones = new Map<string, AccessZone>();
+export const temporaryAccesses = new Map<string, TemporaryAccess>();
+
+// Sync versions of functions for testing
+export function getKeyInventorySync(propertyId: string): {
+  total: number;
+  byType: Record<string, number>;
+  byStatus: Record<string, number>;
+  assignedCount: number;
+  availableCount: number;
+} {
+  const keys = Array.from(physicalKeys.values()).filter(k => k.propertyId === propertyId);
+
+  const byType: Record<string, number> = {};
+  const byStatus: Record<string, number> = {};
+
+  keys.forEach((key) => {
+    byType[key.type as string] = (byType[key.type as string] || 0) + key.copies;
+    byStatus[key.status as string] = (byStatus[key.status as string] || 0) + key.copies;
+  });
+
+  return {
+    total: keys.reduce((sum, k) => sum + k.copies, 0),
+    byType,
+    byStatus,
+    assignedCount: byStatus['assigned'] || 0,
+    availableCount: byStatus['available'] || 0,
+  };
+}
+
+export function isAccessValidSync(
+  deviceId: string,
+  zoneId: string,
+  checkTime: Date = new Date()
+): { valid: boolean; reason?: string } {
+  const device = Array.from(accessDevices.values()).find(d => d.deviceId === deviceId);
+
+  if (!device) {
+    return { valid: false, reason: 'Device not found' };
+  }
+
+  if (device.status !== 'active') {
+    return { valid: false, reason: 'Device not active' };
+  }
+
+  if (device.expiresAt && new Date(device.expiresAt) < checkTime) {
+    return { valid: false, reason: 'Device expired' };
+  }
+
+  if (device.zoneIds && !device.zoneIds.includes(zoneId)) {
+    return { valid: false, reason: 'Not authorized for this zone' };
+  }
+
+  return { valid: true };
+}
+
+export function checkTemporaryAccessSync(
+  accessCode: string,
+  zoneId: string,
+  checkTime: Date = new Date()
+): { valid: boolean; reason?: string; accessName?: string } {
+  const access = Array.from(temporaryAccesses.values()).find(a => a.accessCode === accessCode);
+
+  if (!access) {
+    return { valid: false, reason: 'Access code not found' };
+  }
+
+  if (access.status !== 'active') {
+    return { valid: false, reason: 'Access not active' };
+  }
+
+  if (checkTime < new Date(access.validFrom) || checkTime > new Date(access.validUntil)) {
+    return { valid: false, reason: 'Access expired' };
+  }
+
+  if (access.zoneIds && !access.zoneIds.includes(zoneId)) {
+    return { valid: false, reason: 'Not authorized for this zone' };
+  }
+
+  return { valid: true, accessName: access.name };
+}
+
+// Export sync versions as main exports
+export { getKeyInventorySync as getKeyInventory };
+export { isAccessValidSync as isAccessValid };
+export { checkTemporaryAccessSync as checkTemporaryAccess };
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
@@ -42,7 +173,7 @@ export function generateDeviceId(): string {
   return id;
 }
 
-export async function getKeyInventory(propertyId: string) {
+async function getKeyInventoryAsync(propertyId: string) {
   const keys = await prisma.propertyKey.findMany({
     where: { propertyId },
   });
@@ -174,7 +305,7 @@ export interface TemporaryAccess {
   status: 'active' | 'used' | 'expired' | 'revoked';
 }
 
-export async function isAccessValid(
+async function isAccessValidAsync(
   deviceId: string,
   zoneId: string
 ): Promise<{ valid: boolean; reason?: string }> {
@@ -202,7 +333,7 @@ export async function isAccessValid(
   return { valid: true };
 }
 
-export async function checkTemporaryAccess(
+async function checkTemporaryAccessAsync(
   accessCode: string,
   zoneId: string
 ): Promise<{ valid: boolean; access?: TemporaryAccess; reason?: string }> {

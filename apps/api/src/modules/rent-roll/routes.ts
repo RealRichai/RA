@@ -14,6 +14,71 @@ function toNumber(value: unknown): number {
   return Number(value) || 0;
 }
 
+// Exported types for testing
+export interface RentRollEntry {
+  id: string;
+  propertyId: string;
+  unitId: string;
+  unitNumber: string;
+  unitType?: string;
+  squareFeet?: number | null;
+  bedrooms?: number;
+  bathrooms?: number;
+  status?: OccupancyStatus | string;
+  occupancyStatus?: OccupancyStatus | string;
+  marketRent: number;
+  currentRent?: number;
+  monthlyRent?: unknown;
+  balance?: number | unknown;
+  depositHeld?: number;
+  deposit?: unknown;
+  leaseEnd?: Date | null;
+  leaseStart?: Date | null;
+  tenantId?: string;
+  tenantName?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface RentRollSnapshot {
+  id: string;
+  propertyId: string;
+  snapshotDate: Date;
+  summary: RentRollSummary;
+  createdAt: Date;
+}
+
+export interface ScheduledReport {
+  id: string;
+  propertyId: string;
+  name: string;
+  reportType: string;
+  frequency: string;
+  dayOfWeek?: number;
+  dayOfMonth?: number;
+  recipients: string[];
+  format: string;
+  includeComparison: boolean;
+  nextRunAt?: Date;
+  isActive: boolean;
+  createdAt: Date;
+}
+
+// Exported Maps for testing
+export const rentRollEntries = new Map<string, RentRollEntry>();
+export const rentRollSnapshots = new Map<string, RentRollSnapshot>();
+export const scheduledReports = new Map<string, ScheduledReport>();
+
+// Sync version of getRentRollForProperty for testing
+export function getRentRollForPropertySync(propertyId: string): RentRollEntry[] {
+  return Array.from(rentRollEntries.values())
+    .filter(e => e.propertyId === propertyId)
+    .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber));
+}
+
+// Re-export sync version as main export for tests
+export { getRentRollForPropertySync as getRentRollForProperty };
+
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -27,7 +92,7 @@ export function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
-export async function getRentRollForProperty(propertyId: string) {
+async function getRentRollForPropertyAsync(propertyId: string) {
   return prisma.rentRollEntry.findMany({
     where: { propertyId },
     orderBy: { unitNumber: 'asc' },
@@ -107,13 +172,28 @@ interface RentRollSummary {
 }
 
 interface EntryData {
-  squareFeet: number | null;
-  monthlyRent: unknown;
+  squareFeet?: number | null;
+  monthlyRent?: unknown;
+  currentRent?: number;
   marketRent: unknown;
-  balance: unknown;
-  deposit: unknown;
-  occupancyStatus: OccupancyStatus;
-  leaseEnd: Date | null;
+  balance?: unknown;
+  deposit?: unknown;
+  depositHeld?: number;
+  occupancyStatus?: OccupancyStatus | string;
+  status?: OccupancyStatus | string;
+  leaseEnd?: Date | null;
+}
+
+function getOccupancyStatus(entry: EntryData): string {
+  return (entry.occupancyStatus || entry.status || 'vacant') as string;
+}
+
+function getRent(entry: EntryData): number {
+  return entry.currentRent !== undefined ? entry.currentRent : toNumber(entry.monthlyRent);
+}
+
+function getDeposit(entry: EntryData): number {
+  return entry.depositHeld !== undefined ? entry.depositHeld : toNumber(entry.deposit);
 }
 
 export function calculateSummary(entries: EntryData[]): RentRollSummary {
@@ -123,18 +203,18 @@ export function calculateSummary(entries: EntryData[]): RentRollSummary {
   const in90Days = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
 
   const totalUnits = entries.length;
-  const occupiedEntries = entries.filter(e => e.occupancyStatus === 'occupied');
-  const vacantEntries = entries.filter(e => e.occupancyStatus === 'vacant');
-  const noticeEntries = entries.filter(e => e.occupancyStatus === 'notice_given');
+  const occupiedEntries = entries.filter(e => getOccupancyStatus(e) === 'occupied');
+  const vacantEntries = entries.filter(e => getOccupancyStatus(e) === 'vacant');
+  const noticeEntries = entries.filter(e => getOccupancyStatus(e) === 'notice_given');
 
   const totalSquareFeet = entries.reduce((sum, e) => sum + (e.squareFeet || 0), 0);
   const occupiedSquareFeet = occupiedEntries.reduce((sum, e) => sum + (e.squareFeet || 0), 0);
 
   const totalMarketRent = entries.reduce((sum, e) => sum + toNumber(e.marketRent), 0);
-  const totalCurrentRent = occupiedEntries.reduce((sum, e) => sum + toNumber(e.monthlyRent), 0);
+  const totalCurrentRent = occupiedEntries.reduce((sum, e) => sum + getRent(e), 0);
   const totalConcessions = 0;
 
-  const lossToLease = occupiedEntries.reduce((sum, e) => sum + (toNumber(e.marketRent) - toNumber(e.monthlyRent)), 0);
+  const lossToLease = occupiedEntries.reduce((sum, e) => sum + (toNumber(e.marketRent) - getRent(e)), 0);
   const lossToVacancy = vacantEntries.reduce((sum, e) => sum + toNumber(e.marketRent), 0);
 
   const expiringLeases30Days = occupiedEntries.filter(e =>
@@ -163,7 +243,7 @@ export function calculateSummary(entries: EntryData[]): RentRollSummary {
     lossToLease,
     lossToVacancy,
     totalBalance: entries.reduce((sum, e) => sum + toNumber(e.balance), 0),
-    totalDeposits: entries.reduce((sum, e) => sum + toNumber(e.deposit), 0),
+    totalDeposits: entries.reduce((sum, e) => sum + getDeposit(e), 0),
     averageRentPerUnit: occupiedEntries.length > 0 ? totalCurrentRent / occupiedEntries.length : 0,
     averageRentPerSqFt: occupiedSquareFeet > 0 ? totalCurrentRent / occupiedSquareFeet : 0,
     expiringLeases30Days,
@@ -198,7 +278,25 @@ export function compareSummaries(
   return comparison;
 }
 
-export function calculateNextRunDate(frequency: string, dayOfWeek?: number | null, dayOfMonth?: number | null): Date {
+export function calculateNextRunDate(
+  frequencyOrSchedule: string | ScheduledReport,
+  dayOfWeek?: number | null,
+  dayOfMonth?: number | null
+): Date {
+  let frequency: string;
+  let targetDayOfWeek: number | null | undefined;
+  let targetDayOfMonth: number | null | undefined;
+
+  if (typeof frequencyOrSchedule === 'object') {
+    frequency = frequencyOrSchedule.frequency;
+    targetDayOfWeek = frequencyOrSchedule.dayOfWeek;
+    targetDayOfMonth = frequencyOrSchedule.dayOfMonth;
+  } else {
+    frequency = frequencyOrSchedule;
+    targetDayOfWeek = dayOfWeek;
+    targetDayOfMonth = dayOfMonth;
+  }
+
   const now = new Date();
   const next = new Date(now);
 
@@ -209,7 +307,7 @@ export function calculateNextRunDate(frequency: string, dayOfWeek?: number | nul
       break;
     case 'weekly': {
       const currentDay = next.getDay();
-      const targetDay = dayOfWeek || 1;
+      const targetDay = targetDayOfWeek || 1;
       const daysUntil = (targetDay - currentDay + 7) % 7 || 7;
       next.setDate(next.getDate() + daysUntil);
       next.setHours(6, 0, 0, 0);
@@ -217,7 +315,7 @@ export function calculateNextRunDate(frequency: string, dayOfWeek?: number | nul
     }
     case 'monthly':
       next.setMonth(next.getMonth() + 1);
-      next.setDate(Math.min(dayOfMonth || 1, 28));
+      next.setDate(Math.min(targetDayOfMonth || 1, 28));
       next.setHours(6, 0, 0, 0);
       break;
     case 'quarterly':

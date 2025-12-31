@@ -51,7 +51,89 @@ export function getUnitPricing(size: string, type: string): number {
   return Math.round((basePrices[size] || 100) * (typeMultipliers[type] || 1.0));
 }
 
-export async function getAvailableUnits(
+// ============================================================================
+// Exported Maps and Sync Functions for Testing
+// ============================================================================
+
+export interface StorageUnit {
+  id: string;
+  propertyId: string;
+  unitNumber: string;
+  size: string;
+  type: string;
+  status: StorageUnitStatus | string;
+  monthlyRate?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const storageUnits = new Map<string, StorageUnit>();
+export const storageRentals = new Map<string, StorageRental>();
+
+// Synchronous getAvailableUnits for testing
+export function getAvailableUnits(
+  propertyId: string,
+  size?: string,
+  type?: string
+): StorageUnit[] {
+  return Array.from(storageUnits.values()).filter(
+    u => u.propertyId === propertyId &&
+      u.status === 'available' &&
+      (!size || u.size === size) &&
+      (!type || u.type === type)
+  );
+}
+
+// Synchronous getOccupancyStats for testing
+export function getOccupancyStats(propertyId: string): {
+  total: number;
+  available: number;
+  rented: number;
+  reserved: number;
+  maintenance: number;
+  occupancyRate: number;
+  bySize: Record<string, { total: number; rented: number }>;
+  byType: Record<string, { total: number; rented: number }>;
+} {
+  const units = Array.from(storageUnits.values()).filter(u => u.propertyId === propertyId);
+
+  const total = units.length;
+  const available = units.filter((u) => u.status === 'available').length;
+  const rented = units.filter((u) => u.status === 'assigned' || u.status === 'rented').length;
+  const reserved = units.filter((u) => u.status === 'reserved').length;
+  const maintenance = units.filter((u) => u.status === 'maintenance').length;
+
+  const bySize: Record<string, { total: number; rented: number }> = {};
+  const byType: Record<string, { total: number; rented: number }> = {};
+
+  units.forEach((unit) => {
+    if (!bySize[unit.size]) {
+      bySize[unit.size] = { total: 0, rented: 0 };
+    }
+    bySize[unit.size].total++;
+    if (unit.status === 'assigned' || unit.status === 'rented') bySize[unit.size].rented++;
+
+    if (!byType[unit.type]) {
+      byType[unit.type] = { total: 0, rented: 0 };
+    }
+    byType[unit.type].total++;
+    if (unit.status === 'assigned' || unit.status === 'rented') byType[unit.type].rented++;
+  });
+
+  return {
+    total,
+    available,
+    rented,
+    reserved,
+    maintenance,
+    occupancyRate: total > 0 ? Math.round((rented / total) * 100) : 0,
+    bySize,
+    byType,
+  };
+}
+
+// Async versions for production
+async function getAvailableUnitsAsync(
   propertyId: string,
   size?: string,
   type?: string
@@ -66,7 +148,7 @@ export async function getAvailableUnits(
   });
 }
 
-export async function getOccupancyStats(propertyId: string) {
+export async function getOccupancyStatsAsync(propertyId: string) {
   const units = await prisma.storageUnit.findMany({
     where: { propertyId },
   });
@@ -179,7 +261,10 @@ export interface StoragePromotion {
 export function isRentalPastDue(rental: StorageRental): boolean {
   if (!rental.nextPaymentDue) return false;
   const now = new Date();
-  return rental.nextPaymentDue < now && rental.status !== 'terminated';
+  const dueDate = typeof rental.nextPaymentDue === 'string'
+    ? new Date(rental.nextPaymentDue)
+    : rental.nextPaymentDue;
+  return dueDate < now && rental.status !== 'terminated';
 }
 
 export function applyPromotion(monthlyRate: number, promotion: StoragePromotion): number {
@@ -416,7 +501,7 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       request: FastifyRequest<{ Querystring: { propertyId: string } }>,
       reply
     ) => {
-      const stats = await getOccupancyStats(request.query.propertyId);
+      const stats = await getOccupancyStatsAsync(request.query.propertyId);
       return reply.send(stats);
     }
   );

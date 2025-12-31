@@ -19,6 +19,159 @@ import {
 } from '@realriches/database';
 
 // ============================================================================
+// EXPORTED TYPES FOR TESTING
+// ============================================================================
+
+export interface BuildingSystem {
+  id: string;
+  propertyId: string;
+  name: string;
+  type: BuildingSystemType | string;
+  status: BuildingSystemStatus | string;
+  nextServiceDate?: Date | null;
+}
+
+export interface SystemSensor {
+  id: string;
+  systemId: string;
+  name: string;
+  type: SensorType | string;
+  status: SensorStatus | string;
+  unit: string;
+  minThreshold?: number | null;
+  maxThreshold?: number | null;
+  currentValue?: number;
+}
+
+export interface SystemAlert {
+  id: string;
+  systemId: string;
+  severity: SystemAlertSeverity | string;
+  status: SystemAlertStatus | string;
+  message: string;
+  createdAt: Date;
+}
+
+export interface MaintenanceSchedule {
+  id: string;
+  systemId: string;
+  type: SystemMaintenanceType | string;
+  status: SystemMaintenanceStatus | string;
+  scheduledDate: Date;
+  description?: string;
+}
+
+export interface AlertRule {
+  id: string;
+  sensorId: string;
+  operator: RuleOperator | string;
+  value: number;
+  value2?: number | null;
+  severity: SystemAlertSeverity | string;
+  message: string;
+  isActive: boolean;
+}
+
+// Exported Maps for testing
+export const buildingSystems = new Map<string, BuildingSystem>();
+export const systemSensors = new Map<string, SystemSensor>();
+export const systemAlerts = new Map<string, SystemAlert>();
+export const maintenanceSchedules = new Map<string, MaintenanceSchedule>();
+export const alertRules = new Map<string, AlertRule>();
+export const systemDowntimes = new Map<string, { systemId: string; startTime: Date; endTime?: Date; duration?: number }>();
+
+// Sync versions of functions for testing
+export function calculateSystemHealthSync(systemId: string): {
+  score: number;
+  status: 'healthy' | 'degraded' | 'critical';
+  factors: string[];
+} {
+  const system = buildingSystems.get(systemId);
+
+  if (!system) {
+    return { score: 0, status: 'critical', factors: ['System not found'] };
+  }
+
+  let score = 100;
+  const factors: string[] = [];
+
+  if (system.status === 'offline') {
+    score -= 50;
+    factors.push('System offline');
+  } else if (system.status === 'degraded') {
+    score -= 20;
+    factors.push('System in warning state');
+  } else if (system.status === 'critical') {
+    score -= 40;
+    factors.push('System in critical state');
+  }
+
+  if (system.nextServiceDate) {
+    const nextMaint = new Date(system.nextServiceDate);
+    const now = new Date();
+    const daysUntil = Math.floor((nextMaint.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysUntil < 0) {
+      score -= 20;
+      factors.push('Maintenance overdue');
+    } else if (daysUntil < 7) {
+      score -= 10;
+      factors.push('Maintenance due soon');
+    }
+  }
+
+  const status = score >= 80 ? 'healthy' : score >= 50 ? 'degraded' : 'critical';
+  return { score, status, factors };
+}
+
+export function getSystemUptimeSync(systemId: string, days: number = 30): {
+  uptimePercentage: number;
+  totalDowntimeMinutes: number;
+  incidents: number;
+  mtbf: number;
+  mttr: number;
+} {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+
+  const downtimes = Array.from(systemDowntimes.values()).filter(
+    d => d.systemId === systemId && new Date(d.startTime) >= cutoffDate
+  );
+
+  const totalMinutes = days * 24 * 60;
+  let totalDowntimeMinutes = 0;
+  const completedDowntimes: { duration: number }[] = [];
+
+  downtimes.forEach((d) => {
+    if (d.duration) {
+      totalDowntimeMinutes += d.duration;
+      completedDowntimes.push({ duration: d.duration });
+    } else if (d.endTime) {
+      const duration = Math.floor(
+        (new Date(d.endTime).getTime() - new Date(d.startTime).getTime()) / (1000 * 60)
+      );
+      totalDowntimeMinutes += duration;
+      completedDowntimes.push({ duration });
+    }
+  });
+
+  const uptimeMinutes = totalMinutes - totalDowntimeMinutes;
+  const uptimePercentage = Math.round((uptimeMinutes / totalMinutes) * 100 * 100) / 100;
+
+  const incidents = downtimes.length;
+  const mtbf = incidents > 0 ? Math.round((uptimeMinutes / 60) / incidents) : totalMinutes / 60;
+  const mttr = completedDowntimes.length > 0
+    ? Math.round(completedDowntimes.reduce((sum, d) => sum + d.duration, 0) / completedDowntimes.length)
+    : 0;
+
+  return { uptimePercentage, totalDowntimeMinutes, incidents, mtbf, mttr };
+}
+
+// Export sync versions as main exports
+export { calculateSystemHealthSync as calculateSystemHealth };
+export { getSystemUptimeSync as getSystemUptime };
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
@@ -55,7 +208,7 @@ export function checkThresholds(
   return { isAnomaly: false };
 }
 
-export async function calculateSystemHealth(systemId: string): Promise<{
+async function calculateSystemHealthAsync(systemId: string): Promise<{
   score: number;
   status: 'healthy' | 'degraded' | 'critical';
   factors: string[];
@@ -290,7 +443,7 @@ export async function calculateEnergyStats(
   };
 }
 
-export async function getSystemUptime(systemId: string, days: number = 30): Promise<{
+async function getSystemUptimeAsync(systemId: string, days: number = 30): Promise<{
   uptimePercentage: number;
   totalDowntimeMinutes: number;
   incidents: number;

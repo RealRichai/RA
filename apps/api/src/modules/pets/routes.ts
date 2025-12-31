@@ -66,9 +66,11 @@ export interface VaccinationRecord {
 export interface PetIncident {
   id: string;
   petId: string;
-  type: PetIncidentType;
-  severity: PetIncidentSeverity;
-  date: Date | string;
+  type?: PetIncidentType | string;
+  incidentType?: PetIncidentType | string;
+  severity: PetIncidentSeverity | string;
+  date?: Date | string;
+  incidentDate?: Date | string;
   description: string;
   fineAmount?: number;
   finePaid?: boolean;
@@ -297,7 +299,9 @@ export function getIncidentHistory(petId: string): {
   let unpaidFines = 0;
 
   for (const incident of incidents) {
-    byType[incident.type] = (byType[incident.type] || 0) + 1;
+    // Support both 'type' and 'incidentType' field names
+    const incType = (incident.type || incident.incidentType || 'other') as string;
+    byType[incType] = (byType[incType] || 0) + 1;
     if (incident.fineAmount) {
       totalFines += incident.fineAmount;
       if (!incident.finePaid) {

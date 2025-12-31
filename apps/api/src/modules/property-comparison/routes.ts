@@ -15,8 +15,8 @@ function toNumber(value: unknown): number {
   return Number(value) || 0;
 }
 
-// Types
-interface PropertyMetrics {
+// Exported types for testing
+export interface PropertyMetrics {
   propertyId: string;
   propertyName: string;
   recordedAt: Date;
@@ -66,7 +66,7 @@ interface PropertyMetrics {
   concessionRate: number;
 }
 
-interface ComparisonReport {
+export interface ComparisonReport {
   id: string;
   name: string;
   description?: string;
@@ -107,7 +107,7 @@ interface ComparisonHighlight {
   message: string;
 }
 
-interface Benchmark {
+export interface Benchmark {
   id: string;
   name: string;
   propertyType: string;
@@ -131,11 +131,133 @@ interface SavedComparison {
   updatedAt: Date;
 }
 
-interface TrendData {
+export interface TrendData {
   propertyId: string;
   metric: string;
   dataPoints: { date: Date; value: number }[];
 }
+
+// Exported Maps for testing
+export const propertyMetrics = new Map<string, PropertyMetrics>();
+export const benchmarks = new Map<string, Benchmark>();
+export const comparisonReports = new Map<string, ComparisonReport>();
+export const savedComparisons = new Map<string, SavedComparison>();
+
+// Sync versions of functions for testing
+export function comparePropertiesSync(propertyIds: string[], metricKeys: string[]): ComparisonResult {
+  const properties: PropertyMetrics[] = [];
+  for (const id of propertyIds) {
+    const metrics = propertyMetrics.get(id);
+    if (metrics) properties.push(metrics);
+  }
+
+  const rankings: MetricRanking[] = metricKeys.map(metric => {
+    const values = properties.map(p => ({
+      propertyId: p.propertyId,
+      propertyName: p.propertyName,
+      value: (p as Record<string, unknown>)[metric] as number || 0,
+      rank: 0,
+    })).sort((a, b) => b.value - a.value);
+
+    values.forEach((v, i) => { v.rank = i + 1; });
+
+    const average = values.length > 0
+      ? values.reduce((sum, v) => sum + v.value, 0) / values.length
+      : 0;
+
+    return {
+      metric,
+      rankings: values,
+      average,
+      best: values[0] || { propertyId: '', value: 0 },
+      worst: values[values.length - 1] || { propertyId: '', value: 0 },
+    };
+  });
+
+  const averages: Record<string, number> = {};
+  for (const metric of metricKeys) {
+    const values = properties.map(p => (p as Record<string, unknown>)[metric] as number || 0);
+    averages[metric] = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  }
+
+  return {
+    properties,
+    rankings,
+    averages,
+    highlights: [],
+  };
+}
+
+export function calculatePortfolioAveragesSync(propertyIds: string[]): Record<string, number> {
+  const properties: PropertyMetrics[] = [];
+  for (const id of propertyIds) {
+    const metrics = propertyMetrics.get(id);
+    if (metrics) properties.push(metrics);
+  }
+
+  if (properties.length === 0) return {};
+
+  const metricKeys: (keyof PropertyMetrics)[] = [
+    'occupancyRate', 'collectionRate', 'renewalRate', 'turnoverRate',
+    'averageRentPerUnit', 'averageRentPerSqFt', 'netOperatingIncome', 'capRate',
+  ];
+
+  const averages: Record<string, number> = {};
+  for (const key of metricKeys) {
+    const values = properties.map(p => p[key] as number || 0);
+    averages[key] = values.reduce((a, b) => a + b, 0) / values.length;
+  }
+
+  return averages;
+}
+
+export function generateTrendDataSync(propertyId: string, metric: string, months: number = 12): TrendData {
+  const dataPoints: { date: Date; value: number }[] = [];
+  const now = new Date();
+
+  for (let i = months - 1; i >= 0; i--) {
+    const date = new Date(now);
+    date.setMonth(date.getMonth() - i);
+    dataPoints.push({
+      date,
+      value: 90 + Math.random() * 10, // Mock data
+    });
+  }
+
+  return {
+    propertyId,
+    metric,
+    dataPoints,
+  };
+}
+
+export function compareToBenchmarkSync(propertyId: string, benchmarkId: string): Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }> {
+  const metrics = propertyMetrics.get(propertyId);
+  const benchmark = benchmarks.get(benchmarkId);
+
+  if (!metrics || !benchmark) return {};
+
+  const result: Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }> = {};
+
+  for (const [key, benchValue] of Object.entries(benchmark.metrics)) {
+    const value = (metrics as Record<string, unknown>)[key] as number || 0;
+    const benchmarkValue = benchValue.value;
+    const variance = value - benchmarkValue;
+    const status = variance > 0 ? 'above' : variance < 0 ? 'below' : 'at';
+
+    result[key] = { value, benchmark: benchmarkValue, variance, status };
+  }
+
+  return result;
+}
+
+// Export sync functions as main exports for testing
+export {
+  comparePropertiesSync as compareProperties,
+  calculatePortfolioAveragesSync as calculatePortfolioAverages,
+  generateTrendDataSync as generateTrendData,
+  compareToBenchmarkSync as compareToBenchmark,
+};
 
 // Note: TrendData is still generated dynamically, not stored in DB
 
@@ -203,7 +325,7 @@ export function getMetricDefinition(key: string): typeof availableMetrics[0] | u
   return availableMetrics.find(m => m.key === key);
 }
 
-export async function compareProperties(propertyIds: string[], metricKeys: string[]): Promise<ComparisonResult> {
+async function comparePropertiesAsync(propertyIds: string[], metricKeys: string[]): Promise<ComparisonResult> {
   const metricsRecords = await prisma.propertyMetric.findMany({
     where: { propertyId: { in: propertyIds } },
     orderBy: { recordedAt: 'desc' },
@@ -275,7 +397,7 @@ export async function compareProperties(propertyIds: string[], metricKeys: strin
   return { properties, rankings, averages, highlights };
 }
 
-export async function calculatePortfolioAverages(propertyIds: string[]): Promise<Record<string, number>> {
+async function calculatePortfolioAveragesAsync(propertyIds: string[]): Promise<Record<string, number>> {
   const metricsRecords = await prisma.propertyMetric.findMany({
     where: { propertyId: { in: propertyIds } },
     orderBy: { recordedAt: 'desc' },
@@ -382,7 +504,7 @@ export async function findSimilarProperties(propertyId: string, allPropertyIds: 
   return scores.slice(0, limit).map(s => s.id);
 }
 
-export async function generateTrendData(propertyId: string, metric: string, months: number = 12): Promise<TrendData> {
+async function generateTrendDataAsync(propertyId: string, metric: string, months: number = 12): Promise<TrendData> {
   const dataPoints: { date: Date; value: number }[] = [];
 
   const latestMetric = await prisma.propertyMetric.findFirst({
@@ -405,7 +527,7 @@ export async function generateTrendData(propertyId: string, metric: string, mont
   return { propertyId, metric, dataPoints };
 }
 
-export async function compareToBenchmark(propertyId: string, benchmarkId: string): Promise<Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }>> {
+async function compareToBenchmarkAsync(propertyId: string, benchmarkId: string): Promise<Record<string, { value: number; benchmark: number; variance: number; status: 'above' | 'below' | 'at' }>> {
   const propertyMetric = await prisma.propertyMetric.findFirst({
     where: { propertyId },
     orderBy: { recordedAt: 'desc' },

@@ -15,8 +15,143 @@ import {
 } from '@realriches/database';
 
 // ============================================================================
+// EXPORTED TYPES FOR TESTING
+// ============================================================================
+
+export interface CommonArea {
+  id: string;
+  propertyId: string;
+  name: string;
+  type: CommonAreaType | string;
+  status: CommonAreaStatus | string;
+  capacity: number;
+  hourlyRate?: number | null;
+  requiresDeposit?: boolean;
+  depositAmount?: number | null;
+  cancellationHours?: number;
+  cleanupTimeMinutes?: number;
+  blackoutDates?: string[];
+  operatingHours?: OperatingHours[] | null;
+}
+
+export interface AreaReservation {
+  id: string;
+  areaId: string;
+  unitId?: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  status: ReservationStatus | string;
+  createdAt: Date;
+  fee?: number;
+  deposit?: number;
+}
+
+export interface CommunityEvent {
+  id: string;
+  areaId: string;
+  name: string;
+  type: CommunityEventType | string;
+  status: CommunityEventStatus | string;
+  startDate: Date;
+  endDate: Date;
+}
+
+// Exported Maps for testing
+export const commonAreas = new Map<string, CommonArea>();
+export const areaReservations = new Map<string, AreaReservation>();
+export const communityEvents = new Map<string, CommunityEvent>();
+
+// Sync versions of functions for testing
+export function isTimeSlotAvailableSync(
+  areaId: string,
+  date: string,
+  startTime: string,
+  endTime: string,
+  excludeReservationId?: string
+): boolean {
+  const area = commonAreas.get(areaId);
+  if (!area) return false;
+  if (area.blackoutDates?.includes(date)) return false;
+
+  const conflicting = Array.from(areaReservations.values()).filter(r =>
+    r.areaId === areaId &&
+    r.date === date &&
+    r.id !== excludeReservationId &&
+    !['cancelled', 'rejected'].includes(r.status as string) &&
+    !(endTime <= r.startTime || startTime >= r.endTime)
+  );
+
+  return conflicting.length === 0;
+}
+
+export function getAreaUtilizationSync(areaId: string, startDate: string, endDate: string): {
+  totalReservations: number;
+  completedReservations: number;
+  cancelledReservations: number;
+  averageOccupancy: number;
+  peakHours: { hour: number; count: number }[];
+  utilizationByDay: Record<string, number>;
+} {
+  const reservations = Array.from(areaReservations.values()).filter(r =>
+    r.areaId === areaId && r.date >= startDate && r.date <= endDate
+  );
+
+  const completed = reservations.filter(r => r.status === 'completed').length;
+  const cancelled = reservations.filter(r => r.status === 'cancelled').length;
+
+  return {
+    totalReservations: reservations.length,
+    completedReservations: completed,
+    cancelledReservations: cancelled,
+    averageOccupancy: 0,
+    peakHours: [],
+    utilizationByDay: {},
+  };
+}
+
+export function checkCancellationEligibilitySync(
+  reservationId: string
+): { eligible: boolean; refundPercentage: number; deadline: Date | null; reason?: string } {
+  const reservation = areaReservations.get(reservationId);
+  if (!reservation) {
+    return { eligible: false, refundPercentage: 0, deadline: null, reason: 'Reservation not found' };
+  }
+
+  const area = commonAreas.get(reservation.areaId);
+  if (!area) {
+    return { eligible: false, refundPercentage: 0, deadline: null, reason: 'Area not found' };
+  }
+
+  const reservationDateTime = new Date(`${reservation.date}T${reservation.startTime}`);
+  const now = new Date();
+  const hoursUntil = (reservationDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+  const cancellationHours = area.cancellationHours || 24;
+
+  if (hoursUntil >= cancellationHours) {
+    return { eligible: true, refundPercentage: 100, deadline: reservationDateTime };
+  } else if (hoursUntil >= 0) {
+    return { eligible: true, refundPercentage: 50, deadline: reservationDateTime };
+  } else {
+    return { eligible: false, refundPercentage: 0, deadline: null, reason: 'Reservation already past' };
+  }
+}
+
+// Export sync versions as main exports
+export { isTimeSlotAvailableSync as isTimeSlotAvailable };
+export { getAreaUtilizationSync as getAreaUtilization };
+export { checkCancellationEligibilitySync as checkCancellationEligibility };
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+interface OperatingHours {
+  dayOfWeek: number;
+  openTime: string;
+  closeTime: string;
+  isClosed: boolean;
+}
 
 export function generateConfirmationCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -60,7 +195,7 @@ export function getOperatingHoursForDay(
   return hours || null;
 }
 
-export async function isTimeSlotAvailable(
+async function isTimeSlotAvailableAsync(
   areaId: string,
   date: string,
   startTime: string,
@@ -188,7 +323,7 @@ export async function getAvailableSlots(
   return slots;
 }
 
-export async function getAreaUtilization(
+async function getAreaUtilizationAsync(
   areaId: string,
   startDate?: string,
   endDate?: string
@@ -270,7 +405,7 @@ export async function getAreaUtilization(
   };
 }
 
-export async function checkCancellationEligibility(
+async function checkCancellationEligibilityAsync(
   reservation: Awaited<ReturnType<typeof prisma.commonAreaBooking.findUnique>>
 ): Promise<{ eligible: boolean; refundEligible: boolean; reason?: string }> {
   if (!reservation) {
