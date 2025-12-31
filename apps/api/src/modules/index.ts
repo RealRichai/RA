@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 
 import { metricsRoutes } from '../plugins/metrics';
 
+import { auditLogRoutes } from './admin/audit-logs';
 import { aiRoutes } from './ai/routes';
 import { analyticsRoutes } from './analytics/routes';
 import { authRoutes } from './auth/routes';
@@ -54,6 +55,9 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(commercialRoutes, { prefix: '/commercial' });
       await api.register(notificationRoutes, { prefix: '/notifications' });
       await api.register(partnerRoutes, { prefix: '/partners' });
+
+      // Admin routes
+      await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
     },
     { prefix }
   );
