@@ -48,12 +48,15 @@ export interface AccessZone {
 export interface TemporaryAccess {
   id: string;
   propertyId: string;
-  name: string;
-  accessCode: string;
+  name?: string;
+  grantedTo?: string;
+  accessCode?: string;
   status: TemporaryAccessStatus | string;
-  validFrom: Date;
-  validUntil: Date;
+  validFrom: Date | string;
+  validUntil?: Date | string;
+  validTo?: Date | string;
   zoneIds?: string[];
+  accessZones?: string[];
 }
 
 // Exported Maps for testing
@@ -89,38 +92,58 @@ export function getKeyInventorySync(propertyId: string): {
   };
 }
 
+interface AccessValidDevice {
+  id: string;
+  status: AccessDeviceStatus | string;
+  accessZones?: string[];
+  zoneIds?: string[];
+  expiresAt?: Date;
+}
+
+interface AccessValidZone {
+  id: string;
+}
+
 export function isAccessValidSync(
-  deviceId: string,
-  zoneId: string,
+  device: AccessValidDevice | string,
+  zone: AccessValidZone | string,
   checkTime: Date = new Date()
 ): { valid: boolean; reason?: string } {
-  const device = Array.from(accessDevices.values()).find(d => d.deviceId === deviceId);
-
-  if (!device) {
-    return { valid: false, reason: 'Device not found' };
+  // Handle string IDs (backward compatibility)
+  if (typeof device === 'string') {
+    const foundDevice = Array.from(accessDevices.values()).find(d => d.deviceId === device);
+    if (!foundDevice) return { valid: false, reason: 'Device not found' };
+    device = foundDevice;
   }
 
+  const zoneId = typeof zone === 'string' ? zone : zone.id;
+
   if (device.status !== 'active') {
-    return { valid: false, reason: 'Device not active' };
+    return { valid: false, reason: 'Device is inactive' };
   }
 
   if (device.expiresAt && new Date(device.expiresAt) < checkTime) {
     return { valid: false, reason: 'Device expired' };
   }
 
-  if (device.zoneIds && !device.zoneIds.includes(zoneId)) {
-    return { valid: false, reason: 'Not authorized for this zone' };
+  const zones = device.accessZones || device.zoneIds || [];
+  if (zones.length > 0 && !zones.includes(zoneId)) {
+    return { valid: false, reason: 'Device not authorized for this zone' };
   }
 
   return { valid: true };
 }
 
 export function checkTemporaryAccessSync(
-  accessCode: string,
-  zoneId: string,
+  accessIdOrCode: string,
+  zoneId?: string,
   checkTime: Date = new Date()
 ): { valid: boolean; reason?: string; accessName?: string } {
-  const access = Array.from(temporaryAccesses.values()).find(a => a.accessCode === accessCode);
+  // Try to find by ID first, then by accessCode
+  let access = temporaryAccesses.get(accessIdOrCode);
+  if (!access) {
+    access = Array.from(temporaryAccesses.values()).find(a => a.accessCode === accessIdOrCode);
+  }
 
   if (!access) {
     return { valid: false, reason: 'Access code not found' };
@@ -130,15 +153,21 @@ export function checkTemporaryAccessSync(
     return { valid: false, reason: 'Access not active' };
   }
 
-  if (checkTime < new Date(access.validFrom) || checkTime > new Date(access.validUntil)) {
-    return { valid: false, reason: 'Access expired' };
+  const validUntil = access.validUntil || access.validTo;
+  if (validUntil && checkTime > new Date(validUntil)) {
+    return { valid: false, reason: 'Access has expired' };
   }
 
-  if (access.zoneIds && !access.zoneIds.includes(zoneId)) {
+  if (checkTime < new Date(access.validFrom)) {
+    return { valid: false, reason: 'Access not yet valid' };
+  }
+
+  const zones = access.zoneIds || access.accessZones || [];
+  if (zoneId && zones.length > 0 && !zones.includes(zoneId)) {
     return { valid: false, reason: 'Not authorized for this zone' };
   }
 
-  return { valid: true, accessName: access.name };
+  return { valid: true, accessName: access.name || access.grantedTo };
 }
 
 // Export sync versions as main exports
