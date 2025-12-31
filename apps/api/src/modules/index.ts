@@ -13,6 +13,7 @@ import { leaseRoutes } from './leases/routes';
 import { listingRoutes } from './listings/routes';
 import { maintenanceRoutes } from './maintenance/routes';
 import { marketingRoutes } from './marketing/routes';
+import { notificationRoutes } from './notifications/routes';
 import { partnerRoutes } from './partners/routes';
 import { paymentRoutes } from './payments/routes';
 import { propertyRoutes } from './properties/routes';
@@ -46,6 +47,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(commerceRoutes, { prefix: '/commerce' });
       await api.register(analyticsRoutes, { prefix: '/analytics' });
       await api.register(commercialRoutes, { prefix: '/commercial' });
+      await api.register(notificationRoutes, { prefix: '/notifications' });
       await api.register(partnerRoutes, { prefix: '/partners' });
     },
     { prefix }

@@ -11,9 +11,12 @@ import {
   createProviderFromEnv,
   registerAllTemplates,
 } from '@realriches/email-service';
+import type { NotificationType } from '@realriches/types';
 import { logger } from '@realriches/utils';
 import type { Job } from 'bullmq';
 import type { Redis } from 'ioredis';
+
+import { NotificationPreferenceService } from '../modules/notifications/service';
 
 import type { JobDefinition } from './scheduler';
 
@@ -380,6 +383,51 @@ export class EmailNotificationJob {
 
     if (!emailService) {
       logger.error('Email service not initialized');
+      return;
+    }
+
+    // Check user notification preferences
+    const preferenceCheck = await NotificationPreferenceService.shouldSendNotification(
+      notification.userId,
+      notification.type as NotificationType,
+      'email'
+    );
+
+    if (!preferenceCheck.shouldSend) {
+      logger.debug(
+        { notificationId: notification.id, reason: preferenceCheck.reason },
+        'Skipping email due to user preferences'
+      );
+      // Mark as processed so we don't keep trying
+      await prisma.notification.update({
+        where: { id: notification.id },
+        data: {
+          data: {
+            ...(notification.data || {}),
+            emailSkipped: true,
+            emailSkipReason: preferenceCheck.reason,
+          },
+        },
+      });
+      return;
+    }
+
+    // Handle digest frequency (queue for later batch)
+    if (preferenceCheck.frequency === 'daily_digest' || preferenceCheck.frequency === 'weekly_digest') {
+      logger.debug(
+        { notificationId: notification.id, frequency: preferenceCheck.frequency },
+        'Notification queued for digest'
+      );
+      await prisma.notification.update({
+        where: { id: notification.id },
+        data: {
+          data: {
+            ...(notification.data || {}),
+            digestQueued: true,
+            digestFrequency: preferenceCheck.frequency,
+          },
+        },
+      });
       return;
     }
 

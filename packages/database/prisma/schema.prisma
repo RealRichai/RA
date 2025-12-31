@@ -74,10 +74,11 @@ model User {
   workOrdersAssigned     WorkOrder[]           @relation("WorkOrderAssignee")
   documents              Document[]
   aiConversations        AIConversation[]
-  notifications          Notification[]
-  auditLogs              AuditLog[]            @relation("AuditLogActor")
-  refreshTokens          RefreshToken[]
-  apiKeys                ApiKey[]
+  notifications              Notification[]
+  notificationPreferences    NotificationPreference[]
+  auditLogs                  AuditLog[]            @relation("AuditLogActor")
+  refreshTokens              RefreshToken[]
+  apiKeys                    ApiKey[]
 
   @@index([email])
   @@index([role])
@@ -1781,6 +1782,27 @@ model Notification {
   @@index([status])
   @@index([createdAt])
   @@map("notifications")
+}
+
+model NotificationPreference {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  category    String   // payments, leases, compliance, documents, marketing, system
+  channel     String   // email, in_app, sms, push
+  enabled     Boolean  @default(true)
+  frequency   String   @default("immediate") // immediate, daily_digest, weekly_digest, never
+  quietStart  String?  @map("quiet_start") // HH:mm format for quiet hours
+  quietEnd    String?  @map("quiet_end")   // HH:mm format for quiet hours
+  metadata    Json?    // Additional settings per category
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, channel])
+  @@index([userId])
+  @@index([category])
+  @@map("notification_preferences")
 }
 
 model AuditLog {
