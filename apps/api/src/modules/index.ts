@@ -23,6 +23,7 @@ import { authRoutes } from './auth/routes';
 import { commerceRoutes } from './commerce/routes';
 import { commercialRoutes } from './commercial/routes';
 import { complianceRoutes } from './compliance/routes';
+import { esignatureRoutes } from './documents/esignature';
 import { documentRoutes } from './documents/routes';
 import { healthRoutes } from './health/routes';
 import { renewalRoutes } from './leases/renewals';
@@ -31,14 +32,17 @@ import { listingRoutes } from './listings/routes';
 import { maintenanceRoutes } from './maintenance/routes';
 import { workflowRoutes } from './maintenance/workflows';
 import { marketingRoutes } from './marketing/routes';
+import { pushNotificationRoutes } from './notifications/push';
 import { notificationRoutes } from './notifications/routes';
 import { partnerRoutes } from './partners/routes';
 import { reconciliationRoutes } from './payments/reconciliation';
 import { paymentRoutes } from './payments/routes';
+import { comparableRoutes } from './properties/comparables';
 import { propertyRoutes } from './properties/routes';
 import { websocketPlugin } from './realtime/websocket';
 import { reportRoutes } from './reports/routes';
 import { searchRoutes } from './search/routes';
+import { tenantPortalRoutes } from './tenant-portal/routes';
 import { userRoutes } from './users/routes';
 import { webhookRoutes } from './webhooks/routes';
 
@@ -84,6 +88,10 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(renewalRoutes, { prefix: '/renewals' });
       await api.register(workflowRoutes, { prefix: '/maintenance/workflows' });
       await api.register(reconciliationRoutes, { prefix: '/reconciliation' });
+      await api.register(esignatureRoutes, { prefix: '/esignature' });
+      await api.register(pushNotificationRoutes, { prefix: '/push' });
+      await api.register(tenantPortalRoutes, { prefix: '/tenant' });
+      await api.register(comparableRoutes, { prefix: '/comparables' });
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
