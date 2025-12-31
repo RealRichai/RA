@@ -42,6 +42,9 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       },
       preHandler: async (request, reply) => {
         await app.authenticate(request, reply);
+        // Apply AI-specific rate limits
+        const allowed = await app.checkRateLimit(request, reply, { category: 'ai' });
+        if (!allowed) return;
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {

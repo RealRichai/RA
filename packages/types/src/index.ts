@@ -19,3 +19,4 @@ export * from './events';
 export * from './feature-flags';
 export * from './market';
 export * from './notifications';
+export * from './rate-limit';

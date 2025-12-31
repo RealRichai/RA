@@ -15,6 +15,7 @@ import { authPlugin } from './auth';
 import { emailPlugin } from './email';
 import { errorHandler } from './error-handler';
 import { jobsPlugin } from './jobs';
+import { rateLimitPlugin } from './rate-limit';
 import rawBodyPlugin from './raw-body';
 import { redisPlugin } from './redis';
 
@@ -43,6 +44,15 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+    exposedHeaders: [
+      'X-RateLimit-Limit',
+      'X-RateLimit-Remaining',
+      'X-RateLimit-Reset',
+      'X-RateLimit-Category',
+      'X-DailyQuota-Limit',
+      'X-DailyQuota-Remaining',
+      'Retry-After',
+    ],
   });
 
   // Rate limiting
@@ -87,6 +97,14 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
 
   // Redis
   await app.register(redisPlugin);
+
+  // Enhanced rate limiting (depends on Redis)
+  await app.register(rateLimitPlugin, {
+    enabled: true,
+    redisPrefix: 'rl',
+    includeHeaders: true,
+    logExceeded: true,
+  });
 
   // Email service (depends on Redis)
   await app.register(emailPlugin);
