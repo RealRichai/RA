@@ -16,6 +16,7 @@ import { ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import { DataCleanupJob } from '../../jobs/data-cleanup';
 import { PartnerHealthJob } from '../../jobs/partner-health';
 import { WebhookRetryJob } from '../../jobs/webhook-retry';
 
@@ -737,6 +738,89 @@ export async function partnerRoutes(app: FastifyInstance): Promise<void> {
         data: {
           message: 'Webhook deleted from DLQ',
           webhookId,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // GET /admin/cleanup/stats - Get cleanup statistics
+  // =========================================================================
+  app.get(
+    '/admin/cleanup/stats',
+    {
+      schema: {
+        description: 'Get data cleanup statistics (records eligible for deletion)',
+        tags: ['Admin', 'System'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const stats = await DataCleanupJob.getCleanupStats();
+
+      const total = Object.values(stats).reduce((sum, count) => sum + count, 0);
+
+      return reply.send({
+        success: true,
+        data: {
+          totalEligible: total,
+          byTable: stats,
+        },
+      });
+    }
+  );
+
+  // =========================================================================
+  // POST /admin/cleanup/:table - Run cleanup for a specific table
+  // =========================================================================
+  app.post(
+    '/admin/cleanup/:table',
+    {
+      schema: {
+        description: 'Run data cleanup for a specific table',
+        tags: ['Admin', 'System'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['table'],
+          properties: {
+            table: {
+              type: 'string',
+              enum: [
+                'sessions',
+                'refreshTokens',
+                'notifications',
+                'auditLogs',
+                'aiConversations',
+                'aiContexts',
+                'jobRecords',
+                'processedWebhooks',
+                'webhookDLQ',
+                'expiredListings',
+              ],
+            },
+          },
+        },
+      },
+      preHandler: adminPartnerAuth,
+    },
+    async (
+      request: FastifyRequest<{ Params: { table: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { table } = request.params;
+
+      const result = await DataCleanupJob.cleanupTable(
+        table as Parameters<typeof DataCleanupJob.cleanupTable>[0]
+      );
+
+      return reply.send({
+        success: true,
+        data: {
+          table,
+          deleted: result.deleted,
+          durationMs: result.duration,
         },
       });
     }
