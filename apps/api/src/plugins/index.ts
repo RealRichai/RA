@@ -14,6 +14,7 @@ import { auditPlugin } from './audit';
 import { authPlugin } from './auth';
 import { emailPlugin } from './email';
 import { errorHandler } from './error-handler';
+import { jobsPlugin } from './jobs';
 import rawBodyPlugin from './raw-body';
 import { redisPlugin } from './redis';
 
@@ -89,6 +90,9 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
 
   // Email service (depends on Redis)
   await app.register(emailPlugin);
+
+  // Background jobs (depends on Redis)
+  await app.register(jobsPlugin);
 
   // AI client (Claude/OpenAI with fallback)
   await app.register(aiPlugin);
