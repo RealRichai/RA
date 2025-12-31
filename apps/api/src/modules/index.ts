@@ -25,15 +25,19 @@ import { commercialRoutes } from './commercial/routes';
 import { complianceRoutes } from './compliance/routes';
 import { documentRoutes } from './documents/routes';
 import { healthRoutes } from './health/routes';
+import { renewalRoutes } from './leases/renewals';
 import { leaseRoutes } from './leases/routes';
 import { listingRoutes } from './listings/routes';
 import { maintenanceRoutes } from './maintenance/routes';
+import { workflowRoutes } from './maintenance/workflows';
 import { marketingRoutes } from './marketing/routes';
 import { notificationRoutes } from './notifications/routes';
 import { partnerRoutes } from './partners/routes';
+import { reconciliationRoutes } from './payments/reconciliation';
 import { paymentRoutes } from './payments/routes';
 import { propertyRoutes } from './properties/routes';
 import { websocketPlugin } from './realtime/websocket';
+import { reportRoutes } from './reports/routes';
 import { searchRoutes } from './search/routes';
 import { userRoutes } from './users/routes';
 import { webhookRoutes } from './webhooks/routes';
@@ -76,6 +80,10 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(notificationRoutes, { prefix: '/notifications' });
       await api.register(partnerRoutes, { prefix: '/partners' });
       await api.register(searchRoutes, { prefix: '/search' });
+      await api.register(reportRoutes, { prefix: '/reports' });
+      await api.register(renewalRoutes, { prefix: '/renewals' });
+      await api.register(workflowRoutes, { prefix: '/maintenance/workflows' });
+      await api.register(reconciliationRoutes, { prefix: '/reconciliation' });
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
