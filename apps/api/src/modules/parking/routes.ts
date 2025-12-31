@@ -663,8 +663,8 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ error: 'Parking lot not found' });
     }
 
-    const occupancy = getLotOccupancy(lotId);
-    const spacesByType = getSpacesByType(lotId);
+    const occupancy = await getLotOccupancyAsync(lotId);
+    const spacesByType = await getSpacesByTypeAsync(lotId);
 
     return reply.send({ ...lot, occupancy, spacesByType });
   });
@@ -677,10 +677,12 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
       where: propertyId ? { propertyId } : {},
     });
 
-    const lotsWithOccupancy = lots.map((lot) => ({
-      ...lot,
-      occupancy: getLotOccupancy(lot.id),
-    }));
+    const lotsWithOccupancy = await Promise.all(
+      lots.map(async (lot) => ({
+        ...lot,
+        occupancy: await getLotOccupancyAsync(lot.id),
+      }))
+    );
 
     return reply.send({ lots: lotsWithOccupancy });
   });
@@ -1662,7 +1664,7 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const query = querySchema.parse(request.query);
-    const stats = calculateViolationStats(propertyId, query.startDate, query.endDate);
+    const stats = await calculateViolationStatsAsync(propertyId, query.startDate, query.endDate);
 
     return reply.send(stats);
   });
@@ -1676,7 +1678,7 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const query = querySchema.parse(request.query);
-    const revenue = calculateParkingRevenue(propertyId, query.startDate, query.endDate);
+    const revenue = await calculateParkingRevenueAsync(propertyId, query.startDate, query.endDate);
 
     return reply.send(revenue);
   });
@@ -1688,12 +1690,14 @@ export async function parkingRoutes(app: FastifyInstance): Promise<void> {
       where: { propertyId },
     });
 
-    const report = lots.map((lot) => ({
-      lotId: lot.id,
-      lotName: lot.name,
-      ...getLotOccupancy(lot.id),
-      spacesByType: getSpacesByType(lot.id),
-    }));
+    const report = await Promise.all(
+      lots.map(async (lot) => ({
+        lotId: lot.id,
+        lotName: lot.name,
+        ...(await getLotOccupancyAsync(lot.id)),
+        spacesByType: await getSpacesByTypeAsync(lot.id),
+      }))
+    );
 
     const totals = report.reduce(
       (acc, lot) => ({

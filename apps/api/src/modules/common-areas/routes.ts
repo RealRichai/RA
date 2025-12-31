@@ -1002,7 +1002,7 @@ export const commonAreaRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(404).send({ error: 'Reservation not found' });
       }
 
-      const eligibility = checkCancellationEligibilitySync(reservation.id);
+      const eligibility = await checkCancellationEligibilityAsync(reservation);
       if (!eligibility.eligible) {
         return reply.status(400).send({ error: eligibility.reason });
       }
