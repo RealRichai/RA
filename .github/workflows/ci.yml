@@ -510,7 +510,7 @@ jobs:
           echo "✅ Persistence guard check passed!"
 
       - name: Run persistence guard tests
-        run: pnpm --filter @realriches/api test -- --run persistence-guard.test.ts
+        run: pnpm --filter @realriches/api test -- persistence-guard.test.ts
         env:
           NODE_ENV: test
 
