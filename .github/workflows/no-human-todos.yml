@@ -12,29 +12,16 @@ jobs:
   no-human-todos:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install ripgrep
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
-
-      - name: Fail if HUMAN_IMPLEMENTATION_REQUIRED exists in source
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Policy - block HUMAN_IMPLEMENTATION_REQUIRED in source
         run: |
           set -euo pipefail
-
-          # Only scan source directories
-          echo "Scanning apps/, packages/, prisma/, docs/ for HUMAN_IMPLEMENTATION_REQUIRED..."
-
-          # Exclusions are defensive; scan is already limited to source roots.
           if rg -n "HUMAN_IMPLEMENTATION_REQUIRED" apps packages prisma docs \
               -g'!**/coverage/**' \
               -g'!**/.next/**' \
               -g'!**/dist/**' \
               -g'!**/.turbo/**' ; then
-            echo ""
-            echo "ERROR: Found HUMAN_IMPLEMENTATION_REQUIRED in source files."
-            echo "Fix the TODOs or move them into handoff/checklist docs only."
+            echo "ERROR: Found HUMAN_IMPLEMENTATION_REQUIRED in source."
             exit 1
-          else
-            echo "OK: No HUMAN_IMPLEMENTATION_REQUIRED found in source."
           fi
