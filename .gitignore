@@ -4,8 +4,10 @@ node_modules/
 
 # Build outputs
 dist/
+**/dist/
 build/
 .next/
+**/.next/
 out/
 *.tsbuildinfo
 
@@ -32,6 +34,7 @@ yarn-error.log*
 
 # Testing
 coverage/
+**/coverage/
 .nyc_output/
 playwright-report/
 test-results/
