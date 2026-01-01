@@ -1,6 +1,5 @@
 import type { FeatureFlag, FeatureFlagMetadata } from './flags';
 import { FEATURE_FLAG_REGISTRY } from './flags';
-import type { Market } from './markets';
 import { FEATURE_MARKET_CONFIG, getEnabledMarketsForFlag, isValidMarket } from './markets';
 
 /**
@@ -156,7 +155,7 @@ export class FeatureFlagService {
       return metadata?.defaultEnabled ?? false;
     }
 
-    return enabledMarkets.includes(market as Market);
+    return enabledMarkets.includes(market);
   }
 
   /**
