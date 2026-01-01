@@ -6,7 +6,8 @@
 # Part of OWASP Top 10:2021 A05 (Security Misconfiguration) controls.
 #
 
-set -e
+# Don't use set -e as arithmetic operations can return non-zero
+set +e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -32,7 +33,7 @@ if grep -q "import helmet from '@fastify/helmet'" "$PROJECT_ROOT/apps/api/src/pl
 else
     echo -e "${RED}FAIL${NC}"
     echo "  ERROR: Helmet middleware must be registered in plugins/index.ts"
-    ((ERRORS++))
+    ERRORS=$((ERRORS + 1))
 fi
 
 # Check 2: Content Security Policy is configured
@@ -42,7 +43,7 @@ if grep -q "contentSecurityPolicy" "$PROJECT_ROOT/apps/api/src/plugins/index.ts"
 else
     echo -e "${RED}FAIL${NC}"
     echo "  ERROR: Content-Security-Policy must be configured"
-    ((ERRORS++))
+    ERRORS=$((ERRORS + 1))
 fi
 
 # Check 3: CSP defaultSrc is restrictive
@@ -52,7 +53,7 @@ if grep -q "defaultSrc.*'self'" "$PROJECT_ROOT/apps/api/src/plugins/index.ts"; t
 else
     echo -e "${YELLOW}WARN${NC}"
     echo "  WARNING: CSP defaultSrc should use 'self' as baseline"
-    ((WARNINGS++))
+    WARNINGS=$((WARNINGS + 1))
 fi
 
 # Check 4: CORS is configured
@@ -63,7 +64,7 @@ if grep -q "import cors from '@fastify/cors'" "$PROJECT_ROOT/apps/api/src/plugin
 else
     echo -e "${RED}FAIL${NC}"
     echo "  ERROR: CORS middleware must be registered"
-    ((ERRORS++))
+    ERRORS=$((ERRORS + 1))
 fi
 
 # Check 5: CORS origin is not wildcard in production config
@@ -71,7 +72,7 @@ echo -n "Checking CORS origin restriction... "
 if grep -q "origin: '\*'" "$PROJECT_ROOT/apps/api/src/plugins/index.ts"; then
     echo -e "${RED}FAIL${NC}"
     echo "  ERROR: CORS origin must not be '*' wildcard"
-    ((ERRORS++))
+    ERRORS=$((ERRORS + 1))
 else
     echo -e "${GREEN}PASS${NC}"
 fi
@@ -84,7 +85,7 @@ if grep -q "import rateLimit from '@fastify/rate-limit'" "$PROJECT_ROOT/apps/api
 else
     echo -e "${RED}FAIL${NC}"
     echo "  ERROR: Rate limiting middleware must be registered"
-    ((ERRORS++))
+    ERRORS=$((ERRORS + 1))
 fi
 
 # Check 7: JWT secret validation exists
@@ -95,7 +96,7 @@ if grep -q "min(32)" "$PROJECT_ROOT/packages/config/src/index.ts" || \
 else
     echo -e "${YELLOW}WARN${NC}"
     echo "  WARNING: JWT secret should require minimum 32 characters"
-    ((WARNINGS++))
+    WARNINGS=$((WARNINGS + 1))
 fi
 
 # Check 8: Error handler hides stack in production
@@ -106,7 +107,7 @@ if grep -q "NODE_ENV\|production" "$PROJECT_ROOT/apps/api/src/plugins/error-hand
 else
     echo -e "${YELLOW}WARN${NC}"
     echo "  WARNING: Error handler should hide stack traces in production"
-    ((WARNINGS++))
+    WARNINGS=$((WARNINGS + 1))
 fi
 
 # Check 9: Sensitive data redaction in audit logs
@@ -116,7 +117,7 @@ if grep -q "REDACTED\|sanitize\|password\|token" "$PROJECT_ROOT/apps/api/src/plu
 else
     echo -e "${YELLOW}WARN${NC}"
     echo "  WARNING: Audit logs should redact sensitive data"
-    ((WARNINGS++))
+    WARNINGS=$((WARNINGS + 1))
 fi
 
 # Check 10: File upload limits configured
@@ -126,7 +127,7 @@ if grep -q "fileSize\|fileSizeLimit\|limits" "$PROJECT_ROOT/apps/api/src/plugins
 else
     echo -e "${YELLOW}WARN${NC}"
     echo "  WARNING: File upload limits should be configured"
-    ((WARNINGS++))
+    WARNINGS=$((WARNINGS + 1))
 fi
 
 echo ""

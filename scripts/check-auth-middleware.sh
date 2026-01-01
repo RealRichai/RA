@@ -9,7 +9,8 @@
 # authentication/authorization decorators or are explicitly marked as public.
 #
 
-set -e
+# Don't use set -e as arithmetic operations can return non-zero
+set +e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -77,7 +78,7 @@ check_route_file() {
 
     # Check each endpoint
     while IFS= read -r line; do
-        ((CHECKED++))
+        CHECKED=$((CHECKED + 1))
         local line_num=$(echo "$line" | cut -d: -f1)
         local endpoint_def=$(echo "$line" | cut -d: -f2-)
 
@@ -129,8 +130,8 @@ check_route_file() {
             echo -e "${YELLOW}WARNING${NC}: $relative_path:$line_num"
             echo "  Endpoint '$path' may be missing authorization"
             echo "  Add preHandler: [fastify.authenticate] or mark as intentionally public"
-            ((WARNINGS++))
-            ((file_errors++))
+            WARNINGS=$((WARNINGS + 1))
+            file_errors=$((file_errors + 1))
         fi
     done <<< "$endpoints"
 
@@ -145,7 +146,7 @@ if grep -q "fastify.decorate" "$PROJECT_ROOT/apps/api/src/plugins/auth.ts" && \
 else
     echo -e "${RED}FAIL${NC}"
     echo "  ERROR: Auth plugin must export 'authenticate' decorator"
-    ((ERRORS++))
+    ERRORS=$((ERRORS + 1))
 fi
 
 echo -n "Checking auth plugin exports authorize decorator... "
@@ -155,7 +156,7 @@ if grep -q "fastify.decorate" "$PROJECT_ROOT/apps/api/src/plugins/auth.ts" && \
 else
     echo -e "${RED}FAIL${NC}"
     echo "  ERROR: Auth plugin must export 'authorize' decorator"
-    ((ERRORS++))
+    ERRORS=$((ERRORS + 1))
 fi
 
 echo ""
@@ -200,7 +201,7 @@ if [ -n "$admin_routes" ]; then
         if ! grep -q "roles.*admin\|authorize.*admin\|super_admin\|adminAuth" "$file" 2>/dev/null; then
             echo -e "${YELLOW}WARNING${NC}: ${file#$PROJECT_ROOT/}"
             echo "  Admin routes should check for admin role"
-            ((WARNINGS++))
+            WARNINGS=$((WARNINGS + 1))
         fi
     done <<< "$admin_routes"
 fi
