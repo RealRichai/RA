@@ -155,10 +155,81 @@ jobs:
           files: ./coverage/lcov.info
           fail_ci_if_error: false
 
+  acceptance-tests:
+    name: Acceptance Tests
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: realriches_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Run migrations
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_test?schema=public
+
+      - name: Run acceptance tests
+        run: pnpm test:acceptance
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_test?schema=public
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret-for-ci-only-min-32-chars
+          ENCRYPTION_KEY: test-encryption-key-32-bytes-xx
+
+      - name: Upload acceptance report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: acceptance-report
+          path: apps/api/reports/acceptance-report.json
+          retention-days: 30
+
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [secrets-guard, lint, test]
+    needs: [secrets-guard, lint, test, acceptance-tests]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
