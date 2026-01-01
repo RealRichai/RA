@@ -304,3 +304,142 @@ jobs:
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  traceability-check:
+    name: Traceability Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Master Implementation Ledger
+        run: |
+          echo "Validating Master Implementation Ledger..."
+          LEDGER_FILE="docs/traceability/MASTER_IMPLEMENTATION_LEDGER.md"
+
+          # Check file exists
+          if [ ! -f "$LEDGER_FILE" ]; then
+            echo "::error::TRACEABILITY VIOLATION: $LEDGER_FILE does not exist!"
+            exit 1
+          fi
+          echo "✓ Ledger file exists"
+
+          # Check required sections exist
+          REQUIRED_SECTIONS=(
+            "## 1. Compliance"
+            "## 2. Revenue Partners"
+            "## 3. Document Vault"
+            "## 4. AI Agents"
+            "## 5. Agent Governance"
+            "## 6. Media Generation"
+            "## 7. 3D Tours"
+            "## 8. Mobile"
+            "## 9. Security"
+            "## 10. Multi-Market"
+            "## 11. Observability"
+            "## 12. Workflows"
+          )
+
+          MISSING_SECTIONS=""
+          for section in "${REQUIRED_SECTIONS[@]}"; do
+            if ! grep -q "$section" "$LEDGER_FILE"; then
+              MISSING_SECTIONS="$MISSING_SECTIONS\n  - $section"
+            fi
+          done
+
+          if [ -n "$MISSING_SECTIONS" ]; then
+            echo "::error::TRACEABILITY VIOLATION: Missing required sections in ledger:$MISSING_SECTIONS"
+            exit 1
+          fi
+          echo "✓ All required sections present"
+
+          # Check for TBD/TODO placeholders
+          if grep -E "(TBD|TODO|PLACEHOLDER|FIXME)" "$LEDGER_FILE"; then
+            echo "::error::TRACEABILITY VIOLATION: Ledger contains unresolved placeholders (TBD/TODO/PLACEHOLDER/FIXME)"
+            exit 1
+          fi
+          echo "✓ No unresolved placeholders"
+
+          # Check for summary statistics section
+          if ! grep -q "## Summary Statistics" "$LEDGER_FILE"; then
+            echo "::error::TRACEABILITY VIOLATION: Missing Summary Statistics section"
+            exit 1
+          fi
+          echo "✓ Summary Statistics section present"
+
+          echo ""
+          echo "✅ Master Implementation Ledger validation passed!"
+
+      - name: Validate Gap Register
+        run: |
+          echo "Validating Gap Register..."
+          GAP_FILE="docs/traceability/GAP_REGISTER.md"
+
+          # Check file exists
+          if [ ! -f "$GAP_FILE" ]; then
+            echo "::error::TRACEABILITY VIOLATION: $GAP_FILE does not exist!"
+            exit 1
+          fi
+          echo "✓ Gap Register file exists"
+
+          # Check required sections exist
+          if ! grep -q "## Gap Summary" "$GAP_FILE"; then
+            echo "::error::TRACEABILITY VIOLATION: Missing Gap Summary section"
+            exit 1
+          fi
+          echo "✓ Gap Summary section present"
+
+          if ! grep -q "## Detailed Gap Analysis" "$GAP_FILE"; then
+            echo "::error::TRACEABILITY VIOLATION: Missing Detailed Gap Analysis section"
+            exit 1
+          fi
+          echo "✓ Detailed Gap Analysis section present"
+
+          if ! grep -q "## Remediation Timeline" "$GAP_FILE"; then
+            echo "::error::TRACEABILITY VIOLATION: Missing Remediation Timeline section"
+            exit 1
+          fi
+          echo "✓ Remediation Timeline section present"
+
+          # Check for TBD/TODO placeholders in gap descriptions
+          if grep -E "^#### Description$" -A 5 "$GAP_FILE" | grep -E "(TBD|TODO|PLACEHOLDER)"; then
+            echo "::error::TRACEABILITY VIOLATION: Gap Register contains unresolved placeholders in descriptions"
+            exit 1
+          fi
+          echo "✓ No unresolved placeholders in gap descriptions"
+
+          echo ""
+          echo "✅ Gap Register validation passed!"
+
+      - name: Cross-reference check
+        run: |
+          echo "Checking cross-references between STATUS_REPORT.md and traceability docs..."
+
+          # Check STATUS_REPORT.md references the ledger and gap register
+          if ! grep -q "MASTER_IMPLEMENTATION_LEDGER.md" "STATUS_REPORT.md"; then
+            echo "::error::TRACEABILITY VIOLATION: STATUS_REPORT.md does not reference Master Implementation Ledger"
+            exit 1
+          fi
+          echo "✓ STATUS_REPORT.md references Master Implementation Ledger"
+
+          if ! grep -q "GAP_REGISTER.md" "STATUS_REPORT.md"; then
+            echo "::error::TRACEABILITY VIOLATION: STATUS_REPORT.md does not reference Gap Register"
+            exit 1
+          fi
+          echo "✓ STATUS_REPORT.md references Gap Register"
+
+          echo ""
+          echo "✅ Cross-reference check passed!"
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "  TRACEABILITY CHECK COMPLETE"
+          echo "=========================================="
+          echo ""
+          echo "All traceability documentation is valid:"
+          echo "  ✓ Master Implementation Ledger"
+          echo "  ✓ Gap Register"
+          echo "  ✓ Cross-references"
+          echo ""

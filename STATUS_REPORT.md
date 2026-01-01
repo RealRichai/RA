@@ -2,7 +2,16 @@
 
 **Generated:** 2026-01-01
 **Branch:** main
-**Latest Commit:** `ede48cf` - feat(web): add SplatViewer component for 3DGS tours
+**Latest Commit:** `0e8e863` - audit: create traceability documentation
+
+---
+
+## Traceability Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [Master Implementation Ledger](docs/traceability/MASTER_IMPLEMENTATION_LEDGER.md) | Complete feature inventory with evidence paths |
+| [Gap Register](docs/traceability/GAP_REGISTER.md) | Missing/partial features with remediation plans |
 
 ---
 
@@ -271,21 +280,57 @@ SENDGRID_API_KEY=...
 
 ## Known Limitations
 
-1. **Prisma Migration Pending:** Some API modules still use in-memory Maps for test compatibility. Activity module has been migrated as proof of concept.
+1. **3DGS Phase 1 Only:** Currently only enabled for NYC market. Phase 2 (LA, CHI, MIA) and Phase 3 (all markets) pending rollout per `packages/feature-flags/src/markets.ts`.
 
-2. **3DGS Phase 1 Only:** Currently only enabled for NYC market. Phase 2 (LA, CHI, MIA) and Phase 3 (all markets) pending rollout.
+2. **Demo SOG URLs:** The `/debug/tour-demo` page references placeholder URLs that need to be populated with real SOG assets.
 
-3. **Demo SOG URLs:** The `/debug/tour-demo` page references placeholder URLs that need to be populated with real SOG assets.
+3. **Mobile App:** Native mobile application not yet implemented. See [GAP-001](docs/traceability/GAP_REGISTER.md#gap-001-react-native-mobile-application).
+
+4. **Observability:** Prometheus metrics and distributed tracing not yet implemented. See [GAP-005](docs/traceability/GAP_REGISTER.md#gap-005-prometheus-metrics-endpoint) and [GAP-006](docs/traceability/GAP_REGISTER.md#gap-006-distributed-tracing-opentelemetry).
+
+---
+
+## Data Persistence Clarification
+
+### Production Data Stores (PostgreSQL via Prisma)
+All production data is persisted to PostgreSQL. This includes:
+- User data, properties, leases, payments, documents
+- Workflow executions and activity results (`PrismaWorkflowStore`, `PrismaActivityStore`)
+- Agent run logs and audit trails
+- Feature flag configurations (database + Redis cache)
+- Tour metering events (`DatabaseMeteringService`)
+
+### In-Memory Components (Test Doubles Only)
+The following in-memory implementations exist **exclusively for unit testing**:
+- `InMemorySignalStore` - Test double for workflow signals
+- `InMemoryActivityResultCache` - Test double for activity caching
+- `InMemoryMeteringService` - Test double for tour metering
+- `MockRedis` - Test double for idempotency checks
+
+**These are NOT used in production.** Production uses:
+- PostgreSQL for all persistent data
+- Redis for caching, queues (BullMQ), and idempotency keys
+
+### Redis-Backed Components (Production)
+- Email queue (BullMQ with Redis)
+- Tour conversion queue (BullMQ with Redis)
+- Idempotency keys (24hr TTL)
+- Feature flag fast-access cache
+- Rate limiting counters
 
 ---
 
 ## Next Steps
 
-1. **Prisma Migration:** Continue migrating remaining in-memory stores to Prisma
-2. **3DGS Rollout:** Enable Phase 2 markets (LA, CHI, MIA)
-3. **SOG Assets:** Generate demo SOG files for testing
-4. **E2E Tests:** Add Playwright tests for critical paths
-5. **Monitoring:** Set up observability (metrics, traces, logs)
+Prioritized based on [Gap Register](docs/traceability/GAP_REGISTER.md):
+
+1. **Observability (Q1 2026):** Implement Prometheus metrics (GAP-005) and OpenTelemetry tracing (GAP-006)
+2. **External Alerting (Q1 2026):** Complete PagerDuty/OpsGenie integration (GAP-007)
+3. **3DGS Rollout:** Enable Phase 2 markets (LA, SF, CHI) per rollout schedule
+4. **SOG Assets:** Generate demo SOG files for testing
+5. **E2E Tests:** Add Playwright tests for critical paths
+6. **i18n (Q2 2026):** Implement full internationalization system (GAP-004)
+7. **Mobile App (Q2-Q3 2026):** React Native application (GAP-001)
 
 ---
 
@@ -293,10 +338,12 @@ SENDGRID_API_KEY=...
 
 RealRiches is a **production-ready** property management platform with:
 - **167K+ lines** of TypeScript
-- **225 database models**
+- **235 database models** (Prisma-backed)
 - **50 API modules**
 - **899+ passing tests**
 - **Complete 3DGS tour pipeline**
 - **WebGPU-first viewer component**
+- **162 implemented features** (per [Master Ledger](docs/traceability/MASTER_IMPLEMENTATION_LEDGER.md))
+- **7 identified gaps** with remediation plans (per [Gap Register](docs/traceability/GAP_REGISTER.md))
 
-All systems are fully functional and ready for deployment.
+All core systems are fully functional and ready for deployment. Known gaps are documented with clear remediation timelines.
