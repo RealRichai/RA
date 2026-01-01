@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { metricsRoutes } from '../plugins/metrics';
 
 import { activityRoutes } from './activity/routes';
+import { threeDGSControlAdminRoutes } from './admin/3dgs-control';
 import { apiKeyAdminRoutes } from './admin/api-keys';
 import { auditLogRoutes } from './admin/audit-logs';
 import { bulkOperationsRoutes } from './admin/bulk-operations';
@@ -16,7 +17,6 @@ import { partnerRevenueRoutes } from './admin/partner-revenue';
 import { rateLimitAdminRoutes } from './admin/rate-limits';
 import { roleManagementRoutes } from './admin/roles';
 import { systemSettingsAdminRoutes } from './admin/system-settings';
-import { threeDGSControlAdminRoutes } from './admin/3dgs-control';
 import { webhookAdminRoutes } from './admin/webhooks';
 import { aiRoutes } from './ai/routes';
 import { amenityRoutes } from './amenities/routes';
