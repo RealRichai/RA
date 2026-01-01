@@ -171,3 +171,71 @@ export interface TourDeliveryConfig {
 }
 
 export const DEFAULT_SIGNED_URL_TTL = 3600; // 1 hour
+
+// =============================================================================
+// Plan-Based TTL Configuration (RR-ENG-UPDATE-2026-002)
+// =============================================================================
+
+/**
+ * Signed URL TTL by user plan tier.
+ * Free tier: 15 minutes (900s) - encourages upgrade, limits abuse
+ * Pro tier: 1 hour (3600s) - standard access
+ * Enterprise tier: 2 hours (7200s) - extended sessions for large portfolios
+ */
+export const SIGNED_URL_TTL_BY_PLAN = {
+  free: 900,        // 15 minutes
+  pro: 3600,        // 1 hour
+  enterprise: 7200, // 2 hours
+} as const;
+
+export type PlanTier = keyof typeof SIGNED_URL_TTL_BY_PLAN;
+
+/**
+ * Get signed URL TTL for a given plan
+ * Falls back to free tier TTL for unknown plans
+ */
+export function getSignedUrlTtlForPlan(plan: string): number {
+  return SIGNED_URL_TTL_BY_PLAN[plan as PlanTier] ?? SIGNED_URL_TTL_BY_PLAN.free;
+}
+
+// =============================================================================
+// Enhanced Metering Types (RR-ENG-UPDATE-2026-002)
+// =============================================================================
+
+/** Extended metering event types including conversions */
+export type ExtendedMeteringEventType =
+  | 'view_start'
+  | 'view_progress'
+  | 'view_complete'
+  | 'view_error'
+  | 'conversion_triggered';
+
+export interface ConversionEvent {
+  sessionId: string;
+  tourAssetId: string;
+  userId: string;
+  market: string;
+  conversionType: 'lead_form' | 'schedule_tour' | 'contact_agent' | 'apply_now';
+  timestamp: Date;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MeteringService {
+  /** Start a new viewing session */
+  startSession(request: TourAccessRequest): Promise<TourViewSession>;
+
+  /** Record progress during viewing */
+  recordProgress(sessionId: string, durationMs: number, viewPercentage: number): Promise<void>;
+
+  /** Complete a viewing session */
+  completeSession(sessionId: string): Promise<void>;
+
+  /** Record an error during viewing */
+  recordError(sessionId: string, error: Error): Promise<void>;
+
+  /** Record a conversion event (new for unit economics) */
+  recordConversion(event: ConversionEvent): Promise<void>;
+
+  /** Get session by ID */
+  getSession(sessionId: string): Promise<TourViewSession | null>;
+}

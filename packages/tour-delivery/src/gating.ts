@@ -3,6 +3,9 @@
  *
  * Enforces market + plan gating with deny-by-default policy.
  * Uses feature flags for dynamic configuration.
+ * Integrates kill switch for emergency market disabling.
+ *
+ * @see RR-ENG-UPDATE-2026-002 - Kill switch integration
  */
 
 import type { GatingConfig, TourAccessRequest } from './types';
@@ -10,9 +13,26 @@ import { DEFAULT_GATING_CONFIG } from './types';
 
 export interface GatingResult {
   allowed: boolean;
-  reason?: 'market_not_enabled' | 'plan_not_eligible';
+  reason?: 'market_not_enabled' | 'plan_not_eligible' | 'market_disabled';
   market: string;
   plan: string;
+  /** True if kill switch is active for this market */
+  killSwitchActive?: boolean;
+  /** Kill switch ID if blocked by kill switch */
+  killSwitchId?: string;
+  /** Kill switch reason if blocked */
+  killSwitchReason?: string;
+}
+
+/**
+ * Kill switch check interface
+ * Allows injection of agent-governance KillSwitchManager
+ */
+export interface KillSwitchChecker {
+  isBlocked(context: {
+    market?: string;
+    toolName?: string;
+  }): { blocked: boolean; reason?: string; killSwitchId?: string };
 }
 
 export interface GatingService {
@@ -33,28 +53,58 @@ export interface GatingService {
 }
 
 /**
- * Feature flag-based gating service
+ * Feature flag-based gating service with kill switch integration
  */
 export class FeatureFlagGatingService implements GatingService {
   private config: GatingConfig;
   private featureFlagService?: {
     isEnabled: (flag: string, context?: Record<string, string>) => Promise<boolean>;
   };
+  private killSwitchChecker?: KillSwitchChecker;
 
   constructor(
     config: Partial<GatingConfig> = {},
     featureFlagService?: {
       isEnabled: (flag: string, context?: Record<string, string>) => Promise<boolean>;
-    }
+    },
+    killSwitchChecker?: KillSwitchChecker
   ) {
     this.config = { ...DEFAULT_GATING_CONFIG, ...config };
     this.featureFlagService = featureFlagService;
+    this.killSwitchChecker = killSwitchChecker;
+  }
+
+  /**
+   * Set the kill switch checker (for late binding)
+   */
+  setKillSwitchChecker(checker: KillSwitchChecker): void {
+    this.killSwitchChecker = checker;
   }
 
   async checkAccess(request: TourAccessRequest): Promise<GatingResult> {
     const { market, plan = 'free' } = request;
 
-    // Check market first (deny by default)
+    // Check kill switch FIRST (emergency override - RR-ENG-UPDATE-2026-002)
+    if (this.killSwitchChecker) {
+      const killSwitchCheck = this.killSwitchChecker.isBlocked({
+        market,
+        toolName: '3dgs_tours',
+      });
+
+      if (killSwitchCheck.blocked) {
+        return {
+          allowed: false,
+          reason: 'market_disabled',
+          market,
+          plan,
+          killSwitchActive: true,
+          killSwitchId: killSwitchCheck.killSwitchId,
+          killSwitchReason: killSwitchCheck.reason,
+        };
+      }
+    }
+
+    // Check market (deny by default)
     const marketEnabled = await this.isMarketEnabled(market);
     if (!marketEnabled) {
       return {
@@ -139,9 +189,10 @@ export function createGatingService(
   config?: Partial<GatingConfig>,
   featureFlagService?: {
     isEnabled: (flag: string, context?: Record<string, string>) => Promise<boolean>;
-  }
+  },
+  killSwitchChecker?: KillSwitchChecker
 ): GatingService {
-  return new FeatureFlagGatingService(config, featureFlagService);
+  return new FeatureFlagGatingService(config, featureFlagService, killSwitchChecker);
 }
 
 /**

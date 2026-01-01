@@ -2,8 +2,19 @@ import { Job, Worker, Queue } from 'bullmq';
 import IORedis from 'ioredis';
 
 import { TourConversionService } from './service';
-import type { ConversionJobData, ConversionResult, WorkerConfig } from './types';
-import { ConversionJobDataSchema, DEFAULT_WORKER_CONFIG } from './types';
+import type {
+  ConversionJobData,
+  ConversionResult,
+  WorkerConfig,
+  BackpressureConfig,
+  BackpressureStatus,
+} from './types';
+import {
+  ConversionJobDataSchema,
+  DEFAULT_WORKER_CONFIG,
+  DEFAULT_BACKPRESSURE_CONFIG,
+  BackpressureError,
+} from './types';
 
 // =============================================================================
 // Queue Setup
@@ -12,6 +23,142 @@ import { ConversionJobDataSchema, DEFAULT_WORKER_CONFIG } from './types';
 let queue: Queue<ConversionJobData, ConversionResult> | null = null;
 let worker: Worker<ConversionJobData, ConversionResult> | null = null;
 let connection: IORedis | null = null;
+
+// =============================================================================
+// Backpressure Control (RR-ENG-UPDATE-2026-002)
+// =============================================================================
+
+/**
+ * Simple circuit breaker implementation for queue operations
+ */
+class QueueCircuitBreaker {
+  private failures = 0;
+  private lastFailureTime: number | null = null;
+  private state: 'closed' | 'open' | 'half-open' = 'closed';
+
+  constructor(
+    private readonly threshold: number,
+    private readonly resetTimeout: number
+  ) {}
+
+  recordSuccess(): void {
+    if (this.state === 'half-open') {
+      this.reset();
+    }
+  }
+
+  recordFailure(): void {
+    this.failures++;
+    this.lastFailureTime = Date.now();
+
+    if (this.failures >= this.threshold) {
+      this.state = 'open';
+      console.warn(`[TourConversion] Circuit breaker opened after ${this.failures} failures`);
+    }
+  }
+
+  canExecute(): boolean {
+    if (this.state === 'closed') {
+      return true;
+    }
+
+    if (this.state === 'open') {
+      const now = Date.now();
+      if (this.lastFailureTime && now - this.lastFailureTime >= this.resetTimeout) {
+        this.state = 'half-open';
+        console.info('[TourConversion] Circuit breaker entering half-open state');
+        return true;
+      }
+      return false;
+    }
+
+    // half-open: allow one request through
+    return true;
+  }
+
+  getState(): 'closed' | 'open' | 'half-open' {
+    // Check if we should transition from open to half-open
+    if (this.state === 'open' && this.lastFailureTime) {
+      const now = Date.now();
+      if (now - this.lastFailureTime >= this.resetTimeout) {
+        this.state = 'half-open';
+      }
+    }
+    return this.state;
+  }
+
+  private reset(): void {
+    this.failures = 0;
+    this.lastFailureTime = null;
+    this.state = 'closed';
+    console.info('[TourConversion] Circuit breaker reset');
+  }
+}
+
+let backpressureConfig: BackpressureConfig = DEFAULT_BACKPRESSURE_CONFIG;
+let circuitBreaker: QueueCircuitBreaker | null = null;
+
+/**
+ * Initialize backpressure control
+ */
+export function initBackpressure(config: Partial<BackpressureConfig> = {}): void {
+  backpressureConfig = { ...DEFAULT_BACKPRESSURE_CONFIG, ...config };
+  circuitBreaker = new QueueCircuitBreaker(
+    backpressureConfig.circuitBreakerThreshold,
+    backpressureConfig.circuitBreakerResetMs
+  );
+}
+
+/**
+ * Get current backpressure status
+ */
+export async function getBackpressureStatus(): Promise<BackpressureStatus> {
+  const q = getConversionQueue();
+  const [waiting, active] = await Promise.all([
+    q.getWaitingCount(),
+    q.getActiveCount(),
+  ]);
+
+  const queueDepth = waiting + active;
+  const utilizationPercent = Math.round((queueDepth / backpressureConfig.maxPendingJobs) * 100);
+  const circuitState = circuitBreaker?.getState() ?? 'closed';
+
+  let acceptingJobs = true;
+  let rejectionReason: 'queue_full' | 'circuit_open' | undefined;
+
+  if (backpressureConfig.enabled) {
+    if (circuitState === 'open') {
+      acceptingJobs = false;
+      rejectionReason = 'circuit_open';
+    } else if (queueDepth >= backpressureConfig.maxPendingJobs) {
+      acceptingJobs = false;
+      rejectionReason = 'queue_full';
+    }
+  }
+
+  return {
+    circuitBreakerState: circuitState,
+    queueDepth,
+    maxPendingJobs: backpressureConfig.maxPendingJobs,
+    utilizationPercent: Math.min(utilizationPercent, 100),
+    acceptingJobs,
+    rejectionReason,
+  };
+}
+
+/**
+ * Record a successful job completion for circuit breaker
+ */
+export function recordJobSuccess(): void {
+  circuitBreaker?.recordSuccess();
+}
+
+/**
+ * Record a job failure for circuit breaker
+ */
+export function recordJobFailure(): void {
+  circuitBreaker?.recordFailure();
+}
 
 /**
  * Initialize the Redis connection
@@ -56,6 +203,8 @@ export function getConversionQueue(
 
 /**
  * Add a conversion job to the queue
+ *
+ * @throws {BackpressureError} if queue is at capacity or circuit breaker is open
  */
 export async function enqueueConversionJob(
   data: ConversionJobData,
@@ -63,8 +212,30 @@ export async function enqueueConversionJob(
     priority?: number;
     delay?: number;
     jobId?: string;
+    /** Skip backpressure check (use with caution) */
+    bypassBackpressure?: boolean;
   }
 ): Promise<Job<ConversionJobData, ConversionResult>> {
+  // Initialize circuit breaker if not done
+  if (!circuitBreaker) {
+    initBackpressure();
+  }
+
+  // Check backpressure status
+  if (backpressureConfig.enabled && !options?.bypassBackpressure) {
+    const status = await getBackpressureStatus();
+
+    if (!status.acceptingJobs) {
+      const reason = status.rejectionReason!;
+      const message = reason === 'circuit_open'
+        ? 'Tour conversion is temporarily unavailable due to high failure rate'
+        : `Tour conversion queue is at capacity (${status.queueDepth}/${status.maxPendingJobs} jobs)`;
+
+      console.warn(`[TourConversion] Job rejected: ${message}`);
+      throw new BackpressureError(message, reason, status);
+    }
+  }
+
   const q = getConversionQueue();
 
   // Validate job data
@@ -157,10 +328,19 @@ export function startWorker(
       `[TourConversion] Job ${job.id} completed:`,
       result.success ? 'SUCCESS' : 'FAILED'
     );
+    // Record success for circuit breaker
+    if (result.success) {
+      recordJobSuccess();
+    } else {
+      // Job completed but with error (non-retryable failure)
+      recordJobFailure();
+    }
   });
 
   worker.on('failed', (job, err) => {
     console.error(`[TourConversion] Job ${job?.id} failed:`, err.message);
+    // Record failure for circuit breaker
+    recordJobFailure();
   });
 
   worker.on('error', (err) => {

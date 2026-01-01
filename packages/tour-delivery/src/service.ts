@@ -18,7 +18,12 @@ import type {
   TourAccessResult,
   GatingConfig,
 } from './types';
-import { DEFAULT_SIGNED_URL_TTL, TourAccessRequestSchema } from './types';
+import {
+  DEFAULT_SIGNED_URL_TTL,
+  TourAccessRequestSchema,
+  getSignedUrlTtlForPlan,
+  SIGNED_URL_TTL_BY_PLAN,
+} from './types';
 
 export interface TourDeliveryServiceOptions {
   /** Storage provider for PLY files (source of truth) */
@@ -29,10 +34,20 @@ export interface TourDeliveryServiceOptions {
   gatingService?: GatingService;
   /** Metering service for usage tracking */
   meteringService?: MeteringService;
-  /** Signed URL TTL in seconds */
+  /**
+   * Signed URL TTL in seconds (default fallback)
+   * @deprecated Use usePlanBasedTtl instead for per-plan TTL
+   */
   signedUrlTtl?: number;
   /** Whether metering is enabled */
   enableMetering?: boolean;
+  /**
+   * Use plan-based TTL for signed URLs (RR-ENG-UPDATE-2026-002)
+   * - free: 15 minutes
+   * - pro: 1 hour
+   * - enterprise: 2 hours
+   */
+  usePlanBasedTtl?: boolean;
 }
 
 export class TourDeliveryService {
@@ -42,6 +57,7 @@ export class TourDeliveryService {
   private meteringService: MeteringService;
   private signedUrlTtl: number;
   private enableMetering: boolean;
+  private usePlanBasedTtl: boolean;
 
   constructor(options: TourDeliveryServiceOptions) {
     this.plyStorage = options.plyStorage;
@@ -50,6 +66,8 @@ export class TourDeliveryService {
     this.meteringService = options.meteringService ?? createMeteringService();
     this.signedUrlTtl = options.signedUrlTtl ?? DEFAULT_SIGNED_URL_TTL;
     this.enableMetering = options.enableMetering ?? true;
+    // Default to plan-based TTL (RR-ENG-UPDATE-2026-002)
+    this.usePlanBasedTtl = options.usePlanBasedTtl ?? true;
   }
 
   /**
@@ -87,10 +105,15 @@ export class TourDeliveryService {
       };
     }
 
+    // Determine TTL based on plan (RR-ENG-UPDATE-2026-002)
+    const ttl = this.usePlanBasedTtl
+      ? getSignedUrlTtlForPlan(validated.plan)
+      : this.signedUrlTtl;
+
     // Generate signed URL
     const signedUrl = await this.sogStorage.getSignedReadUrl({
       key: sogKey,
-      expiresIn: this.signedUrlTtl,
+      expiresIn: ttl,
       contentDisposition: 'inline',
     });
 

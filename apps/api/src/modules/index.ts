@@ -16,6 +16,7 @@ import { partnerRevenueRoutes } from './admin/partner-revenue';
 import { rateLimitAdminRoutes } from './admin/rate-limits';
 import { roleManagementRoutes } from './admin/roles';
 import { systemSettingsAdminRoutes } from './admin/system-settings';
+import { threeDGSControlAdminRoutes } from './admin/3dgs-control';
 import { webhookAdminRoutes } from './admin/webhooks';
 import { aiRoutes } from './ai/routes';
 import { amenityRoutes } from './amenities/routes';
@@ -166,6 +167,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(dataExportRoutes, { prefix: '/admin/exports' });
       await api.register(roleManagementRoutes, { prefix: '/admin/roles' });
       await api.register(bulkOperationsRoutes, { prefix: '/admin/bulk' });
+      await api.register(threeDGSControlAdminRoutes, { prefix: '/admin/3dgs' });
       await api.register(partnerRevenueRoutes);
       await api.register(evidenceRoutes);
     },

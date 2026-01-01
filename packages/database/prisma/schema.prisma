@@ -8177,6 +8177,7 @@ model TourAsset {
   // Relations
   listing           Listing         @relation(fields: [listingId], references: [id], onDelete: Cascade)
   conversionJobs    TourConversionJob[]
+  viewSessions      TourViewSession[]
 
   @@index([listingId])
   @@index([market])
@@ -8216,6 +8217,104 @@ model TourConversionJob {
   @@index([status])
   @@index([queuedAt])
   @@map("tour_conversion_jobs")
+}
+
+// =============================================================================
+// 3DGS Tour Metering (RR-ENG-UPDATE-2026-002)
+// =============================================================================
+
+enum TourViewSessionStatus {
+  active
+  completed
+  error
+  abandoned
+}
+
+// TourViewSession - Tracks individual tour viewing sessions for unit economics
+model TourViewSession {
+  id              String                 @id @default(uuid()) @db.Uuid
+  tourAssetId     String                 @map("tour_asset_id") @db.Uuid
+  userId          String                 @map("user_id") @db.Uuid
+  market          String
+  plan            String
+
+  // Timing metrics
+  startedAt       DateTime               @default(now()) @map("started_at")
+  lastActivityAt  DateTime               @default(now()) @map("last_activity_at")
+  completedAt     DateTime?              @map("completed_at")
+  durationMs      Int                    @default(0) @map("duration_ms")
+
+  // View metrics
+  viewPercentage  Int                    @default(0) @map("view_percentage")
+  status          TourViewSessionStatus  @default(active)
+
+  // Error tracking
+  errorCode       String?                @map("error_code")
+  errorMessage    String?                @map("error_message")
+
+  // Relations
+  tourAsset       TourAsset              @relation(fields: [tourAssetId], references: [id], onDelete: Cascade)
+  events          TourMeteringEvent[]
+
+  @@index([tourAssetId])
+  @@index([userId])
+  @@index([market])
+  @@index([startedAt])
+  @@index([status])
+  @@map("tour_view_sessions")
+}
+
+// TourMeteringEvent - Individual metering events for audit trail
+model TourMeteringEvent {
+  id              String           @id @default(uuid()) @db.Uuid
+  sessionId       String           @map("session_id") @db.Uuid
+  tourAssetId     String           @map("tour_asset_id") @db.Uuid
+  userId          String           @map("user_id") @db.Uuid
+  market          String
+  eventType       String           @map("event_type") // view_start, view_progress, view_complete, view_error, conversion_triggered
+  timestamp       DateTime         @default(now())
+  metadata        Json?
+
+  // Relations
+  session         TourViewSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([tourAssetId])
+  @@index([eventType])
+  @@index([timestamp])
+  @@map("tour_metering_events")
+}
+
+// TourMeteringDaily - Aggregated daily metrics for unit economics reporting
+model TourMeteringDaily {
+  id                   String    @id @default(uuid()) @db.Uuid
+  date                 DateTime  @db.Date
+  market               String
+  plan                 String
+
+  // View counts
+  totalViews           Int       @default(0) @map("total_views")
+  uniqueViewers        Int       @default(0) @map("unique_viewers")
+  completedViews       Int       @default(0) @map("completed_views")
+
+  // Duration tracking (minutes streamed)
+  totalMinutesStreamed Float     @default(0) @map("total_minutes_streamed")
+  avgSessionDurationMs Int       @default(0) @map("avg_session_duration_ms")
+
+  // Conversion tracking
+  conversionsTriggered Int       @default(0) @map("conversions_triggered")
+
+  // Cost estimation
+  estimatedEgressGb    Float     @default(0) @map("estimated_egress_gb")
+  estimatedCostUsd     Float     @default(0) @map("estimated_cost_usd")
+
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@unique([date, market, plan])
+  @@index([date])
+  @@index([market])
+  @@map("tour_metering_daily")
 }
 
 // =============================================================================

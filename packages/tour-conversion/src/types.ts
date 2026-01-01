@@ -171,3 +171,61 @@ export const QA_THRESHOLDS = {
   MAX_PHASH_DISTANCE: 10,
   MIN_FRAMES_PASSED_RATIO: 0.8,
 };
+
+// =============================================================================
+// Backpressure Configuration (RR-ENG-UPDATE-2026-002)
+// =============================================================================
+
+/**
+ * Configuration for queue backpressure control.
+ * Prevents queue overflow and enables graceful degradation under load.
+ */
+export interface BackpressureConfig {
+  /** Maximum pending jobs before rejecting new submissions (default: 100) */
+  maxPendingJobs: number;
+  /** Number of consecutive failures before circuit breaker opens (default: 5) */
+  circuitBreakerThreshold: number;
+  /** Time in ms to wait before trying again after circuit opens (default: 60000) */
+  circuitBreakerResetMs: number;
+  /** Whether backpressure is enabled (default: true) */
+  enabled: boolean;
+}
+
+export const DEFAULT_BACKPRESSURE_CONFIG: BackpressureConfig = {
+  maxPendingJobs: 100,
+  circuitBreakerThreshold: 5,
+  circuitBreakerResetMs: 60000,
+  enabled: true,
+};
+
+/**
+ * Backpressure status for monitoring
+ */
+export interface BackpressureStatus {
+  /** Current circuit breaker state */
+  circuitBreakerState: 'closed' | 'open' | 'half-open';
+  /** Current queue depth (waiting + active) */
+  queueDepth: number;
+  /** Maximum allowed pending jobs */
+  maxPendingJobs: number;
+  /** Utilization percentage (0-100) */
+  utilizationPercent: number;
+  /** Whether new jobs are being accepted */
+  acceptingJobs: boolean;
+  /** Reason for rejection if not accepting */
+  rejectionReason?: 'queue_full' | 'circuit_open';
+}
+
+/**
+ * Error thrown when queue is at capacity
+ */
+export class BackpressureError extends Error {
+  constructor(
+    message: string,
+    public readonly reason: 'queue_full' | 'circuit_open',
+    public readonly status: BackpressureStatus
+  ) {
+    super(message);
+    this.name = 'BackpressureError';
+  }
+}
