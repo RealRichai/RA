@@ -22,7 +22,6 @@ import {
   DEFAULT_SIGNED_URL_TTL,
   TourAccessRequestSchema,
   getSignedUrlTtlForPlan,
-  SIGNED_URL_TTL_BY_PLAN,
 } from './types';
 
 export interface TourDeliveryServiceOptions {
@@ -120,12 +119,14 @@ export class TourDeliveryService {
     // Start metering session
     let sessionId = validated.sessionId;
     if (this.enableMetering && !sessionId) {
-      const session = this.meteringService.startSession(
+      const sessionResult = this.meteringService.startSession(
         validated.tourAssetId,
         validated.userId,
         validated.market,
         validated.plan
       );
+      // Handle both sync and async implementations
+      const session = sessionResult instanceof Promise ? await sessionResult : sessionResult;
       sessionId = session.id;
     }
 
@@ -142,7 +143,7 @@ export class TourDeliveryService {
    */
   recordProgress(sessionId: string, viewPercentage: number): void {
     if (this.enableMetering) {
-      this.meteringService.recordProgress(sessionId, viewPercentage);
+      void this.meteringService.recordProgress(sessionId, viewPercentage);
     }
   }
 
@@ -151,7 +152,7 @@ export class TourDeliveryService {
    */
   completeSession(sessionId: string): void {
     if (this.enableMetering) {
-      this.meteringService.completeSession(sessionId);
+      void this.meteringService.completeSession(sessionId);
     }
   }
 
@@ -160,7 +161,7 @@ export class TourDeliveryService {
    */
   recordError(sessionId: string, error: Error): void {
     if (this.enableMetering) {
-      this.meteringService.recordError(sessionId, error);
+      void this.meteringService.recordError(sessionId, error);
     }
   }
 
