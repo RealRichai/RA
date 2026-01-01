@@ -77,6 +77,8 @@ realriches/
 | `pnpm db:push` | Push schema to database |
 | `pnpm db:seed` | Seed demo data |
 | `pnpm db:studio` | Open Prisma Studio |
+| `./scripts/export_repo.sh` | Export clean zip (excludes node_modules, .env, coverage) |
+| `./scripts/policy_scan.sh` | Check for HUMAN_IMPLEMENTATION_REQUIRED |
 
 ## Architecture
 
