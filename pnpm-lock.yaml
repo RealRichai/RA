@@ -679,9 +679,6 @@ importers:
 
   packages/workflows:
     dependencies:
-      '@prisma/client':
-        specifier: ^5.8.0
-        version: 5.22.0(prisma@5.22.0)
       '@realriches/config':
         specifier: workspace:*
         version: link:../config
