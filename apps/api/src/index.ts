@@ -5,6 +5,7 @@ import Fastify from 'fastify';
 
 import { setupGracefulShutdown } from './lib/shutdown';
 import { registerModules } from './modules';
+import { initializePersistence } from './persistence';
 import { registerPlugins } from './plugins';
 
 async function main() {
@@ -39,6 +40,13 @@ async function main() {
       throw new Error('Failed to connect to database');
     }
     logger.info('Database connected successfully');
+
+    // Initialize persistence layer (composition root)
+    // This wires up all stores based on NODE_ENV
+    // Production: Prisma/PostgreSQL + Redis
+    // Development: Prisma/PostgreSQL + Redis
+    // Test: In-memory (when no DB available)
+    initializePersistence();
 
     // Register plugins
     await registerPlugins(app);

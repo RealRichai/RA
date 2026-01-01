@@ -33,6 +33,8 @@
     "@realriches/document-storage": "workspace:*",
     "@realriches/email-service": "workspace:*",
     "@realriches/revenue-engine": "workspace:*",
+    "@realriches/tour-conversion": "workspace:*",
+    "@realriches/tour-delivery": "workspace:*",
     "@realriches/types": "workspace:*",
     "@realriches/utils": "workspace:*",
     "argon2": "^0.31.2",

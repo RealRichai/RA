@@ -446,3 +446,83 @@ jobs:
           echo "  ✓ Gap Register"
           echo "  ✓ Cross-references"
           echo ""
+
+  persistence-guard:
+    name: Persistence Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Verify no InMemory imports in production code
+        run: |
+          echo "Checking for forbidden InMemory imports in production code..."
+
+          # Check for direct InMemory class instantiation in production routes
+          if grep -r "new InMemory" apps/api/src/modules/ 2>/dev/null; then
+            echo "::error::PERSISTENCE VIOLATION: Found 'new InMemory*' in production routes!"
+            echo "Use the persistence composition root (apps/api/src/persistence) instead."
+            exit 1
+          fi
+          echo "✓ No InMemory instantiation in routes"
+
+          # Check for InMemory imports in production routes
+          if grep -r "InMemoryAttributionStore\|InMemoryMeteringService" apps/api/src/modules/ 2>/dev/null; then
+            echo "::error::PERSISTENCE VIOLATION: Found InMemory imports in production routes!"
+            echo "Use getAttributionStore()/getMeteringService() from persistence composition root."
+            exit 1
+          fi
+          echo "✓ No InMemory imports in routes"
+
+          # Verify composition root exists
+          if [ ! -f "apps/api/src/persistence/index.ts" ]; then
+            echo "::error::PERSISTENCE VIOLATION: Composition root not found!"
+            exit 1
+          fi
+          echo "✓ Composition root exists"
+
+          # Verify composition root uses dynamic imports for test stores
+          if grep -E "^import.*InMemory" apps/api/src/persistence/index.ts 2>/dev/null; then
+            echo "::error::PERSISTENCE VIOLATION: Composition root has static InMemory imports!"
+            echo "InMemory stores must be dynamically imported in test mode only."
+            exit 1
+          fi
+          echo "✓ Composition root uses dynamic imports for InMemory stores"
+
+          echo ""
+          echo "✅ Persistence guard check passed!"
+
+      - name: Run persistence guard tests
+        run: pnpm --filter @realriches/api test -- --run persistence-guard.test.ts
+        env:
+          NODE_ENV: test
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "  PERSISTENCE GUARD COMPLETE"
+          echo "=========================================="
+          echo ""
+          echo "Verified:"
+          echo "  ✓ No InMemory stores in production code"
+          echo "  ✓ Composition root properly configured"
+          echo "  ✓ Dynamic imports for test-only stores"
+          echo ""

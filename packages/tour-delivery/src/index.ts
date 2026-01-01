@@ -42,7 +42,9 @@ export {
 // Metering
 export {
   InMemoryMeteringService,
+  DatabaseMeteringService,
   createMeteringService,
+  createDatabaseMeteringService,
   noopMeteringHooks,
   type MeteringService,
 } from './metering';

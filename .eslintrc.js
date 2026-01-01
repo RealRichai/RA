@@ -49,6 +49,48 @@ module.exports = {
     'no-debugger': 'error',
     'prefer-const': 'error',
     'no-var': 'error',
+
+    // Persistence Guard: Block InMemory* imports from production code
+    // InMemory stores are only allowed in test files (excluded via ignorePatterns)
+    // and in the composition root (apps/api/src/persistence/index.ts via dynamic import)
+    'no-restricted-imports': [
+      'error',
+      {
+        patterns: [
+          {
+            group: ['**/InMemory*', '*InMemoryAttributionStore*', '*InMemoryMeteringService*'],
+            message: 'InMemory stores cannot be imported in production code. Use the persistence composition root (apps/api/src/persistence) instead.',
+          },
+        ],
+        paths: [
+          {
+            name: '@realriches/revenue-engine',
+            importNames: ['InMemoryAttributionStore'],
+            message: 'Use getAttributionStore() from apps/api/src/persistence instead of InMemoryAttributionStore.',
+          },
+          {
+            name: '@realriches/tour-delivery',
+            importNames: ['InMemoryMeteringService', 'createMeteringService'],
+            message: 'Use getMeteringService() from apps/api/src/persistence instead of InMemoryMeteringService.',
+          },
+          {
+            name: '@realriches/workflows',
+            importNames: ['InMemoryActivityCache', 'InMemorySignalStore'],
+            message: 'InMemory workflow stores are for testing only. Use Redis-backed implementations in production.',
+          },
+          {
+            name: '@realriches/agent-governance',
+            importNames: ['InMemoryTaskQueue', 'InMemoryOutcomeRecorder', 'InMemoryGradingStore', 'InMemoryRecordingStorage', 'InMemoryAgentRunStore'],
+            message: 'InMemory agent stores are for testing only. Use database-backed implementations in production.',
+          },
+          {
+            name: '@realriches/email-service',
+            importNames: ['InMemoryNotificationLogger'],
+            message: 'InMemory notification logger is for testing only. Use database-backed implementation in production.',
+          },
+        ],
+      },
+    ],
   },
   ignorePatterns: [
     'node_modules/',

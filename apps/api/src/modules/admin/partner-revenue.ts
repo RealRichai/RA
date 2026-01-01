@@ -5,8 +5,6 @@
  */
 
 import {
-  AttributionService,
-  InMemoryAttributionStore,
   AttributionQuerySchema,
   RevenueDashboardQuerySchema,
   CreateAttributionSchema,
@@ -14,9 +12,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
-// Initialize with in-memory store (swap with Prisma store in production)
-const attributionStore = new InMemoryAttributionStore();
-const attributionService = new AttributionService({ store: attributionStore });
+import { getAttributionService } from '../../persistence';
 
 // ============================================================================
 // Schemas
@@ -100,7 +96,7 @@ export async function partnerRevenueRoutes(fastify: FastifyInstance) {
     },
     async (request, _reply) => {
       const query = RevenueDashboardQuerySchema.parse(request.query);
-      return attributionService.getDashboard(query);
+      return getAttributionService().getDashboard(query);
     }
   );
 
@@ -126,7 +122,7 @@ export async function partnerRevenueRoutes(fastify: FastifyInstance) {
     },
     async (request, _reply) => {
       const query = AttributionQuerySchema.parse(request.query);
-      return attributionService.queryAttributions(query);
+      return getAttributionService().queryAttributions(query);
     }
   );
 
@@ -146,7 +142,7 @@ export async function partnerRevenueRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const { id } = AttributionIdParamsSchema.parse(request.params);
-      const attribution = await attributionService.getAttribution(id);
+      const attribution = await getAttributionService().getAttribution(id);
 
       if (!attribution) {
         return reply.status(404).send({ error: 'Attribution not found' });
@@ -172,7 +168,7 @@ export async function partnerRevenueRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const input = CreateAttributionSchema.parse(request.body);
-      const attribution = await attributionService.createAttribution(input);
+      const attribution = await getAttributionService().createAttribution(input);
       return reply.status(201).send(attribution);
     }
   );
@@ -197,7 +193,7 @@ export async function partnerRevenueRoutes(fastify: FastifyInstance) {
       const { notes } = QualifyAttributionSchema.parse(request.body);
 
       try {
-        const attribution = await attributionService.qualifyAttribution(id, notes);
+        const attribution = await getAttributionService().qualifyAttribution(id, notes);
         return attribution;
       } catch (error) {
         return reply.status(404).send({ error: 'Attribution not found' });
@@ -225,7 +221,7 @@ export async function partnerRevenueRoutes(fastify: FastifyInstance) {
       const { realizedRevenue, ledgerTransactionId } = RealizeAttributionSchema.parse(request.body);
 
       try {
-        const attribution = await attributionService.realizeAttribution(
+        const attribution = await getAttributionService().realizeAttribution(
           id,
           realizedRevenue,
           ledgerTransactionId
@@ -257,7 +253,7 @@ export async function partnerRevenueRoutes(fastify: FastifyInstance) {
       const { reason } = FailAttributionSchema.parse(request.body);
 
       try {
-        const attribution = await attributionService.failAttribution(id, reason);
+        const attribution = await getAttributionService().failAttribution(id, reason);
         return attribution;
       } catch (error) {
         return reply.status(404).send({ error: 'Attribution not found' });
@@ -286,7 +282,7 @@ export async function partnerRevenueRoutes(fastify: FastifyInstance) {
       const { partnerId } = request.params as { partnerId: string };
       const query = AttributionQuerySchema.omit({ partnerId: true }).parse(request.query);
 
-      const attributions = await attributionService.getPartnerAttributions(partnerId, query);
+      const attributions = await getAttributionService().getPartnerAttributions(partnerId, query);
       return { attributions, total: attributions.length };
     }
   );
@@ -310,7 +306,7 @@ export async function partnerRevenueRoutes(fastify: FastifyInstance) {
     async (request, _reply) => {
       const { leaseId } = request.params as { leaseId: string };
 
-      const attributions = await attributionService.getLeaseAttributions(leaseId);
+      const attributions = await getAttributionService().getLeaseAttributions(leaseId);
       return { attributions, total: attributions.length };
     }
   );
@@ -347,7 +343,7 @@ export async function partnerRevenueRoutes(fastify: FastifyInstance) {
         fixedAmount?: number;
       };
 
-      const expectedCommission = attributionService.calculateExpectedCommission(
+      const expectedCommission = getAttributionService().calculateExpectedCommission(
         commissionType,
         transactionAmount,
         commissionRate,

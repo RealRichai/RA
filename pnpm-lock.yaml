@@ -93,6 +93,12 @@ importers:
       '@realriches/revenue-engine':
         specifier: workspace:*
         version: link:../../packages/revenue-engine
+      '@realriches/tour-conversion':
+        specifier: workspace:*
+        version: link:../../packages/tour-conversion
+      '@realriches/tour-delivery':
+        specifier: workspace:*
+        version: link:../../packages/tour-delivery
       '@realriches/types':
         specifier: workspace:*
         version: link:../../packages/types
