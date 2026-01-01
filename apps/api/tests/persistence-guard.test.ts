@@ -197,6 +197,10 @@ describe('InMemory Store Location Validation', () => {
     // - NOT in apps/api/src/modules/* (production routes)
 
     const { execSync } = await import('child_process');
+    const { resolve } = await import('path');
+
+    // Get project root (apps/api/tests -> apps/api -> apps -> project root)
+    const projectRoot = resolve(__dirname, '..', '..', '..');
 
     // Search for InMemory class definitions in production paths
     const productionPaths = [
@@ -204,11 +208,11 @@ describe('InMemory Store Location Validation', () => {
       'apps/api/src/modules',
     ];
 
-    for (const path of productionPaths) {
+    for (const searchPath of productionPaths) {
       try {
         const result = execSync(
-          `grep -r "class InMemory" ${path} 2>/dev/null || true`,
-          { encoding: 'utf-8', cwd: '/Users/nelsonolaya/realriches' }
+          `grep -r "class InMemory" ${searchPath} 2>/dev/null || true`,
+          { encoding: 'utf-8', cwd: projectRoot }
         );
 
         // Should not find InMemory class definitions in production code
@@ -221,9 +225,12 @@ describe('InMemory Store Location Validation', () => {
 
   it('should verify no InMemory imports in partner-revenue routes', async () => {
     const { readFileSync } = await import('fs');
-    const path = '/Users/nelsonolaya/realriches/apps/api/src/modules/admin/partner-revenue.ts';
+    const { resolve } = await import('path');
 
-    const content = readFileSync(path, 'utf-8');
+    // Use relative path from test file location
+    const filePath = resolve(__dirname, '..', 'src', 'modules', 'admin', 'partner-revenue.ts');
+
+    const content = readFileSync(filePath, 'utf-8');
 
     // Should not import InMemory stores directly
     expect(content).not.toContain('InMemoryAttributionStore');
