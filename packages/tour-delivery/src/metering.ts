@@ -7,7 +7,7 @@
  * @see RR-ENG-UPDATE-2026-002 - 3DGS Pipeline Economics
  */
 
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@realriches/database';
 
 import type {
   MeteringHooks,

@@ -77,7 +77,7 @@ export interface TourAccessResult {
   /** Whether access was granted */
   granted: boolean;
   /** Denial reason if not granted */
-  denialReason?: 'market_not_enabled' | 'plan_not_eligible' | 'asset_not_found' | 'asset_not_ready';
+  denialReason?: 'market_not_enabled' | 'plan_not_eligible' | 'asset_not_found' | 'asset_not_ready' | 'market_disabled';
   /** Signed URL for the SOG file (if granted) */
   sogUrl?: string;
   /** URL expiration (if granted) */
