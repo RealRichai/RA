@@ -1,4 +1,3 @@
-import type { Contact } from '../types/common';
 import type {
   InsurancePolicy,
   InsuranceProvider,
@@ -7,6 +6,7 @@ import type {
   PurchasePolicyRequest,
   QuotePolicyRequest,
 } from '../contracts/insurance';
+import type { Contact } from '../types/common';
 import type { ProviderError } from '../types/errors';
 import { createProviderError } from '../types/errors';
 import type { Result } from '../types/result';

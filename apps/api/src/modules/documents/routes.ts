@@ -8,6 +8,7 @@ import {
   type ACLContext,
   type EntityOwnership,
   type UploadRequest,
+  type UserRole,
   UploadRequestSchema,
 } from '@realriches/document-storage';
 import { generatePrefixedId, NotFoundError, ForbiddenError, ValidationError } from '@realriches/utils';
@@ -42,8 +43,6 @@ const GenerateDocumentSchema = z.object({
 // =============================================================================
 // Helper Functions
 // =============================================================================
-
-import type { UserRole } from '@realriches/document-storage';
 
 interface AuthenticatedUser {
   id: string;

@@ -140,8 +140,8 @@ export abstract class BaseMockProvider {
     this.latencyRange = options?.latencyRange ?? [50, 200];
   }
 
-  async healthCheck(): Promise<boolean> {
-    return true;
+  healthCheck(): Promise<boolean> {
+    return Promise.resolve(true);
   }
 
   protected async maybeDelay(): Promise<void> {
