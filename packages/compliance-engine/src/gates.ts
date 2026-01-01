@@ -20,7 +20,15 @@ import type {
   Violation,
   RecommendedFix,
   FCHAStage,
+  FCHAWorkflowState,
+  FCHATransitionEvidence,
 } from './types';
+import {
+  validateTransition,
+  validateBackgroundCheck,
+  type FCHATransitionRequest,
+  type FCHABackgroundCheckRequest,
+} from './fcha-state-machine';
 
 const POLICY_VERSION = '1.0.0';
 
@@ -432,6 +440,164 @@ export async function gateFCHABackgroundCheck(
     blockedReason: passed
       ? undefined
       : `Background check blocked: ${criticalViolations.map((v) => v.message).join('; ')}`,
+  };
+}
+
+// ============================================================================
+// Gate: FCHA Workflow State Transition (Enhanced)
+// ============================================================================
+
+export interface FCHAWorkflowTransitionInput {
+  applicationId: string;
+  marketId: string;
+  currentState: FCHAWorkflowState;
+  targetState: FCHAWorkflowState;
+  actorId: string;
+  actorType: 'system' | 'user' | 'agent';
+  conditionalOfferDetails?: {
+    unitId: string;
+    offerLetterDelivered: boolean;
+    deliveryMethod: 'email' | 'mail' | 'in_app' | 'hand_delivered';
+  };
+  backgroundCheckAuthorization?: {
+    authorizationSigned: boolean;
+    signedAt: string;
+  };
+  adverseInfoDetails?: {
+    adverseInfoFound: boolean;
+    adverseInfoSummary?: string;
+    noticeDelivered: boolean;
+  };
+  finalDecision?: {
+    decision: 'approved' | 'denied';
+    rationale: string;
+    article23AFactorsConsidered?: string[];
+  };
+  prequalificationResults?: {
+    incomeVerified: boolean;
+    creditCheckPassed: boolean;
+    rentalHistoryVerified: boolean;
+    employmentVerified: boolean;
+  };
+}
+
+export interface FCHAWorkflowGateResult extends GateResult {
+  evidence?: FCHATransitionEvidence;
+}
+
+export async function gateFCHAWorkflowTransition(
+  input: FCHAWorkflowTransitionInput
+): Promise<FCHAWorkflowGateResult> {
+  const marketPackId = getMarketPackIdFromMarket(input.marketId);
+  const pack = getMarketPack(marketPackId);
+  const checksPerformed: string[] = ['fcha_workflow'];
+  const timestamp = new Date().toISOString();
+
+  const transitionRequest: FCHATransitionRequest = {
+    applicationId: input.applicationId,
+    currentState: input.currentState,
+    targetState: input.targetState,
+    actorId: input.actorId,
+    actorType: input.actorType,
+    conditionalOfferDetails: input.conditionalOfferDetails,
+    backgroundCheckAuthorization: input.backgroundCheckAuthorization,
+    adverseInfoDetails: input.adverseInfoDetails,
+    finalDecision: input.finalDecision,
+    prequalificationResults: input.prequalificationResults,
+    timestamp,
+  };
+
+  const result = validateTransition(transitionRequest, pack);
+
+  const criticalViolations = result.violations.filter((v) => v.severity === 'critical');
+  const passed = criticalViolations.length === 0;
+
+  const decision: ComplianceDecision = {
+    passed,
+    violations: result.violations,
+    recommendedFixes: result.fixes,
+    policyVersion: POLICY_VERSION,
+    marketPack: pack.id,
+    marketPackVersion: getMarketPackVersion(pack),
+    checkedAt: timestamp,
+    checksPerformed,
+    metadata: {
+      applicationId: input.applicationId,
+      fromState: input.currentState,
+      toState: input.targetState,
+      action: 'fcha_workflow_transition',
+      transitionId: result.evidence?.transitionId,
+      fchaEnforced: pack.rules.fcha?.enabled ?? false,
+    },
+  };
+
+  return {
+    allowed: passed,
+    decision,
+    evidence: result.evidence,
+    blockedReason: passed
+      ? undefined
+      : `FCHA workflow transition blocked: ${criticalViolations.map((v) => v.message).join('; ')}`,
+  };
+}
+
+// ============================================================================
+// Gate: FCHA Criminal Background Check Request
+// ============================================================================
+
+export interface FCHACriminalCheckGateInput {
+  applicationId: string;
+  marketId: string;
+  currentState: FCHAWorkflowState;
+  checkType: string;
+  actorId: string;
+}
+
+export async function gateFCHACriminalCheck(
+  input: FCHACriminalCheckGateInput
+): Promise<GateResult> {
+  const marketPackId = getMarketPackIdFromMarket(input.marketId);
+  const pack = getMarketPack(marketPackId);
+  const checksPerformed: string[] = ['fcha_criminal_check'];
+  const timestamp = new Date().toISOString();
+
+  const checkRequest: FCHABackgroundCheckRequest = {
+    applicationId: input.applicationId,
+    currentState: input.currentState,
+    checkType: input.checkType,
+    actorId: input.actorId,
+    timestamp,
+  };
+
+  const result = validateBackgroundCheck(checkRequest, pack);
+
+  const criticalViolations = result.violations.filter((v) => v.severity === 'critical');
+  const passed = criticalViolations.length === 0;
+
+  const decision: ComplianceDecision = {
+    passed,
+    violations: result.violations,
+    recommendedFixes: result.fixes,
+    policyVersion: POLICY_VERSION,
+    marketPack: pack.id,
+    marketPackVersion: getMarketPackVersion(pack),
+    checkedAt: timestamp,
+    checksPerformed,
+    metadata: {
+      applicationId: input.applicationId,
+      currentState: input.currentState,
+      checkType: input.checkType,
+      action: 'fcha_criminal_check_request',
+      fchaEnforced: pack.rules.fcha?.enabled ?? false,
+    },
+  };
+
+  return {
+    allowed: passed,
+    decision,
+    blockedReason: passed
+      ? undefined
+      : result.blockedReason || `Criminal background check blocked: ${criticalViolations.map((v) => v.message).join('; ')}`,
   };
 }
 

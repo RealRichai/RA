@@ -150,7 +150,190 @@ flowchart TD
     style R fill:#ffd43b,color:#000
 ```
 
-## FCHA Stage Order Enforcement
+## NYC Fair Chance Housing Act (FCHA) Enforcement
+
+The Fair Chance Housing Act enforces a strict workflow for tenant screening, ensuring criminal background checks cannot occur before a conditional offer.
+
+### Workflow State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> PREQUALIFICATION
+    PREQUALIFICATION --> CONDITIONAL_OFFER: Pass non-criminal checks
+    PREQUALIFICATION --> DENIED: Fail prequalification
+
+    CONDITIONAL_OFFER --> BACKGROUND_CHECK_ALLOWED: Authorization signed
+    CONDITIONAL_OFFER --> DENIED: Withdraw
+
+    note right of BACKGROUND_CHECK_ALLOWED
+        Criminal checks NOW permitted
+    end note
+
+    BACKGROUND_CHECK_ALLOWED --> APPROVED: Clear check
+    BACKGROUND_CHECK_ALLOWED --> INDIVIDUALIZED_ASSESSMENT: Adverse info found
+    BACKGROUND_CHECK_ALLOWED --> DENIED: Immediate disqualifier
+
+    INDIVIDUALIZED_ASSESSMENT --> APPROVED: Article 23-A passed
+    INDIVIDUALIZED_ASSESSMENT --> DENIED: Article 23-A failed
+
+    APPROVED --> [*]
+    DENIED --> [*]
+```
+
+### Workflow States
+
+| State | Description | Criminal Checks |
+|-------|-------------|-----------------|
+| `PREQUALIFICATION` | Evaluate income, credit, rental history | **BLOCKED** |
+| `CONDITIONAL_OFFER` | Written offer issued, awaiting authorization | **BLOCKED** |
+| `BACKGROUND_CHECK_ALLOWED` | Authorization signed, checks permitted | **ALLOWED** |
+| `INDIVIDUALIZED_ASSESSMENT` | Adverse info found, Article 23-A review | **ALLOWED** |
+| `APPROVED` | Application approved | N/A |
+| `DENIED` | Application denied | N/A |
+
+### Usage
+
+```typescript
+import {
+  gateFCHAWorkflowTransition,
+  gateFCHACriminalCheck,
+} from '@realriches/compliance-engine';
+
+// 1. Transition from PREQUALIFICATION to CONDITIONAL_OFFER
+const step1 = await gateFCHAWorkflowTransition({
+  applicationId: 'app_123',
+  marketId: 'NYC',
+  currentState: 'PREQUALIFICATION',
+  targetState: 'CONDITIONAL_OFFER',
+  actorId: 'user_123',
+  actorType: 'user',
+  prequalificationResults: {
+    incomeVerified: true,
+    creditCheckPassed: true,
+    rentalHistoryVerified: true,
+    employmentVerified: true,
+  },
+  conditionalOfferDetails: {
+    unitId: 'unit_456',
+    offerLetterDelivered: true,
+    deliveryMethod: 'email',
+  },
+});
+
+// 2. Criminal check BLOCKED before BACKGROUND_CHECK_ALLOWED state
+const blockedCheck = await gateFCHACriminalCheck({
+  applicationId: 'app_123',
+  marketId: 'NYC',
+  currentState: 'CONDITIONAL_OFFER', // Still before authorization!
+  checkType: 'criminal_background_check',
+  actorId: 'user_123',
+});
+// blockedCheck.allowed = false
+// blockedCheck.blockedReason = "Criminal background check blocked: Application is in CONDITIONAL_OFFER state..."
+
+// 3. Transition to BACKGROUND_CHECK_ALLOWED
+const step2 = await gateFCHAWorkflowTransition({
+  applicationId: 'app_123',
+  marketId: 'NYC',
+  currentState: 'CONDITIONAL_OFFER',
+  targetState: 'BACKGROUND_CHECK_ALLOWED',
+  actorId: 'user_123',
+  actorType: 'user',
+  backgroundCheckAuthorization: {
+    authorizationSigned: true,
+    signedAt: new Date().toISOString(),
+  },
+});
+
+// 4. Now criminal check is ALLOWED
+const allowedCheck = await gateFCHACriminalCheck({
+  applicationId: 'app_123',
+  marketId: 'NYC',
+  currentState: 'BACKGROUND_CHECK_ALLOWED',
+  checkType: 'criminal_background_check',
+  actorId: 'user_123',
+});
+// allowedCheck.allowed = true
+```
+
+### Evidence and Audit Trail
+
+Every transition generates complete evidence for audit:
+
+```typescript
+const result = await gateFCHAWorkflowTransition({...});
+
+console.log(result.evidence);
+// {
+//   applicationId: 'app_123',
+//   transitionId: 'fcha_app_123_20260101123456789',
+//   fromState: 'PREQUALIFICATION',
+//   toState: 'CONDITIONAL_OFFER',
+//   timestamp: '2026-01-01T12:34:56.789Z',
+//   actorId: 'user_123',
+//   actorType: 'user',
+//   noticesIssued: [{
+//     type: 'conditional_offer_letter',
+//     issuedAt: '2026-01-01T12:34:56.789Z',
+//     deliveryMethod: 'email',
+//     recipientId: 'app_123',
+//   }],
+//   prequalificationResults: {
+//     incomeVerified: true,
+//     creditCheckPassed: true,
+//     rentalHistoryVerified: true,
+//     employmentVerified: true,
+//     allCriteriaMet: true,
+//   },
+// }
+```
+
+### Article 23-A Individualized Assessment
+
+When adverse criminal history is found, the workflow requires an individualized assessment:
+
+```typescript
+// Transition to INDIVIDUALIZED_ASSESSMENT when adverse info found
+const assessment = await gateFCHAWorkflowTransition({
+  applicationId: 'app_123',
+  marketId: 'NYC',
+  currentState: 'BACKGROUND_CHECK_ALLOWED',
+  targetState: 'INDIVIDUALIZED_ASSESSMENT',
+  actorId: 'user_123',
+  actorType: 'user',
+  adverseInfoDetails: {
+    adverseInfoFound: true,
+    adverseInfoSummary: 'Prior misdemeanor conviction 8 years ago',
+    noticeDelivered: true,
+  },
+});
+
+// Response window is tracked (10 days for mitigating factors)
+console.log(assessment.evidence?.responseWindow);
+// { opensAt: '...', closesAt: '...', daysAllowed: 10, responded: false }
+
+// When denying, must consider Article 23-A factors
+const denial = await gateFCHAWorkflowTransition({
+  applicationId: 'app_123',
+  marketId: 'NYC',
+  currentState: 'INDIVIDUALIZED_ASSESSMENT',
+  targetState: 'DENIED',
+  actorId: 'user_123',
+  actorType: 'user',
+  finalDecision: {
+    decision: 'denied',
+    rationale: 'After individualized assessment...',
+    article23AFactorsConsidered: [
+      'nature_of_offense',
+      'time_elapsed_since_offense',
+      'relationship_to_housing',
+      'evidence_of_rehabilitation',
+    ],
+  },
+});
+```
+
+## FCHA Stage Order Enforcement (Legacy)
 
 ```mermaid
 stateDiagram-v2
@@ -365,6 +548,12 @@ The following fee types must be disclosed when charged to tenants:
 | `FARE_INCOME_REQUIREMENT_EXCESSIVE` | Violation | Income requirement > 40x rent |
 | `FARE_CREDIT_SCORE_THRESHOLD_EXCESSIVE` | Violation | Credit score requirement > 650 |
 | `FCHA_CRIMINAL_CHECK_BEFORE_OFFER` | Critical | Background check before conditional offer |
+| `FCHA_BACKGROUND_CHECK_NOT_ALLOWED` | Critical | Criminal check in wrong workflow state |
+| `FCHA_CONDITIONAL_OFFER_REQUIRED` | Critical | Conditional offer must be issued first |
+| `FCHA_PREQUALIFICATION_INCOMPLETE` | Critical | Prequalification criteria not met |
+| `FCHA_INDIVIDUALIZED_ASSESSMENT_REQUIRED` | Critical | Article 23-A assessment required |
+| `FCHA_NOTICE_NOT_ISSUED` | Critical | Required notice not delivered |
+| `FCHA_INVALID_STATE_TRANSITION` | Critical | Invalid workflow state transition |
 | `FCHA_STAGE_ORDER_VIOLATION` | Critical | Skipping application stages |
 | `GOOD_CAUSE_RENT_INCREASE_EXCESSIVE` | Critical | Rent increase > CPI + 5% |
 | `GOOD_CAUSE_EVICTION_INVALID_REASON` | Critical | Eviction reason not in allowed list |

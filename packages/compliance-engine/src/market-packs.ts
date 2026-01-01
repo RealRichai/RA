@@ -120,6 +120,27 @@ export const NYC_STRICT_V1: MarketPack = {
         'final_approval',
         'lease_signing',
       ],
+      workflow: {
+        adverseActionResponseDays: 5,
+        mitigatingFactorsResponseDays: 10,
+        article23AFactors: [
+          'nature_of_offense',
+          'time_elapsed_since_offense',
+          'age_at_time_of_offense',
+          'evidence_of_rehabilitation',
+          'relationship_to_housing',
+          'legitimate_business_interest',
+          'public_policy_encouraging_employment',
+          'certificates_of_relief',
+        ],
+        requiredNotices: {
+          CONDITIONAL_OFFER: ['conditional_offer_letter'],
+          BACKGROUND_CHECK_ALLOWED: ['background_check_authorization'],
+          INDIVIDUALIZED_ASSESSMENT: ['adverse_action_notice', 'article_23a_factors_notice'],
+          APPROVED: ['approval_notice'],
+          DENIED: ['denial_notice'],
+        },
+      },
     },
     goodCause: {
       enabled: true,

@@ -34,6 +34,13 @@ export const ViolationCodeSchema = z.enum([
   'FCHA_CREDIT_CHECK_BEFORE_OFFER',
   'FCHA_STAGE_ORDER_VIOLATION',
   'FCHA_PROHIBITED_INQUIRY',
+  'FCHA_BACKGROUND_CHECK_NOT_ALLOWED',
+  'FCHA_CONDITIONAL_OFFER_REQUIRED',
+  'FCHA_PREQUALIFICATION_INCOMPLETE',
+  'FCHA_INDIVIDUALIZED_ASSESSMENT_REQUIRED',
+  'FCHA_NOTICE_NOT_ISSUED',
+  'FCHA_RESPONSE_WINDOW_ACTIVE',
+  'FCHA_INVALID_STATE_TRANSITION',
 
   // Good Cause violations
   'GOOD_CAUSE_RENT_INCREASE_EXCESSIVE',
@@ -190,6 +197,177 @@ export const FCHAStageSchema = z.enum([
 
 export type FCHAStage = z.infer<typeof FCHAStageSchema>;
 
+// ============================================================================
+// NYC Fair Chance Housing Workflow State Machine
+// ============================================================================
+
+/**
+ * Explicit workflow states for NYC Fair Chance Housing Act compliance.
+ * These states enforce the legal requirement to evaluate non-criminal
+ * eligibility before any criminal background check.
+ */
+export const FCHAWorkflowStateSchema = z.enum([
+  /** Initial application - evaluate income, credit, rental history (non-criminal) */
+  'PREQUALIFICATION',
+  /** Written conditional offer issued - commits a unit to applicant */
+  'CONDITIONAL_OFFER',
+  /** Criminal background check now permitted */
+  'BACKGROUND_CHECK_ALLOWED',
+  /** Adverse info found - Article 23-A individualized assessment required */
+  'INDIVIDUALIZED_ASSESSMENT',
+  /** Final decision made (approved or denied) */
+  'FINAL_DECISION',
+  /** Denied - application rejected */
+  'DENIED',
+  /** Approved - proceed to lease signing */
+  'APPROVED',
+]);
+
+export type FCHAWorkflowState = z.infer<typeof FCHAWorkflowStateSchema>;
+
+/**
+ * Valid transitions in the FCHA workflow state machine.
+ * Only these transitions are permitted.
+ */
+export const FCHAValidTransitions: Record<FCHAWorkflowState, FCHAWorkflowState[]> = {
+  PREQUALIFICATION: ['CONDITIONAL_OFFER', 'DENIED'],
+  CONDITIONAL_OFFER: ['BACKGROUND_CHECK_ALLOWED', 'DENIED'],
+  BACKGROUND_CHECK_ALLOWED: ['INDIVIDUALIZED_ASSESSMENT', 'APPROVED', 'DENIED'],
+  INDIVIDUALIZED_ASSESSMENT: ['APPROVED', 'DENIED'],
+  FINAL_DECISION: [], // Terminal state
+  DENIED: [], // Terminal state
+  APPROVED: [], // Terminal state (proceed to lease)
+};
+
+/**
+ * Check types that require BACKGROUND_CHECK_ALLOWED state
+ */
+export const FCHACriminalCheckTypes = [
+  'criminal_background_check',
+  'criminal_history',
+  'arrest_record',
+  'conviction_record',
+] as const;
+
+export type FCHACriminalCheckType = typeof FCHACriminalCheckTypes[number];
+
+/**
+ * Non-criminal checks allowed during PREQUALIFICATION
+ */
+export const FCHAPrequalificationCheckTypes = [
+  'income_verification',
+  'employment_verification',
+  'credit_check',
+  'rental_history',
+  'eviction_history',
+  'identity_verification',
+] as const;
+
+export type FCHAPrequalificationCheckType = typeof FCHAPrequalificationCheckTypes[number];
+
+/**
+ * Notice types required by FCHA
+ */
+export const FCHANoticeTypeSchema = z.enum([
+  'conditional_offer_letter',
+  'background_check_authorization',
+  'adverse_action_notice',
+  'individualized_assessment_notice',
+  'article_23a_factors_notice',
+  'final_decision_notice',
+  'denial_notice',
+  'approval_notice',
+]);
+
+export type FCHANoticeType = z.infer<typeof FCHANoticeTypeSchema>;
+
+/**
+ * Evidence record for FCHA workflow transitions
+ */
+export const FCHATransitionEvidenceSchema = z.object({
+  applicationId: z.string(),
+  transitionId: z.string(),
+  fromState: FCHAWorkflowStateSchema,
+  toState: FCHAWorkflowStateSchema,
+  timestamp: z.string().datetime(),
+  /** Actor who initiated the transition */
+  actorId: z.string(),
+  actorType: z.enum(['system', 'user', 'agent']),
+  /** Notices issued as part of this transition */
+  noticesIssued: z.array(z.object({
+    type: FCHANoticeTypeSchema,
+    issuedAt: z.string().datetime(),
+    deliveryMethod: z.enum(['email', 'mail', 'in_app', 'hand_delivered']),
+    recipientId: z.string(),
+  })).optional(),
+  /** Response window tracking for applicant responses */
+  responseWindow: z.object({
+    opensAt: z.string().datetime(),
+    closesAt: z.string().datetime(),
+    daysAllowed: z.number(),
+    responded: z.boolean().default(false),
+    respondedAt: z.string().datetime().optional(),
+  }).optional(),
+  /** Background check details if applicable */
+  backgroundCheck: z.object({
+    type: z.string(),
+    requestedAt: z.string().datetime(),
+    completedAt: z.string().datetime().optional(),
+    result: z.enum(['clear', 'adverse_info_found', 'pending', 'error']).optional(),
+    adverseInfoDetails: z.string().optional(),
+  }).optional(),
+  /** Individualized assessment details if applicable */
+  individualizedAssessment: z.object({
+    startedAt: z.string().datetime(),
+    completedAt: z.string().datetime().optional(),
+    article23AFactorsConsidered: z.array(z.string()).optional(),
+    mitigatingFactorsProvided: z.array(z.string()).optional(),
+    rationale: z.string().optional(),
+  }).optional(),
+  /** Prequalification criteria results */
+  prequalificationResults: z.object({
+    incomeVerified: z.boolean().optional(),
+    creditCheckPassed: z.boolean().optional(),
+    rentalHistoryVerified: z.boolean().optional(),
+    employmentVerified: z.boolean().optional(),
+    allCriteriaMet: z.boolean(),
+  }).optional(),
+  /** Additional metadata */
+  metadata: z.record(z.unknown()).optional(),
+});
+
+export type FCHATransitionEvidence = z.infer<typeof FCHATransitionEvidenceSchema>;
+
+/**
+ * FCHA workflow state record - tracks current state and history
+ */
+export const FCHAWorkflowRecordSchema = z.object({
+  applicationId: z.string(),
+  currentState: FCHAWorkflowStateSchema,
+  stateHistory: z.array(z.object({
+    state: FCHAWorkflowStateSchema,
+    enteredAt: z.string().datetime(),
+    exitedAt: z.string().datetime().optional(),
+    transitionId: z.string().optional(),
+  })),
+  conditionalOfferIssuedAt: z.string().datetime().optional(),
+  conditionalOfferUnitId: z.string().optional(),
+  backgroundCheckAllowedAt: z.string().datetime().optional(),
+  individualizedAssessmentStartedAt: z.string().datetime().optional(),
+  finalDecisionAt: z.string().datetime().optional(),
+  finalDecisionResult: z.enum(['approved', 'denied']).optional(),
+  activeResponseWindow: z.object({
+    opensAt: z.string().datetime(),
+    closesAt: z.string().datetime(),
+    daysAllowed: z.number(),
+    purpose: z.string(),
+  }).optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type FCHAWorkflowRecord = z.infer<typeof FCHAWorkflowRecordSchema>;
+
 export const FCHARuleSchema = z.object({
   enabled: z.boolean(),
   prohibitedBeforeConditionalOffer: z.array(z.enum([
@@ -198,6 +376,24 @@ export const FCHARuleSchema = z.object({
     'eviction_history',
   ])),
   stageOrder: z.array(FCHAStageSchema),
+  /** Enhanced workflow settings */
+  workflow: z.object({
+    /** Days applicant has to respond to adverse action notice */
+    adverseActionResponseDays: z.number().default(5),
+    /** Days applicant has to provide mitigating factors */
+    mitigatingFactorsResponseDays: z.number().default(10),
+    /** Article 23-A factors that must be considered */
+    article23AFactors: z.array(z.string()).default([
+      'nature_of_offense',
+      'time_elapsed_since_offense',
+      'age_at_time_of_offense',
+      'evidence_of_rehabilitation',
+      'relationship_to_housing',
+      'legitimate_business_interest',
+    ]),
+    /** Required notices for each state */
+    requiredNotices: z.record(z.array(FCHANoticeTypeSchema)).optional(),
+  }).optional(),
 });
 
 export const GDPRRuleSchema = z.object({

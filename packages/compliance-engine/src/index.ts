@@ -11,3 +11,4 @@ export * from './rules';
 export * from './gates';
 export * from './providers';
 export * from './engine';
+export * from './fcha-state-machine';
