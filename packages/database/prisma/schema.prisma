@@ -495,6 +495,7 @@ model Listing {
   media              ListingMedia[]
   availability       ListingAvailability?
   tourAssets         TourAsset[]
+  collateralGenerations CollateralGeneration[]
 
   @@index([propertyId])
   @@index([landlordId])
@@ -1763,6 +1764,65 @@ model MarketingTemplate {
   @@index([type])
   @@index([isPublic])
   @@map("marketing_templates")
+}
+
+// =============================================================================
+// Collateral Generation (Media Generator)
+// =============================================================================
+
+model CollateralTemplate {
+  id                       String   @id @default(uuid()) @db.Uuid
+  name                     String
+  type                     String   // flyer, brochure, listing_deck
+  source                   String   @default("system") // system, user
+  version                  String   @default("1.0.0")
+  htmlTemplate             String   @map("html_template") @db.Text
+  pptxTemplate             Json?    @map("pptx_template")
+  variables                Json     @default("[]")
+  requiredComplianceBlocks String[] @default([]) @map("required_compliance_blocks")
+  supportedFormats         String[] @default(["pdf"]) @map("supported_formats")
+  marketId                 String?  @map("market_id")
+  isActive                 Boolean  @default(true) @map("is_active")
+  isSystem                 Boolean  @default(false) @map("is_system")
+  thumbnailUrl             String?  @map("thumbnail_url")
+  createdBy                String   @map("created_by") @db.Uuid
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  generations CollateralGeneration[]
+
+  @@index([type])
+  @@index([source])
+  @@index([marketId])
+  @@index([isActive])
+  @@map("collateral_templates")
+}
+
+model CollateralGeneration {
+  id                String   @id @default(uuid()) @db.Uuid
+  listingId         String   @map("listing_id") @db.Uuid
+  templateId        String   @map("template_id") @db.Uuid
+  templateVersion   String   @map("template_version")
+  format            String   // pdf, pptx
+  fileUrl           String   @map("file_url")
+  fileSize          Int      @map("file_size")
+  checksum          String   // SHA-256
+  listingSnapshot   Json     @map("listing_snapshot")
+  complianceBlocks  Json     @default("[]") @map("compliance_blocks")
+  marketId          String   @map("market_id")
+  marketPackVersion String   @map("market_pack_version")
+  evidenceRecordId  String?  @map("evidence_record_id") @db.Uuid
+  generatedBy       String   @map("generated_by") @db.Uuid
+  generatedAt       DateTime @default(now()) @map("generated_at")
+
+  template CollateralTemplate @relation(fields: [templateId], references: [id])
+  listing  Listing             @relation(fields: [listingId], references: [id])
+
+  @@index([listingId])
+  @@index([templateId])
+  @@index([generatedBy])
+  @@index([generatedAt])
+  @@map("collateral_generations")
 }
 
 // =============================================================================

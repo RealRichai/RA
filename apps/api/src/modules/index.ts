@@ -24,6 +24,7 @@ import { mfaRoutes } from './auth/mfa';
 import { authRoutes } from './auth/routes';
 import { budgetRoutes } from './budgets/routes';
 import { buildingSystemRoutes } from './building-systems/routes';
+import { collateralRoutes } from './collateral/routes';
 import { commerceRoutes } from './commerce/routes';
 import { commercialRoutes } from './commercial/routes';
 import { commonAreaRoutes } from './common-areas/routes';
@@ -109,6 +110,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(maintenanceRoutes, { prefix: '/maintenance' });
       await api.register(marketingRoutes, { prefix: '/marketing' });
       await api.register(commerceRoutes, { prefix: '/commerce' });
+      await api.register(collateralRoutes);
       await api.register(analyticsRoutes, { prefix: '/analytics' });
       await api.register(commercialRoutes, { prefix: '/commercial' });
       await api.register(notificationRoutes, { prefix: '/notifications' });
