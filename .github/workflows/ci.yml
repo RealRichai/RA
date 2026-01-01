@@ -210,6 +210,9 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_test?schema=public
 
+      - name: Build packages
+        run: pnpm build
+
       - name: Run acceptance tests
         run: pnpm test:acceptance
         env:
