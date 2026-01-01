@@ -1,3 +1,4 @@
+import { prisma } from '@realriches/database';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -123,11 +124,6 @@ export interface DelinquencyReport {
   total: { count: number; amount: number };
 }
 
-// In-memory mock data stores
-const properties = new Map<string, PropertyMetrics>();
-const occupancyHistory = new Map<string, OccupancyTrend[]>();
-const revenueHistory = new Map<string, RevenueTrend[]>();
-
 // Schemas
 const periodSchema = z.enum(['day', 'week', 'month', 'quarter', 'year', 'ytd', 'all_time']);
 
@@ -145,11 +141,7 @@ const forecastQuerySchema = z.object({
 });
 
 // Helper functions
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-}
-
-function calculateTrend(current: number, previous: number): TrendDirection {
+export function calculateTrend(current: number, previous: number): TrendDirection {
   const change = current - previous;
   if (Math.abs(change) < 0.01) return 'flat';
   return change > 0 ? 'up' : 'down';
@@ -163,142 +155,201 @@ function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
-function calculateNOI(revenue: number, expenses: number): number {
+export function calculateNOI(revenue: number, expenses: number): number {
   return revenue - expenses;
 }
 
-function calculateCapRate(noi: number, value: number): number {
+export function calculateCapRate(noi: number, value: number): number {
   if (value === 0) return 0;
   return (noi * 12 / value) * 100;
 }
 
-function calculateCashOnCash(annualCashFlow: number, totalInvestment: number): number {
+export function calculateCashOnCash(annualCashFlow: number, totalInvestment: number): number {
   if (totalInvestment === 0) return 0;
   return (annualCashFlow / totalInvestment) * 100;
 }
 
-function calculateLTV(debt: number, value: number): number {
+export function calculateLTV(debt: number, value: number): number {
   if (value === 0) return 0;
   return (debt / value) * 100;
 }
 
-// Initialize mock data
-function initializeMockData(): void {
-  const propertyData: PropertyMetrics[] = [
-    {
-      propertyId: 'prop-1',
-      propertyName: 'Sunset Apartments',
-      propertyType: 'multifamily',
-      address: '123 Sunset Blvd, Los Angeles, CA',
-      units: 24,
-      occupiedUnits: 22,
-      occupancyRate: 91.67,
-      monthlyRent: 48000,
-      collectedRent: 46500,
-      collectionRate: 96.88,
-      expenses: 18000,
-      noi: 28500,
-      capRate: 5.7,
-      value: 6000000,
-      debt: 4200000,
-      equity: 1800000,
-      cashFlow: 12000,
-    },
-    {
-      propertyId: 'prop-2',
-      propertyName: 'Downtown Lofts',
-      propertyType: 'multifamily',
-      address: '456 Main St, New York, NY',
-      units: 48,
-      occupiedUnits: 45,
-      occupancyRate: 93.75,
-      monthlyRent: 120000,
-      collectedRent: 117000,
-      collectionRate: 97.5,
-      expenses: 42000,
-      noi: 75000,
-      capRate: 6.0,
-      value: 15000000,
-      debt: 10500000,
-      equity: 4500000,
-      cashFlow: 35000,
-    },
-    {
-      propertyId: 'prop-3',
-      propertyName: 'Parkview Residences',
-      propertyType: 'multifamily',
-      address: '789 Park Ave, Chicago, IL',
-      units: 36,
-      occupiedUnits: 32,
-      occupancyRate: 88.89,
-      monthlyRent: 72000,
-      collectedRent: 68000,
-      collectionRate: 94.44,
-      expenses: 28000,
-      noi: 40000,
-      capRate: 5.3,
-      value: 9000000,
-      debt: 6300000,
-      equity: 2700000,
-      cashFlow: 18000,
-    },
-  ];
-
-  for (const prop of propertyData) {
-    properties.set(prop.propertyId, prop);
+// Database query helpers
+async function getPropertyMetrics(propertyIds?: string[], propertyType?: string): Promise<PropertyMetrics[]> {
+  const where: Record<string, unknown> = { status: 'active' };
+  if (propertyIds?.length) {
+    where.id = { in: propertyIds };
+  }
+  if (propertyType) {
+    where.type = propertyType;
   }
 
-  // Generate historical data for trends
+  const properties = await prisma.property.findMany({
+    where,
+    include: {
+      units: true,
+      leases: {
+        where: { status: 'active' },
+      },
+    },
+  });
+
   const now = new Date();
-  for (const prop of propertyData) {
-    const occHistory: OccupancyTrend[] = [];
-    const revHistory: RevenueTrend[] = [];
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-    for (let i = 11; i >= 0; i--) {
-      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const variance = (Math.random() - 0.5) * 10;
+  const metrics: PropertyMetrics[] = [];
 
-      occHistory.push({
-        date,
-        occupancyRate: Math.min(100, Math.max(80, prop.occupancyRate + variance)),
-        occupiedUnits: Math.round(prop.units * (prop.occupancyRate + variance) / 100),
-        totalUnits: prop.units,
-      });
+  for (const property of properties) {
+    const totalUnits = property.units.length;
+    const occupiedUnits = property.units.filter(u => u.status === 'occupied').length;
 
-      const rentVariance = (Math.random() - 0.5) * 0.1;
-      revHistory.push({
-        date,
-        scheduledRent: prop.monthlyRent * (1 + rentVariance),
-        collectedRent: prop.collectedRent * (1 + rentVariance),
-        collectionRate: prop.collectionRate + (Math.random() - 0.5) * 5,
-        otherIncome: prop.monthlyRent * 0.05 * (1 + rentVariance),
-        totalRevenue: prop.collectedRent * 1.05 * (1 + rentVariance),
-      });
-    }
+    // Calculate monthly rent from active leases
+    const monthlyRent = property.leases.reduce((sum, lease) => sum + lease.monthlyRentAmount, 0);
 
-    occupancyHistory.set(prop.propertyId, occHistory);
-    revenueHistory.set(prop.propertyId, revHistory);
+    // Get payments for this property this month
+    const payments = await prisma.payment.findMany({
+      where: {
+        propertyId: property.id,
+        status: 'completed',
+        paidAt: { gte: startOfMonth, lte: endOfMonth },
+        type: 'rent',
+      },
+    });
+    const collectedRent = payments.reduce((sum, p) => sum + p.amount, 0) / 100; // Convert cents to dollars
+
+    // Estimate expenses (30% of collected rent as default)
+    const expenses = collectedRent * 0.30;
+    const noi = collectedRent - expenses;
+
+    // Use property metadata for value/debt or defaults
+    const value = (property.metadata as { value?: number } | null)?.value ?? monthlyRent * 12 * 15; // 15x annual rent
+    const debt = (property.metadata as { debt?: number } | null)?.debt ?? value * 0.7; // 70% LTV default
+
+    metrics.push({
+      propertyId: property.id,
+      propertyName: property.name,
+      propertyType: property.type,
+      address: `${property.street1}, ${property.city}, ${property.state}`,
+      units: totalUnits,
+      occupiedUnits,
+      occupancyRate: totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0,
+      monthlyRent,
+      collectedRent,
+      collectionRate: monthlyRent > 0 ? (collectedRent / monthlyRent) * 100 : 0,
+      expenses,
+      noi,
+      capRate: calculateCapRate(noi, value),
+      value,
+      debt,
+      equity: value - debt,
+      cashFlow: noi - (debt * 0.06 / 12), // Assume 6% annual interest
+    });
   }
+
+  return metrics;
 }
 
-initializeMockData();
+async function getOccupancyTrends(propertyId?: string, months: number = 12): Promise<OccupancyTrend[]> {
+  const trends: OccupancyTrend[] = [];
+  const now = new Date();
+
+  for (let i = months - 1; i >= 0; i--) {
+    const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+
+    const where: Record<string, unknown> = { status: 'active' };
+    if (propertyId) {
+      where.id = propertyId;
+    }
+
+    // Count active leases at end of each month
+    const leaseCount = await prisma.lease.count({
+      where: {
+        ...(propertyId ? { propertyId } : {}),
+        status: 'active',
+        startDate: { lte: endOfMonth },
+        endDate: { gte: date },
+      },
+    });
+
+    const unitCount = await prisma.unit.count({
+      where: propertyId ? { propertyId } : {},
+    });
+
+    trends.push({
+      date,
+      occupiedUnits: leaseCount,
+      totalUnits: unitCount,
+      occupancyRate: unitCount > 0 ? (leaseCount / unitCount) * 100 : 0,
+    });
+  }
+
+  return trends;
+}
+
+async function getRevenueTrends(propertyId?: string, months: number = 12): Promise<RevenueTrend[]> {
+  const trends: RevenueTrend[] = [];
+  const now = new Date();
+
+  for (let i = months - 1; i >= 0; i--) {
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+
+    // Get scheduled rent from active leases
+    const leases = await prisma.lease.findMany({
+      where: {
+        ...(propertyId ? { propertyId } : {}),
+        status: 'active',
+        startDate: { lte: endOfMonth },
+        endDate: { gte: startOfMonth },
+      },
+    });
+    const scheduledRent = leases.reduce((sum, l) => sum + l.monthlyRentAmount, 0);
+
+    // Get actual payments
+    const payments = await prisma.payment.findMany({
+      where: {
+        ...(propertyId ? { propertyId } : {}),
+        status: 'completed',
+        paidAt: { gte: startOfMonth, lte: endOfMonth },
+        type: 'rent',
+      },
+    });
+    const collectedRent = payments.reduce((sum, p) => sum + p.amount, 0) / 100;
+
+    // Get other income (non-rent payments)
+    const otherPayments = await prisma.payment.findMany({
+      where: {
+        ...(propertyId ? { propertyId } : {}),
+        status: 'completed',
+        paidAt: { gte: startOfMonth, lte: endOfMonth },
+        type: { not: 'rent' },
+      },
+    });
+    const otherIncome = otherPayments.reduce((sum, p) => sum + p.amount, 0) / 100;
+
+    trends.push({
+      date: startOfMonth,
+      scheduledRent,
+      collectedRent,
+      collectionRate: scheduledRent > 0 ? (collectedRent / scheduledRent) * 100 : 0,
+      otherIncome,
+      totalRevenue: collectedRent + otherIncome,
+    });
+  }
+
+  return trends;
+}
 
 // Route handlers
 export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
   // Get portfolio summary
   app.get('/summary', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = dashboardQuerySchema.parse(request.query);
+    const propertyIds = query.propertyIds?.split(',');
 
-    let propertyList = Array.from(properties.values());
-
-    if (query.propertyIds) {
-      const ids = query.propertyIds.split(',');
-      propertyList = propertyList.filter((p) => ids.includes(p.propertyId));
-    }
-
-    if (query.propertyType) {
-      propertyList = propertyList.filter((p) => p.propertyType === query.propertyType);
-    }
+    const propertyList = await getPropertyMetrics(propertyIds, query.propertyType);
 
     const totalUnits = propertyList.reduce((sum, p) => sum + p.units, 0);
     const occupiedUnits = propertyList.reduce((sum, p) => sum + p.occupiedUnits, 0);
@@ -335,8 +386,9 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
   // Get KPI cards
   app.get('/kpis', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = dashboardQuerySchema.parse(request.query);
+    const propertyIds = query.propertyIds?.split(',');
 
-    const propertyList = Array.from(properties.values());
+    const propertyList = await getPropertyMetrics(propertyIds, query.propertyType);
     const totalUnits = propertyList.reduce((sum, p) => sum + p.units, 0);
     const occupiedUnits = propertyList.reduce((sum, p) => sum + p.occupiedUnits, 0);
     const monthlyRevenue = propertyList.reduce((sum, p) => sum + p.collectedRent, 0);
@@ -345,14 +397,20 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
     const totalValue = propertyList.reduce((sum, p) => sum + p.value, 0);
     const noi = monthlyRevenue - monthlyExpenses;
 
-    // Mock previous period values (slightly lower)
-    const prevMonthlyRevenue = monthlyRevenue * 0.97;
-    const prevOccupancy = (occupiedUnits / totalUnits) * 100 - 1.5;
-    const prevNOI = noi * 0.95;
-    const prevCollectionRate = (monthlyRevenue / scheduledRent) * 100 - 0.8;
+    // Get previous month data for comparison
+    const lastMonth = new Date();
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+    const revenueTrends = await getRevenueTrends(undefined, 2);
+    const prevMonthlyRevenue = revenueTrends[0]?.collectedRent ?? monthlyRevenue * 0.97;
 
-    const currentOccupancy = (occupiedUnits / totalUnits) * 100;
-    const currentCollectionRate = (monthlyRevenue / scheduledRent) * 100;
+    const occupancyTrends = await getOccupancyTrends(undefined, 2);
+    const prevOccupancy = occupancyTrends[0]?.occupancyRate ?? (occupiedUnits / totalUnits) * 100 - 1.5;
+
+    const prevNOI = noi * 0.95;
+    const prevCollectionRate = revenueTrends[0]?.collectionRate ?? 95;
+
+    const currentOccupancy = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
+    const currentCollectionRate = scheduledRent > 0 ? (monthlyRevenue / scheduledRent) * 100 : 0;
 
     const kpis: KPICard[] = [
       {
@@ -362,7 +420,7 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
         formattedValue: formatCurrency(monthlyRevenue),
         previousValue: prevMonthlyRevenue,
         change: monthlyRevenue - prevMonthlyRevenue,
-        changePercent: ((monthlyRevenue - prevMonthlyRevenue) / prevMonthlyRevenue) * 100,
+        changePercent: prevMonthlyRevenue > 0 ? ((monthlyRevenue - prevMonthlyRevenue) / prevMonthlyRevenue) * 100 : 0,
         trend: calculateTrend(monthlyRevenue, prevMonthlyRevenue),
         period: query.period,
         category: 'revenue',
@@ -374,7 +432,7 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
         formattedValue: formatPercent(currentOccupancy),
         previousValue: prevOccupancy,
         change: currentOccupancy - prevOccupancy,
-        changePercent: ((currentOccupancy - prevOccupancy) / prevOccupancy) * 100,
+        changePercent: prevOccupancy > 0 ? ((currentOccupancy - prevOccupancy) / prevOccupancy) * 100 : 0,
         trend: calculateTrend(currentOccupancy, prevOccupancy),
         period: query.period,
         category: 'occupancy',
@@ -386,7 +444,7 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
         formattedValue: formatCurrency(noi),
         previousValue: prevNOI,
         change: noi - prevNOI,
-        changePercent: ((noi - prevNOI) / prevNOI) * 100,
+        changePercent: prevNOI > 0 ? ((noi - prevNOI) / prevNOI) * 100 : 0,
         trend: calculateTrend(noi, prevNOI),
         period: query.period,
         category: 'performance',
@@ -398,7 +456,7 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
         formattedValue: formatPercent(currentCollectionRate),
         previousValue: prevCollectionRate,
         change: currentCollectionRate - prevCollectionRate,
-        changePercent: ((currentCollectionRate - prevCollectionRate) / prevCollectionRate) * 100,
+        changePercent: prevCollectionRate > 0 ? ((currentCollectionRate - prevCollectionRate) / prevCollectionRate) * 100 : 0,
         trend: calculateTrend(currentCollectionRate, prevCollectionRate),
         period: query.period,
         category: 'revenue',
@@ -439,7 +497,7 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
   app.get('/properties', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = request.query as { sortBy?: string; sortOrder?: 'asc' | 'desc' };
 
-    const propertyList = Array.from(properties.values());
+    const propertyList = await getPropertyMetrics();
 
     if (query.sortBy) {
       const sortKey = query.sortBy as keyof PropertyMetrics;
@@ -462,35 +520,7 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
     const query = request.query as { propertyId?: string; months?: string };
     const months = parseInt(query.months || '12', 10);
 
-    let trends: OccupancyTrend[] = [];
-
-    if (query.propertyId) {
-      trends = occupancyHistory.get(query.propertyId)?.slice(-months) || [];
-    } else {
-      // Aggregate across all properties
-      const allHistory = Array.from(occupancyHistory.values());
-      if (allHistory.length > 0) {
-        const monthCount = Math.min(months, allHistory[0].length);
-        for (let i = 0; i < monthCount; i++) {
-          let totalOccupied = 0;
-          let totalUnits = 0;
-
-          for (const history of allHistory) {
-            if (history[i]) {
-              totalOccupied += history[i].occupiedUnits;
-              totalUnits += history[i].totalUnits;
-            }
-          }
-
-          trends.push({
-            date: allHistory[0][i]?.date || new Date(),
-            occupancyRate: totalUnits > 0 ? (totalOccupied / totalUnits) * 100 : 0,
-            occupiedUnits: totalOccupied,
-            totalUnits,
-          });
-        }
-      }
-    }
+    const trends = await getOccupancyTrends(query.propertyId, months);
 
     return reply.send({
       success: true,
@@ -503,39 +533,7 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
     const query = request.query as { propertyId?: string; months?: string };
     const months = parseInt(query.months || '12', 10);
 
-    let trends: RevenueTrend[] = [];
-
-    if (query.propertyId) {
-      trends = revenueHistory.get(query.propertyId)?.slice(-months) || [];
-    } else {
-      // Aggregate across all properties
-      const allHistory = Array.from(revenueHistory.values());
-      if (allHistory.length > 0) {
-        const monthCount = Math.min(months, allHistory[0].length);
-        for (let i = 0; i < monthCount; i++) {
-          let scheduledRent = 0;
-          let collectedRent = 0;
-          let otherIncome = 0;
-
-          for (const history of allHistory) {
-            if (history[i]) {
-              scheduledRent += history[i].scheduledRent;
-              collectedRent += history[i].collectedRent;
-              otherIncome += history[i].otherIncome;
-            }
-          }
-
-          trends.push({
-            date: allHistory[0][i]?.date || new Date(),
-            scheduledRent,
-            collectedRent,
-            collectionRate: scheduledRent > 0 ? (collectedRent / scheduledRent) * 100 : 0,
-            otherIncome,
-            totalRevenue: collectedRent + otherIncome,
-          });
-        }
-      }
-    }
+    const trends = await getRevenueTrends(query.propertyId, months);
 
     return reply.send({
       success: true,
@@ -548,36 +546,23 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
     const query = request.query as { months?: string };
     const months = parseInt(query.months || '12', 10);
 
-    const propertyList = Array.from(properties.values());
+    const revenueTrends = await getRevenueTrends(undefined, months);
+    const propertyList = await getPropertyMetrics();
     const totalExpenses = propertyList.reduce((sum, p) => sum + p.expenses, 0);
 
-    const allRevHistory = Array.from(revenueHistory.values());
-    const trends: NOITrend[] = [];
+    const trends: NOITrend[] = revenueTrends.map(rev => {
+      // Assume expenses are relatively stable with slight variance
+      const expenses = totalExpenses * (1 + (Math.random() - 0.5) * 0.1);
+      const noi = rev.totalRevenue - expenses;
 
-    if (allRevHistory.length > 0) {
-      const monthCount = Math.min(months, allRevHistory[0].length);
-      for (let i = 0; i < monthCount; i++) {
-        let totalRevenue = 0;
-
-        for (const history of allRevHistory) {
-          if (history[i]) {
-            totalRevenue += history[i].totalRevenue;
-          }
-        }
-
-        // Assume expenses are relatively stable
-        const expenses = totalExpenses * (1 + (Math.random() - 0.5) * 0.1);
-        const noi = totalRevenue - expenses;
-
-        trends.push({
-          date: allRevHistory[0][i]?.date || new Date(),
-          revenue: totalRevenue,
-          expenses,
-          noi,
-          noiMargin: totalRevenue > 0 ? (noi / totalRevenue) * 100 : 0,
-        });
-      }
-    }
+      return {
+        date: rev.date,
+        revenue: rev.totalRevenue,
+        expenses,
+        noi,
+        noiMargin: rev.totalRevenue > 0 ? (noi / rev.totalRevenue) * 100 : 0,
+      };
+    });
 
     return reply.send({
       success: true,
@@ -589,7 +574,7 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
   app.get('/forecast', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = forecastQuerySchema.parse(request.query);
 
-    const propertyList = Array.from(properties.values());
+    const propertyList = await getPropertyMetrics();
     const baseMonthlyRent = propertyList.reduce((sum, p) => sum + p.monthlyRent, 0);
     const baseExpenses = propertyList.reduce((sum, p) => sum + p.expenses, 0);
     const totalDebt = propertyList.reduce((sum, p) => sum + p.debt, 0);
@@ -662,20 +647,26 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
     const expirations: LeaseExpirationSummary[] = [];
 
     for (let i = 0; i < months; i++) {
-      const date = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      const monthStr = date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + i + 1, 0);
+      const monthStr = startOfMonth.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
 
-      // Mock data - would come from lease database
-      const expiringLeases = Math.floor(Math.random() * 8) + 1;
-      const avgRent = 2000 + Math.random() * 1000;
-      const expiringRent = expiringLeases * avgRent;
-      const renewalProbability = 0.7 + Math.random() * 0.2;
-      const projectedRenewalRent = expiringRent * renewalProbability * 1.03;
+      // Get leases expiring this month
+      const expiringLeases = await prisma.lease.findMany({
+        where: {
+          status: 'active',
+          endDate: { gte: startOfMonth, lte: endOfMonth },
+        },
+      });
+
+      const expiringRent = expiringLeases.reduce((sum, l) => sum + l.monthlyRentAmount, 0);
+      const renewalProbability = 0.75; // Default 75% renewal rate
+      const projectedRenewalRent = expiringRent * renewalProbability * 1.03; // 3% rent increase
       const atRiskRent = expiringRent * (1 - renewalProbability);
 
       expirations.push({
         month: monthStr,
-        expiringLeases,
+        expiringLeases: expiringLeases.length,
         expiringRent: Math.round(expiringRent),
         renewalProbability: Math.round(renewalProbability * 100),
         projectedRenewalRent: Math.round(projectedRenewalRent),
@@ -697,18 +688,37 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
 
   // Get delinquency report
   app.get('/delinquency', async (request: FastifyRequest, reply: FastifyReply) => {
-    // Mock delinquency data
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+    // Get pending payments by age
+    const allPending = await prisma.payment.findMany({
+      where: {
+        status: { in: ['pending', 'failed'] },
+        type: 'rent',
+      },
+    });
+
+    const current = allPending.filter(p => !p.scheduledDate || p.scheduledDate > now);
+    const days1to30 = allPending.filter(p => p.scheduledDate && p.scheduledDate <= now && p.scheduledDate > thirtyDaysAgo);
+    const days31to60 = allPending.filter(p => p.scheduledDate && p.scheduledDate <= thirtyDaysAgo && p.scheduledDate > sixtyDaysAgo);
+    const days61to90 = allPending.filter(p => p.scheduledDate && p.scheduledDate <= sixtyDaysAgo && p.scheduledDate > ninetyDaysAgo);
+    const days90plus = allPending.filter(p => p.scheduledDate && p.scheduledDate <= ninetyDaysAgo);
+
     const report: DelinquencyReport = {
-      current: { count: 95, amount: 190000 },
-      days1to30: { count: 8, amount: 16000 },
-      days31to60: { count: 4, amount: 8000 },
-      days61to90: { count: 2, amount: 4000 },
-      days90plus: { count: 1, amount: 2500 },
-      total: { count: 110, amount: 220500 },
+      current: { count: current.length, amount: current.reduce((s, p) => s + p.amount, 0) / 100 },
+      days1to30: { count: days1to30.length, amount: days1to30.reduce((s, p) => s + p.amount, 0) / 100 },
+      days31to60: { count: days31to60.length, amount: days31to60.reduce((s, p) => s + p.amount, 0) / 100 },
+      days61to90: { count: days61to90.length, amount: days61to90.reduce((s, p) => s + p.amount, 0) / 100 },
+      days90plus: { count: days90plus.length, amount: days90plus.reduce((s, p) => s + p.amount, 0) / 100 },
+      total: { count: allPending.length, amount: allPending.reduce((s, p) => s + p.amount, 0) / 100 },
     };
 
-    const delinquencyRate = ((report.days1to30.amount + report.days31to60.amount +
-      report.days61to90.amount + report.days90plus.amount) / report.total.amount) * 100;
+    const totalDelinquent = report.days1to30.amount + report.days31to60.amount +
+      report.days61to90.amount + report.days90plus.amount;
+    const delinquencyRate = report.total.amount > 0 ? (totalDelinquent / report.total.amount) * 100 : 0;
 
     return reply.send({
       success: true,
@@ -732,11 +742,11 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const ids = query.propertyIds.split(',');
-    const selectedProperties = ids.map((id) => properties.get(id)).filter(Boolean) as PropertyMetrics[];
+    const allProperties = await getPropertyMetrics(ids);
 
     const metrics = query.metrics?.split(',') || ['occupancyRate', 'noi', 'capRate', 'collectionRate'];
 
-    const comparison = selectedProperties.map((prop) => {
+    const comparison = allProperties.map((prop) => {
       const result: Record<string, string | number> = {
         propertyId: prop.propertyId,
         propertyName: prop.propertyName,
@@ -752,11 +762,11 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
     });
 
     // Calculate averages for benchmarking
-    const allProps = Array.from(properties.values());
+    const benchmarkProperties = await getPropertyMetrics();
     const benchmarks: Record<string, number> = {};
     for (const metric of metrics) {
-      const values = allProps.map((p) => p[metric as keyof PropertyMetrics] as number).filter((v) => typeof v === 'number');
-      benchmarks[metric] = values.reduce((sum, v) => sum + v, 0) / values.length;
+      const values = benchmarkProperties.map((p) => p[metric as keyof PropertyMetrics] as number).filter((v) => typeof v === 'number');
+      benchmarks[metric] = values.length > 0 ? values.reduce((sum, v) => sum + v, 0) / values.length : 0;
     }
 
     return reply.send({
@@ -768,15 +778,3 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 }
-
-// Export for testing
-export {
-  properties,
-  occupancyHistory,
-  revenueHistory,
-  calculateNOI,
-  calculateCapRate,
-  calculateCashOnCash,
-  calculateLTV,
-  calculateTrend,
-};
