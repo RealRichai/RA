@@ -4,9 +4,6 @@
  * Admin-only endpoints for viewing partner attribution and revenue data.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { z } from 'zod';
-
 import {
   AttributionService,
   InMemoryAttributionStore,
@@ -14,6 +11,8 @@ import {
   RevenueDashboardQuerySchema,
   CreateAttributionSchema,
 } from '@realriches/revenue-engine';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 
 // Initialize with in-memory store (swap with Prisma store in production)
 const attributionStore = new InMemoryAttributionStore();

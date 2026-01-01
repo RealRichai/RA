@@ -13,6 +13,7 @@ import type {
 import type { ProviderError } from '../types/errors';
 import type { Result } from '../types/result';
 import { success, failure } from '../types/result';
+
 import { BaseMockProvider, SeededRandom, createSeed } from './base';
 
 // ============================================================================
@@ -298,7 +299,7 @@ export class MockVendorProvider extends BaseMockProvider implements VendorProvid
 
     // Filter by service area (check if any zip matches)
     if (request.address.postalCode) {
-      vendors = vendors.filter((v) => v.serviceAreas.includes(request.address.postalCode!));
+      vendors = vendors.filter((v) => v.serviceAreas.includes(request.address.postalCode));
     }
 
     // Filter by categories

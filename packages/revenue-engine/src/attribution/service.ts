@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from 'crypto';
+
 import type {
   PartnerAttribution,
   CreateAttributionInput,
@@ -39,7 +40,7 @@ export interface AttributionStore {
 export class InMemoryAttributionStore implements AttributionStore {
   private attributions = new Map<string, PartnerAttribution>();
 
-  async create(input: CreateAttributionInput): Promise<PartnerAttribution> {
+  create(input: CreateAttributionInput): Promise<PartnerAttribution> {
     const now = new Date();
     const attribution: PartnerAttribution = {
       id: randomUUID(),
@@ -68,17 +69,17 @@ export class InMemoryAttributionStore implements AttributionStore {
     };
 
     this.attributions.set(attribution.id, attribution);
-    return attribution;
+    return Promise.resolve(attribution);
   }
 
-  async get(id: string): Promise<PartnerAttribution | null> {
-    return this.attributions.get(id) ?? null;
+  get(id: string): Promise<PartnerAttribution | null> {
+    return Promise.resolve(this.attributions.get(id) ?? null);
   }
 
-  async update(id: string, input: UpdateAttributionInput): Promise<PartnerAttribution> {
+  update(id: string, input: UpdateAttributionInput): Promise<PartnerAttribution> {
     const existing = this.attributions.get(id);
     if (!existing) {
-      throw new Error(`Attribution ${id} not found`);
+      return Promise.reject(new Error(`Attribution ${id} not found`));
     }
 
     const now = new Date();
@@ -100,10 +101,10 @@ export class InMemoryAttributionStore implements AttributionStore {
     }
 
     this.attributions.set(id, updated);
-    return updated;
+    return Promise.resolve(updated);
   }
 
-  async query(query: AttributionQuery): Promise<{ attributions: PartnerAttribution[]; total: number }> {
+  query(query: AttributionQuery): Promise<{ attributions: PartnerAttribution[]; total: number }> {
     let results = Array.from(this.attributions.values());
 
     if (query.partnerId) {
@@ -135,7 +136,7 @@ export class InMemoryAttributionStore implements AttributionStore {
     results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     results = results.slice(offset, offset + limit);
 
-    return { attributions: results, total };
+    return Promise.resolve({ attributions: results, total });
   }
 
   async getByPartner(partnerId: string, query?: Partial<AttributionQuery>): Promise<PartnerAttribution[]> {
@@ -143,11 +144,11 @@ export class InMemoryAttributionStore implements AttributionStore {
     return result.attributions;
   }
 
-  async getByLease(leaseId: string): Promise<PartnerAttribution[]> {
-    return Array.from(this.attributions.values()).filter(a => a.leaseId === leaseId);
+  getByLease(leaseId: string): Promise<PartnerAttribution[]> {
+    return Promise.resolve(Array.from(this.attributions.values()).filter(a => a.leaseId === leaseId));
   }
 
-  async getDashboardData(query: RevenueDashboardQuery): Promise<RevenueDashboardData> {
+  getDashboardData(query: RevenueDashboardQuery): Promise<RevenueDashboardData> {
     const { startDate, endDate, organizationId, partnerId, productType } = query;
 
     let attributions = Array.from(this.attributions.values()).filter(
@@ -245,13 +246,13 @@ export class InMemoryAttributionStore implements AttributionStore {
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, 10);
 
-    return {
+    return Promise.resolve({
       period: { startDate, endDate },
       totals,
       byPartner: Array.from(partnerMap.values()),
       byProduct: Array.from(productMap.values()),
       recentAttributions,
-    };
+    });
   }
 
   // Helper for testing
