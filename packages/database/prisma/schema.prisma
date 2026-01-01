@@ -84,6 +84,8 @@ model User {
   owners                     Owner[]
   comparableSearches         ComparableSearch[]
   reportSchedules            ReportSchedule[]
+  activities                 Activity[]
+  actorActivities            Activity[]            @relation("ActivityActor")
 
   @@index([email])
   @@index([role])
@@ -7996,4 +7998,47 @@ model TourConversionJob {
   @@index([status])
   @@index([queuedAt])
   @@map("tour_conversion_jobs")
+}
+
+// =============================================================================
+// Activity Feed
+// =============================================================================
+
+enum ActivityCategory {
+  property
+  lease
+  payment
+  document
+  maintenance
+  marketing
+  user
+  system
+}
+
+model Activity {
+  id          String           @id @default(uuid()) @db.Uuid
+  type        String           // Activity type (e.g., 'property_created', 'lease_signed')
+  category    ActivityCategory
+  userId      String           @map("user_id") @db.Uuid
+  actorId     String?          @map("actor_id") @db.Uuid
+  actorName   String?          @map("actor_name")
+  entityType  String           @map("entity_type")
+  entityId    String           @map("entity_id")
+  entityName  String?          @map("entity_name")
+  title       String
+  description String?
+  metadata    Json?
+  isRead      Boolean          @default(false) @map("is_read")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  actor       User?            @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, isRead])
+  @@index([userId, category])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("activities")
 }

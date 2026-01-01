@@ -9,11 +9,15 @@
  * - Maintenance updates
  * - System notifications
  *
- * Supports real-time updates via WebSocket integration.
+ * Uses Prisma for persistence with optional Redis caching.
  */
 
-import { prisma } from '@realriches/database';
-import { logger, generatePrefixedId } from '@realriches/utils';
+import {
+  prisma,
+  Prisma,
+  type ActivityCategory,
+} from '@realriches/database';
+import { logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
@@ -24,7 +28,6 @@ import { z } from 'zod';
 
 const ACTIVITY_FEED_PREFIX = 'activity:';
 const ACTIVITY_CACHE_TTL = 300; // 5 minutes
-const MAX_FEED_SIZE = 1000;
 const DEFAULT_PAGE_SIZE = 20;
 
 // =============================================================================
@@ -58,36 +61,6 @@ type ActivityType =
   | 'comment_added'
   | 'system_notification';
 
-type ActivityCategory = 'property' | 'lease' | 'payment' | 'document' | 'maintenance' | 'marketing' | 'user' | 'system';
-
-interface Activity {
-  id: string;
-  type: ActivityType;
-  category: ActivityCategory;
-  userId: string;
-  actorId?: string;
-  actorName?: string;
-  entityType: string;
-  entityId: string;
-  entityName?: string;
-  title: string;
-  description?: string;
-  metadata?: Record<string, unknown>;
-  isRead: boolean;
-  createdAt: string;
-}
-
-interface ActivityFeedOptions {
-  userId: string;
-  category?: ActivityCategory;
-  entityType?: string;
-  entityId?: string;
-  unreadOnly?: boolean;
-  limit?: number;
-  offset?: number;
-  since?: string;
-}
-
 // =============================================================================
 // Schemas
 // =============================================================================
@@ -103,12 +76,6 @@ const CreateActivitySchema = z.object({
   metadata: z.record(z.unknown()).optional(),
   targetUserIds: z.array(z.string()).optional(),
 });
-
-// =============================================================================
-// In-Memory Storage (Redis fallback)
-// =============================================================================
-
-const inMemoryActivities = new Map<string, Activity[]>();
 
 // =============================================================================
 // Helper Functions
@@ -163,29 +130,9 @@ function generateActivityTitle(type: ActivityType, entityName?: string): string 
   return titles[type] || 'Activity recorded';
 }
 
-async function getUserActivities(redis: Redis | null, userId: string): Promise<Activity[]> {
+async function invalidateCache(redis: Redis | null, userId: string): Promise<void> {
   if (redis) {
-    const data = await redis.get(`${ACTIVITY_FEED_PREFIX}${userId}`);
-    if (data) return JSON.parse(data);
-  }
-  return inMemoryActivities.get(userId) || [];
-}
-
-async function saveUserActivities(redis: Redis | null, userId: string, activities: Activity[]): Promise<void> {
-  // Keep only the most recent activities
-  const trimmed = activities.slice(0, MAX_FEED_SIZE);
-
-  if (redis) {
-    await redis.setex(`${ACTIVITY_FEED_PREFIX}${userId}`, ACTIVITY_CACHE_TTL, JSON.stringify(trimmed));
-  }
-  inMemoryActivities.set(userId, trimmed);
-}
-
-async function addActivity(redis: Redis | null, activity: Activity, targetUserIds: string[]): Promise<void> {
-  for (const userId of targetUserIds) {
-    const activities = await getUserActivities(redis, userId);
-    activities.unshift({ ...activity, userId });
-    await saveUserActivities(redis, userId, activities);
+    await redis.del(`${ACTIVITY_FEED_PREFIX}${userId}`);
   }
 }
 
@@ -206,48 +153,43 @@ export async function createActivity(
     metadata?: Record<string, unknown>;
     targetUserIds: string[];
   }
-): Promise<Activity> {
-  const activity: Activity = {
-    id: generatePrefixedId('act'),
-    type: params.type,
-    category: getActivityCategory(params.type),
-    userId: '', // Will be set per user
-    actorId: params.actorId,
-    actorName: params.actorName,
-    entityType: params.entityType,
-    entityId: params.entityId,
-    entityName: params.entityName,
-    title: generateActivityTitle(params.type, params.entityName),
-    description: params.description,
-    metadata: params.metadata,
-    isRead: false,
-    createdAt: new Date().toISOString(),
-  };
+): Promise<{ id: string; type: string; category: ActivityCategory }> {
+  const category = getActivityCategory(params.type);
+  const title = generateActivityTitle(params.type, params.entityName);
 
-  await addActivity(redis, activity, params.targetUserIds);
-
-  // Also store in database for persistence
-  try {
-    await prisma.auditLog.create({
-      data: {
-        action: `activity:${params.type}`,
-        actorId: params.actorId,
-        entityType: params.entityType,
-        entityId: params.entityId,
-        metadata: {
-          activityId: activity.id,
+  // Create activities for each target user
+  const activities = await Promise.all(
+    params.targetUserIds.map(async (userId) => {
+      const activity = await prisma.activity.create({
+        data: {
+          type: params.type,
+          category,
+          userId,
+          actorId: params.actorId,
+          actorName: params.actorName,
+          entityType: params.entityType,
+          entityId: params.entityId,
           entityName: params.entityName,
+          title,
           description: params.description,
-          targetUserIds: params.targetUserIds,
-          ...params.metadata,
+          metadata: params.metadata as Prisma.InputJsonValue ?? undefined,
+          isRead: false,
         },
-      },
-    });
-  } catch (error) {
-    logger.error({ error }, 'Failed to persist activity to audit log');
-  }
+      });
 
-  return activity;
+      // Invalidate cache for this user
+      await invalidateCache(redis, userId);
+
+      return activity;
+    })
+  );
+
+  const firstActivity = activities[0];
+  return {
+    id: firstActivity?.id ?? '',
+    type: params.type,
+    category,
+  };
 }
 
 // =============================================================================
@@ -312,36 +254,30 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
 
         const { category, entityType, entityId, unreadOnly, limit = DEFAULT_PAGE_SIZE, offset = 0, since } = request.query;
 
-        let activities = await getUserActivities(redis, userId);
+        // Build where clause
+        const where: Record<string, unknown> = { userId };
+        if (category) where.category = category;
+        if (entityType) where.entityType = entityType;
+        if (entityId) where.entityId = entityId;
+        if (unreadOnly) where.isRead = false;
+        if (since) where.createdAt = { gt: new Date(since) };
 
-        // Apply filters
-        if (category) {
-          activities = activities.filter((a) => a.category === category);
-        }
-        if (entityType) {
-          activities = activities.filter((a) => a.entityType === entityType);
-        }
-        if (entityId) {
-          activities = activities.filter((a) => a.entityId === entityId);
-        }
-        if (unreadOnly) {
-          activities = activities.filter((a) => !a.isRead);
-        }
-        if (since) {
-          const sinceDate = new Date(since);
-          activities = activities.filter((a) => new Date(a.createdAt) > sinceDate);
-        }
-
-        const total = activities.length;
-        const paginated = activities.slice(offset, offset + limit);
-
-        // Count unread
-        const unreadCount = activities.filter((a) => !a.isRead).length;
+        // Fetch from database
+        const [activities, total, unreadCount] = await Promise.all([
+          prisma.activity.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            skip: offset,
+            take: limit,
+          }),
+          prisma.activity.count({ where }),
+          prisma.activity.count({ where: { userId, isRead: false } }),
+        ]);
 
         return reply.send({
           success: true,
           data: {
-            activities: paginated,
+            activities,
             pagination: {
               total,
               limit,
@@ -386,19 +322,24 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
           });
         }
 
-        const activities = await getUserActivities(redis, userId);
-        const unreadCount = activities.filter((a) => !a.isRead).length;
-
-        // Count by category
-        const byCategory: Record<string, number> = {};
-        activities.filter((a) => !a.isRead).forEach((a) => {
-          byCategory[a.category] = (byCategory[a.category] || 0) + 1;
+        // Get counts by category
+        const counts = await prisma.activity.groupBy({
+          by: ['category'],
+          where: { userId, isRead: false },
+          _count: true,
         });
+
+        const byCategory: Record<string, number> = {};
+        let total = 0;
+        for (const count of counts) {
+          byCategory[count.category] = count._count;
+          total += count._count;
+        }
 
         return reply.send({
           success: true,
           data: {
-            total: unreadCount,
+            total,
             byCategory,
           },
         });
@@ -444,8 +385,9 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
           });
         }
 
-        const activities = await getUserActivities(redis, userId);
-        const activity = activities.find((a) => a.id === activityId);
+        const activity = await prisma.activity.findFirst({
+          where: { id: activityId, userId },
+        });
 
         if (!activity) {
           return reply.status(404).send({
@@ -454,8 +396,12 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
           });
         }
 
-        activity.isRead = true;
-        await saveUserActivities(redis, userId, activities);
+        await prisma.activity.update({
+          where: { id: activityId },
+          data: { isRead: true },
+        });
+
+        await invalidateCache(redis, userId);
 
         return reply.send({
           success: true,
@@ -508,26 +454,21 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
           });
         }
 
-        const activities = await getUserActivities(redis, userId);
-        let markedCount = 0;
+        const where: Record<string, unknown> = { userId, isRead: false };
+        if (category) where.category = category as ActivityCategory;
+        if (before) where.createdAt = { lte: new Date(before) };
 
-        for (const activity of activities) {
-          if (activity.isRead) continue;
+        const result = await prisma.activity.updateMany({
+          where,
+          data: { isRead: true },
+        });
 
-          // Apply filters
-          if (category && activity.category !== category) continue;
-          if (before && new Date(activity.createdAt) > new Date(before)) continue;
-
-          activity.isRead = true;
-          markedCount++;
-        }
-
-        await saveUserActivities(redis, userId, activities);
+        await invalidateCache(redis, userId);
 
         return reply.send({
           success: true,
-          message: `${markedCount} activities marked as read`,
-          data: { markedCount },
+          message: `${result.count} activities marked as read`,
+          data: { markedCount: result.count },
         });
       } catch (error) {
         logger.error({ error }, 'Failed to mark all activities as read');
@@ -571,19 +512,22 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
           });
         }
 
-        let activities = await getUserActivities(redis, userId);
-        const initialLength = activities.length;
+        const activity = await prisma.activity.findFirst({
+          where: { id: activityId, userId },
+        });
 
-        activities = activities.filter((a) => a.id !== activityId);
-
-        if (activities.length === initialLength) {
+        if (!activity) {
           return reply.status(404).send({
             success: false,
             error: { code: 'NOT_FOUND', message: 'Activity not found' },
           });
         }
 
-        await saveUserActivities(redis, userId, activities);
+        await prisma.activity.delete({
+          where: { id: activityId },
+        });
+
+        await invalidateCache(redis, userId);
 
         return reply.send({
           success: true,
@@ -720,14 +664,13 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
         const { entityType, entityId } = request.params;
         const { limit = 50 } = request.query;
 
-        // Fetch from audit logs
-        const logs = await prisma.auditLog.findMany({
+        // Fetch from Activity table
+        const activities = await prisma.activity.findMany({
           where: {
-            entityType: entityType,
-            entityId: entityId,
-            action: { startsWith: 'activity:' },
+            entityType,
+            entityId,
           },
-          orderBy: { timestamp: 'desc' },
+          orderBy: { createdAt: 'desc' },
           take: limit,
           include: {
             actor: {
@@ -736,17 +679,21 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
           },
         });
 
-        const activities = logs.map((log) => ({
-          id: (log.metadata as Record<string, string>)?.activityId || log.id,
-          type: log.action.replace('activity:', ''),
-          actorId: log.actorId,
-          actorName: log.actor ? `${log.actor.firstName} ${log.actor.lastName}` : undefined,
-          entityType: log.entityType,
-          entityId: log.entityId,
-          entityName: (log.metadata as Record<string, string>)?.entityName,
-          description: (log.metadata as Record<string, string>)?.description,
-          metadata: log.metadata,
-          timestamp: log.timestamp.toISOString(),
+        const formatted = activities.map((activity) => ({
+          id: activity.id,
+          type: activity.type,
+          category: activity.category,
+          actorId: activity.actorId,
+          actorName: activity.actor
+            ? `${activity.actor.firstName} ${activity.actor.lastName}`
+            : activity.actorName,
+          entityType: activity.entityType,
+          entityId: activity.entityId,
+          entityName: activity.entityName,
+          title: activity.title,
+          description: activity.description,
+          metadata: activity.metadata,
+          timestamp: activity.createdAt.toISOString(),
         }));
 
         return reply.send({
@@ -754,8 +701,8 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
           data: {
             entityType,
             entityId,
-            activities,
-            total: activities.length,
+            activities: formatted,
+            total: formatted.length,
           },
         });
       } catch (error) {
@@ -768,4 +715,3 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 }
-
