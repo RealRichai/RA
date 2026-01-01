@@ -166,6 +166,34 @@ Deployment is **manual-only** until AWS infrastructure is configured:
 
 See [docs/release-checklist.md](docs/release-checklist.md) for deployment requirements.
 
+## Policy Checks
+
+The codebase enforces policies via CI and local scripts.
+
+### HUMAN_IMPLEMENTATION_REQUIRED Policy
+
+Source files must not contain `HUMAN_IMPLEMENTATION_REQUIRED` markers. This policy ensures all implementation TODOs are resolved before merging.
+
+**CI Enforcement:**
+- Workflow: `.github/workflows/no-human-todos.yml`
+- Runs on: push to main/canonical-main, all PRs
+- Scans: `apps/`, `packages/`, `prisma/`, `docs/`
+- Excludes: `coverage/`, `.next/`, `dist/`, `.turbo/`
+
+**Run Locally:**
+
+```bash
+# Using the script
+./scripts/policy_scan.sh
+
+# Using pnpm
+pnpm policy:no-human-todos
+```
+
+**Exit Codes:**
+- `0` - No violations found
+- `1` - Violations found (blocks CI)
+
 ## License
 
 UNLICENSED - Private repository
