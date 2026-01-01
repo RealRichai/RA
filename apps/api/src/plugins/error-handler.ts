@@ -29,7 +29,7 @@ export function errorHandler(
   reply: FastifyReply
 ): FastifyReply {
   const requestId = request.id || generateId();
-  const trace = (request as any).trace as { traceId: string; spanId: string } | undefined;
+  const trace = request.trace;
   const traceId = trace?.traceId;
   const timestamp = new Date().toISOString();
   const isDev = process.env['NODE_ENV'] === 'development';

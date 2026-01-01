@@ -58,7 +58,7 @@ function getACLContext(request: FastifyRequest): ACLContext {
   }
   return {
     userId: user.id,
-    userRole: user.role as any,
+    userRole: user.role,
     userEmail: user.email,
   };
 }
@@ -815,10 +815,10 @@ export async function documentRoutes(app: FastifyInstance): Promise<void> {
         template = {
           id: dbTemplate.id,
           name: dbTemplate.name,
-          type: dbTemplate.type as any,
+          type: dbTemplate.type as string,
           format: dbTemplate.format as 'html' | 'docx',
           content: '', // Would need to fetch from storage
-          variables: dbTemplate.variables as any,
+          variables: dbTemplate.variables as Record<string, unknown>,
           isSystem: dbTemplate.isSystem,
           version: dbTemplate.version,
           marketId: dbTemplate.marketId || undefined,

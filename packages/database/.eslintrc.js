@@ -1,7 +1,7 @@
 module.exports = {
   extends: ['../../.eslintrc.js'],
   rules: {
-    // Console is allowed for provider logging
+    // Console is allowed in database package for startup messages
     'no-console': 'off',
   },
 };

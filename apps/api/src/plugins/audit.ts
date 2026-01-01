@@ -33,7 +33,7 @@ export async function writeAuditLog(
   // Fire and forget - don't await in the request path
   setImmediate(async () => {
     try {
-      const user = (request as any).user;
+      const user = request.user;
       
       await prisma.auditLog.create({
         data: {

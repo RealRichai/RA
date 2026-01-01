@@ -13,7 +13,7 @@ import type { Readable } from 'stream';
 
 import { prisma } from '@realriches/database';
 import { getStorageClient, getTemplateEngine, renderHtmlToPdf } from '@realriches/document-storage';
-import { generatePrefixedId } from '@realriches/utils';
+import { generatePrefixedId, logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 import { getStripe, isStripeConfigured, getOrCreateCustomer } from '../../lib/stripe';
@@ -183,7 +183,7 @@ export class MarketingService {
     });
 
     // Audit log
-    console.log('Audit: marketing.asset.generated', {
+    logger.info('Audit: marketing.asset.generated', {
       assetId: asset.id,
       listingId: input.listingId,
       type: input.type,
@@ -280,7 +280,7 @@ export class MarketingService {
     });
 
     // Audit log
-    console.log('Audit: marketing.media.uploaded', {
+    logger.info('Audit: marketing.media.uploaded', {
       mediaId: media.id,
       propertyId: input.propertyId,
       type: input.type,
@@ -381,7 +381,7 @@ export class MarketingService {
     });
 
     // Audit log
-    console.log('Audit: marketing.video.generation_started', {
+    logger.info('Audit: marketing.video.generation_started', {
       mediaId: media.id,
       jobId: result.data.id,
       propertyId: input.propertyId,
@@ -467,7 +467,7 @@ export class MarketingService {
     });
 
     // Audit log
-    console.log('Audit: marketing.3dgs.generation_started', {
+    logger.info('Audit: marketing.3dgs.generation_started', {
       mediaId: media.id,
       jobId: result.data.id,
       propertyId: input.propertyId,
@@ -597,7 +597,7 @@ export class MarketingService {
         });
 
         // Audit log
-        console.log('Audit: marketing.template.purchased', {
+        logger.info('Audit: marketing.template.purchased', {
           templateId: template.id,
           amount: template.priceAmount,
           paymentIntentId: paymentIntent.id,

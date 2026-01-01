@@ -10,7 +10,7 @@
  */
 
 import { getConfig } from '@realriches/config';
-import { prisma } from '@realriches/database';
+import { prisma, type User } from '@realriches/database';
 import type { EmailService } from '@realriches/email-service';
 import type { Role } from '@realriches/types';
 import { RolePermissionsMap } from '@realriches/types';
@@ -129,7 +129,7 @@ export class AuthService {
   // Registration
   // ===========================================================================
 
-  async register(input: RegisterInput): Promise<{ user: any; tokens: TokenPair }> {
+  async register(input: RegisterInput): Promise<{ user: Omit<User, 'passwordHash'>; tokens: TokenPair }> {
     const existingUser = await prisma.user.findUnique({
       where: { email: input.email.toLowerCase() },
     });
@@ -184,7 +184,7 @@ export class AuthService {
   // Login
   // ===========================================================================
 
-  async login(input: LoginInput): Promise<{ user: any; tokens: TokenPair }> {
+  async login(input: LoginInput): Promise<{ user: Omit<User, 'passwordHash'>; tokens: TokenPair }> {
     const email = input.email.toLowerCase();
 
     // Check if account is locked

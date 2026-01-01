@@ -1,5 +1,5 @@
 import { prisma } from '@realriches/database';
-import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
+import { generatePrefixedId, NotFoundError, ForbiddenError, logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -209,7 +209,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       // Auto-escalate emergencies (notification requires unit data which is included above)
       // Note: sendEmergencyNotification expects specific shape, skipping for now
       if (data.priority === 'emergency') {
-        console.log('Emergency work order created:', workOrder.id);
+        logger.info('Emergency work order created:', workOrder.id);
       }
 
       return reply.status(201).send({ success: true, data: workOrder });

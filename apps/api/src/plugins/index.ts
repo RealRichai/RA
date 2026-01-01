@@ -196,7 +196,7 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
 
   // Request logging (trace context added by tracing plugin)
   app.addHook('onRequest', async (request) => {
-    const trace = (request as any).trace;
+    const trace = request.trace;
     request.log.info({
       msg: 'request_start',
       method: request.method,
@@ -208,7 +208,7 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
 
   // Response logging
   app.addHook('onResponse', async (request, reply) => {
-    const trace = (request as any).trace;
+    const trace = request.trace;
     request.log.info({
       msg: 'request_complete',
       method: request.method,

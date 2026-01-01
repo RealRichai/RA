@@ -1,10 +1,12 @@
 module.exports = {
   extends: ['../../.eslintrc.js'],
   rules: {
-    // These functions are intentionally async for future database integration
-    '@typescript-eslint/require-await': 'off',
-    // Allow any for flexible rule input types
+    // Console is allowed for compliance logging
+    'no-console': 'off',
+    // Allow any types for dynamic compliance rules
+    '@typescript-eslint/no-explicit-any': 'off',
     '@typescript-eslint/no-unsafe-argument': 'off',
-    '@typescript-eslint/no-unsafe-assignment': 'off',
+    // Compliance gates are async for future database calls
+    '@typescript-eslint/require-await': 'off',
   },
 };

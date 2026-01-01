@@ -260,7 +260,7 @@ const tracingPluginCallback: FastifyPluginCallback<TracingPluginOptions> = (
     );
 
     // Attach to request
-    (request as any).trace = traceContext;
+    request.trace = traceContext;
 
     // Add trace context to request logger
     request.log = request.log.child({
@@ -272,7 +272,7 @@ const tracingPluginCallback: FastifyPluginCallback<TracingPluginOptions> = (
 
   // Add response headers
   fastify.addHook('onSend', async (request: FastifyRequest, reply: FastifyReply) => {
-    const trace = (request as any).trace as TraceContext | undefined;
+    const trace = request.trace;
 
     if (trace && options.includeResponseHeaders) {
       reply.header(options.traceIdHeader, trace.traceId);
@@ -285,7 +285,7 @@ const tracingPluginCallback: FastifyPluginCallback<TracingPluginOptions> = (
 
   // Log trace completion on response
   fastify.addHook('onResponse', async (request: FastifyRequest, reply: FastifyReply) => {
-    const trace = (request as any).trace as TraceContext | undefined;
+    const trace = request.trace;
 
     if (trace) {
       const duration = Date.now() - trace.startTime;

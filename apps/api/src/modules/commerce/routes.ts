@@ -137,7 +137,7 @@ type GuarantorApplyInput = z.infer<typeof GuarantorApplySchema>;
 
 function sendServiceResponse<T>(
   reply: FastifyReply,
-  response: { success: boolean; data?: T; error?: { code: string; message: string }; meta?: any },
+  response: { success: boolean; data?: T; error?: { code: string; message: string }; meta?: Record<string, unknown> },
   successStatus = 200
 ): FastifyReply {
   if (!response.success) {
@@ -303,7 +303,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       };
 
       // Get quotes from all or specified providers
-      const providerIds = data.providers as any[] | undefined;
+      const providerIds = data.providers as string[] | undefined;
       const comparisons = await registry.getMultiProviderQuotes(quoteRequest, providerIds);
 
       // Find the best quote (lowest premium with successful status)
@@ -883,7 +883,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Get raw body for signature verification
-      const rawBody = (request as any).rawBody || JSON.stringify(request.body);
+      const rawBody = request.rawBody?.toString() || JSON.stringify(request.body);
 
       try {
         const result = await lemonadeAdapter.processWebhook(rawBody, signature);
@@ -944,7 +944,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(401).send({ error: 'Missing signature' });
       }
 
-      const rawBody = (request as any).rawBody || JSON.stringify(request.body);
+      const rawBody = request.rawBody?.toString() || JSON.stringify(request.body);
 
       try {
         const result = await tgAdapter.processWebhook(rawBody, signature);

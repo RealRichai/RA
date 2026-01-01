@@ -5,7 +5,7 @@
  */
 
 import { prisma } from '@realriches/database';
-import { generatePrefixedId } from '@realriches/utils';
+import { generatePrefixedId, logger } from '@realriches/utils';
 import type { FastifyInstance } from 'fastify';
 
 // =============================================================================
@@ -74,7 +74,7 @@ export async function sendEmergencyNotification(
   const recipients = [owner.email];
 
   // Log notification (email sending stubbed for now)
-  console.log('Emergency notification would be sent', {
+  logger.info('Emergency notification would be sent', {
     notificationId,
     workOrderId: workOrder.id,
     recipients,
@@ -141,7 +141,7 @@ export async function sendEscalationNotification(
   if (fullWorkOrder.assignee) recipients.push(fullWorkOrder.assignee.email);
 
   // Log notification (email sending stubbed for now)
-  console.log('Escalation notification would be sent', {
+  logger.info('Escalation notification would be sent', {
     notificationId,
     workOrderId: workOrder.id,
     previousPriority,
@@ -196,7 +196,7 @@ export async function sendStatusUpdateNotification(
   });
 
   // Log notification (email sending stubbed for now)
-  console.log('Status update notification would be sent', {
+  logger.info('Status update notification would be sent', {
     notificationId,
     workOrderId,
     workOrderTitle: workOrder.title,

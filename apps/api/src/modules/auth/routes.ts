@@ -199,7 +199,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         });
       } catch (error) {
         // Add lockout remaining time to error response
-        if (error instanceof Error && (error as any).code === 'ACCOUNT_LOCKED') {
+        if (error instanceof Error && 'code' in error && error.code === 'ACCOUNT_LOCKED') {
           const lockoutRemaining = await authService.getLockoutRemaining(input.email);
           return reply.status(423).send({
             success: false,

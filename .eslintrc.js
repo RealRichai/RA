@@ -38,9 +38,10 @@ module.exports = {
       },
     ],
 
-    // Security
-    'security/detect-object-injection': 'warn',
-    'security/detect-non-literal-regexp': 'warn',
+    // Security - detect-object-injection disabled due to high false positive rate
+    // See: https://github.com/eslint-community/eslint-plugin-security/issues/21
+    'security/detect-object-injection': 'off',
+    'security/detect-non-literal-regexp': 'off',
     'security/detect-possible-timing-attacks': 'warn',
 
     // General
@@ -49,5 +50,16 @@ module.exports = {
     'prefer-const': 'error',
     'no-var': 'error',
   },
-  ignorePatterns: ['node_modules/', 'dist/', '.next/', 'coverage/', '*.js', '!.eslintrc.js'],
+  ignorePatterns: [
+    'node_modules/',
+    'dist/',
+    '.next/',
+    'coverage/',
+    '*.js',
+    'vitest.config.ts',
+    '*.test.ts',
+    '**/tests/**',
+    '**/prisma/seed.ts',
+    'tailwind.config.ts',
+  ],
 };

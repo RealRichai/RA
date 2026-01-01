@@ -1,4 +1,5 @@
 import { z } from 'zod';
+
 import { EmailSchema, UUIDSchema } from './common';
 
 // ============================================================================
@@ -92,7 +93,7 @@ export const PermissionSchema = z.enum([
 export type Permission = z.infer<typeof PermissionSchema>;
 
 export const RolePermissionsMap: Record<Role, Permission[]> = {
-  super_admin: Object.values(PermissionSchema.enum) as Permission[],
+  super_admin: Object.values(PermissionSchema.enum),
   admin: [
     'property:read', 'property:write', 'property:manage',
     'listing:read', 'listing:write', 'listing:publish',

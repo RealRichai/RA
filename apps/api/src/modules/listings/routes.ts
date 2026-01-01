@@ -387,8 +387,8 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
         brokerFeePaidBy: ((listing as unknown as { brokerFeePaidBy?: string }).brokerFeePaidBy || 'tenant') as 'tenant' | 'landlord',
         monthlyRent: listing.rent || 0,
         securityDepositAmount: listing.securityDepositAmount || undefined,
-        incomeRequirementMultiplier: (listing as any).incomeRequirementMultiplier,
-        creditScoreThreshold: (listing as any).creditScoreThreshold,
+        incomeRequirementMultiplier: (listing as unknown as { incomeRequirementMultiplier?: number }).incomeRequirementMultiplier,
+        creditScoreThreshold: (listing as unknown as { creditScoreThreshold?: number }).creditScoreThreshold,
         deliveredDisclosures: publishData.deliveredDisclosures,
         acknowledgedDisclosures: publishData.acknowledgedDisclosures,
       });

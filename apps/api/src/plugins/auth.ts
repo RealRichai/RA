@@ -193,6 +193,10 @@ export const authPlugin = fp(authPluginCallback, {
 
 // Type augmentation for decorators
 declare module 'fastify' {
+  interface FastifyRequest {
+    user?: AppUser;
+  }
+
   interface FastifyInstance {
     authenticate: (
       request: FastifyRequest,

@@ -522,10 +522,10 @@ export class CommerceService {
     minRating?: number;
     limit?: number;
     offset?: number;
-  }): Promise<ServiceResponse<any[]>> {
+  }): Promise<ServiceResponse<unknown[]>> {
     const { category, search, serviceArea, minRating, limit = 20, offset = 0 } = filters;
 
-    const where: any = {};
+    const where: Record<string, unknown> = {};
 
     if (category) {
       where.categories = { has: category };
@@ -608,7 +608,7 @@ export class CommerceService {
   async getVendorProducts(
     vendorId: string,
     filters?: { category?: string; limit?: number }
-  ): Promise<ServiceResponse<any[]>> {
+  ): Promise<ServiceResponse<unknown[]>> {
     // Mock products for now - would be from product catalog
     const products = [
       {
