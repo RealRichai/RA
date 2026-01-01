@@ -199,3 +199,17 @@ export { PrismaClient, Prisma };
 
 // Export generated types
 export * from '@prisma/client';
+
+// ============================================================================
+// Repositories
+// ============================================================================
+
+export {
+  tourAssetRepository,
+  tourConversionJobRepository,
+  type CreateTourAssetInput,
+  type UpdateTourAssetInput,
+  type TourAssetFilters,
+  type CreateConversionJobInput,
+  type ConversionJobFilters,
+} from './repositories/tour';

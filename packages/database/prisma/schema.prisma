@@ -475,6 +475,7 @@ model Listing {
   applications       TenantApplication[]
   media              ListingMedia[]
   availability       ListingAvailability?
+  tourAssets         TourAsset[]
 
   @@index([propertyId])
   @@index([landlordId])
@@ -7894,4 +7895,105 @@ model BackgroundCheckReport {
 
   @@index([status])
   @@map("background_check_reports")
+}
+
+// =============================================================================
+// 3D Tour Assets (RR-ENG-UPDATE-2026-001)
+// =============================================================================
+
+enum TourAssetStatus {
+  pending
+  processing
+  ready
+  failed
+  archived
+
+  @@map("tour_asset_status")
+}
+
+enum TourConversionJobStatus {
+  queued
+  processing
+  completed
+  failed
+  cancelled
+
+  @@map("tour_conversion_job_status")
+}
+
+// TourAsset - PLY source retention and SOG distribution provenance
+model TourAsset {
+  id                String          @id @default(uuid()) @db.Uuid
+  listingId         String          @map("listing_id") @db.Uuid
+  market            String
+
+  // PLY source (raw 3DGS capture)
+  plyS3Key          String          @map("ply_s3_key")
+  plyChecksum       String          @map("ply_checksum")
+  plyVersionId      String?         @map("ply_version_id")
+  plySizeBytes      BigInt?         @map("ply_size_bytes")
+
+  // SOG output (Scene Optimized Gaussian)
+  sogS3Key          String?         @map("sog_s3_key")
+  sogChecksum       String?         @map("sog_checksum")
+  sogSizeBytes      BigInt?         @map("sog_size_bytes")
+
+  // Conversion metadata
+  converterVersion  String?         @map("converter_version")
+  iterations        Int?
+  conversionParams  Json?           @map("conversion_params")
+
+  // QA metrics
+  qaScore           Float?          @map("qa_score")
+  qaReport          Json?           @map("qa_report")
+  qaPassedAt        DateTime?       @map("qa_passed_at")
+
+  // Status and metadata
+  status            TourAssetStatus @default(pending)
+  metadata          Json?
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  listing           Listing         @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  conversionJobs    TourConversionJob[]
+
+  @@index([listingId])
+  @@index([market])
+  @@index([status])
+  @@index([createdAt])
+  @@map("tour_assets")
+}
+
+// TourConversionJob - Tracks PLY to SOG conversion jobs
+model TourConversionJob {
+  id              String                   @id @default(uuid()) @db.Uuid
+  tourAssetId     String                   @map("tour_asset_id") @db.Uuid
+
+  // Job status
+  status          TourConversionJobStatus  @default(queued)
+  attempts        Int                      @default(0)
+  maxAttempts     Int                      @default(3) @map("max_attempts")
+
+  // Error handling
+  errorCode       String?                  @map("error_code")
+  errorMessage    String?                  @map("error_message")
+  errorDetails    Json?                    @map("error_details")
+
+  // Timing
+  queuedAt        DateTime                 @default(now()) @map("queued_at")
+  startedAt       DateTime?                @map("started_at")
+  completedAt     DateTime?                @map("completed_at")
+
+  // Worker metadata
+  workerId        String?                  @map("worker_id")
+  workerVersion   String?                  @map("worker_version")
+
+  // Relations
+  tourAsset       TourAsset                @relation(fields: [tourAssetId], references: [id], onDelete: Cascade)
+
+  @@index([tourAssetId])
+  @@index([status])
+  @@index([queuedAt])
+  @@map("tour_conversion_jobs")
 }
