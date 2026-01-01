@@ -88,6 +88,27 @@ export const FeatureFlag = {
 
   /** Utility concierge service */
   PARTNER_UTILITY_CONCIERGE: 'PARTNER_UTILITY_CONCIERGE',
+
+  /** Guarantor services (TheGuarantors, Insurent, etc.) */
+  PARTNER_GUARANTOR_SERVICES: 'PARTNER_GUARANTOR_SERVICES',
+
+  /** Moving services integration */
+  PARTNER_MOVING_SERVICES: 'PARTNER_MOVING_SERVICES',
+
+  /** Vendor marketplace (furniture, appliances, cleaning) */
+  PARTNER_VENDOR_MARKETPLACE: 'PARTNER_VENDOR_MARKETPLACE',
+
+  /** Partner sandbox mode for testing without real API calls */
+  PARTNER_SANDBOX_MODE: 'PARTNER_SANDBOX_MODE',
+
+  /** Partner revenue dashboard for admin */
+  PARTNER_REVENUE_DASHBOARD: 'PARTNER_REVENUE_DASHBOARD',
+
+  /** Partner attribution tracking */
+  PARTNER_ATTRIBUTION_TRACKING: 'PARTNER_ATTRIBUTION_TRACKING',
+
+  /** Partner commission payments */
+  PARTNER_COMMISSION_PAYMENTS: 'PARTNER_COMMISSION_PAYMENTS',
 } as const;
 
 export type FeatureFlag = (typeof FeatureFlag)[keyof typeof FeatureFlag];
@@ -108,6 +129,13 @@ export const FeatureFlagSchema = z.enum([
   'PARTNER_LEMONADE',
   'PARTNER_RHINO',
   'PARTNER_UTILITY_CONCIERGE',
+  'PARTNER_GUARANTOR_SERVICES',
+  'PARTNER_MOVING_SERVICES',
+  'PARTNER_VENDOR_MARKETPLACE',
+  'PARTNER_SANDBOX_MODE',
+  'PARTNER_REVENUE_DASHBOARD',
+  'PARTNER_ATTRIBUTION_TRACKING',
+  'PARTNER_COMMISSION_PAYMENTS',
 ]);
 
 /**
@@ -283,6 +311,69 @@ export const FEATURE_FLAG_REGISTRY: Record<FeatureFlag, FeatureFlagMetadata> = {
     rolloutPhase: 'BETA',
     defaultEnabled: false,
     marketGated: true,
+  },
+  PARTNER_GUARANTOR_SERVICES: {
+    key: 'PARTNER_GUARANTOR_SERVICES',
+    name: 'Guarantor Services',
+    description: 'Guarantor services integration (TheGuarantors, Insurent)',
+    category: 'PARTNER',
+    rolloutPhase: 'GA',
+    defaultEnabled: true,
+    marketGated: false,
+  },
+  PARTNER_MOVING_SERVICES: {
+    key: 'PARTNER_MOVING_SERVICES',
+    name: 'Moving Services',
+    description: 'Moving services integration for tenant relocations',
+    category: 'PARTNER',
+    rolloutPhase: 'BETA',
+    defaultEnabled: false,
+    marketGated: true,
+  },
+  PARTNER_VENDOR_MARKETPLACE: {
+    key: 'PARTNER_VENDOR_MARKETPLACE',
+    name: 'Vendor Marketplace',
+    description: 'Vendor marketplace for furniture, appliances, cleaning services',
+    category: 'PARTNER',
+    rolloutPhase: 'BETA',
+    defaultEnabled: false,
+    marketGated: true,
+  },
+  PARTNER_SANDBOX_MODE: {
+    key: 'PARTNER_SANDBOX_MODE',
+    name: 'Partner Sandbox Mode',
+    description: 'Enable sandbox mode for partner integrations (no real API calls)',
+    category: 'PARTNER',
+    rolloutPhase: 'GA',
+    defaultEnabled: true,
+    marketGated: false,
+  },
+  PARTNER_REVENUE_DASHBOARD: {
+    key: 'PARTNER_REVENUE_DASHBOARD',
+    name: 'Partner Revenue Dashboard',
+    description: 'Admin dashboard for viewing partner attribution and revenue',
+    category: 'PARTNER',
+    rolloutPhase: 'GA',
+    defaultEnabled: true,
+    marketGated: false,
+  },
+  PARTNER_ATTRIBUTION_TRACKING: {
+    key: 'PARTNER_ATTRIBUTION_TRACKING',
+    name: 'Partner Attribution Tracking',
+    description: 'Track revenue attribution for partner referrals',
+    category: 'PARTNER',
+    rolloutPhase: 'GA',
+    defaultEnabled: true,
+    marketGated: false,
+  },
+  PARTNER_COMMISSION_PAYMENTS: {
+    key: 'PARTNER_COMMISSION_PAYMENTS',
+    name: 'Partner Commission Payments',
+    description: 'Automated commission payments to partners',
+    category: 'PARTNER',
+    rolloutPhase: 'BETA',
+    defaultEnabled: false,
+    marketGated: false,
   },
 };
 

@@ -5,6 +5,8 @@ import { MockUtilitiesProvider } from '../mocks/utilities.mock';
 import { MockMovingProvider } from '../mocks/moving.mock';
 import { MockInsuranceProvider } from '../mocks/insurance.mock';
 import { MockGuarantorProvider } from '../mocks/guarantor.mock';
+import { MockVendorProvider } from '../mocks/vendor';
+import type { VendorCategory } from '../contracts/vendor';
 
 describe('MockUtilitiesProvider', () => {
   let provider: MockUtilitiesProvider;
@@ -687,6 +689,368 @@ describe('MockGuarantorProvider', () => {
   });
 });
 
+describe('MockVendorProvider', () => {
+  let provider: MockVendorProvider;
+
+  beforeEach(() => {
+    provider = new MockVendorProvider();
+  });
+
+  describe('interface compliance', () => {
+    it('has required properties', () => {
+      expect(provider.providerId).toBe('mock_vendor');
+      expect(provider.providerName).toBe('Mock Vendor Provider');
+      expect(provider.isMock).toBe(true);
+    });
+
+    it('passes health check', async () => {
+      const result = await provider.healthCheck();
+      expect(result).toBe(true);
+    });
+
+    it('initializes with mock data', () => {
+      expect(provider.getVendorCount()).toBeGreaterThan(0);
+      expect(provider.getProductCount()).toBeGreaterThan(0);
+    });
+  });
+
+  describe('searchVendors', () => {
+    it('returns vendors for a valid address', async () => {
+      const result = await provider.searchVendors({
+        address: {
+          street1: '123 Main St',
+          city: 'New York',
+          state: 'NY',
+          postalCode: '10001',
+          country: 'US',
+        },
+      });
+
+      expect(isSuccess(result)).toBe(true);
+      if (isSuccess(result)) {
+        expect(result.data.vendors.length).toBeGreaterThan(0);
+        expect(result.data.total).toBeGreaterThan(0);
+        expect(result.metadata.isMock).toBe(true);
+      }
+    });
+
+    it('filters by categories', async () => {
+      const result = await provider.searchVendors({
+        address: {
+          street1: '123 Main St',
+          city: 'New York',
+          state: 'NY',
+          postalCode: '10001',
+          country: 'US',
+        },
+        categories: ['FURNITURE', 'CLEANING'],
+      });
+
+      expect(isSuccess(result)).toBe(true);
+      if (isSuccess(result)) {
+        expect(result.data.vendors.length).toBeGreaterThan(0);
+        for (const vendor of result.data.vendors) {
+          expect(
+            vendor.categories.some((c) => ['FURNITURE', 'CLEANING'].includes(c))
+          ).toBe(true);
+        }
+      }
+    });
+
+    it('supports pagination', async () => {
+      const result = await provider.searchVendors({
+        address: {
+          street1: '123 Main St',
+          city: 'New York',
+          state: 'NY',
+          postalCode: '10001',
+          country: 'US',
+        },
+        limit: 2,
+        offset: 0,
+      });
+
+      expect(isSuccess(result)).toBe(true);
+      if (isSuccess(result)) {
+        expect(result.data.vendors.length).toBeLessThanOrEqual(2);
+      }
+    });
+  });
+
+  describe('searchProducts', () => {
+    it('returns products', async () => {
+      const result = await provider.searchProducts({});
+
+      expect(isSuccess(result)).toBe(true);
+      if (isSuccess(result)) {
+        expect(result.data.products.length).toBeGreaterThan(0);
+        expect(result.data.total).toBeGreaterThan(0);
+      }
+    });
+
+    it('filters by category', async () => {
+      const result = await provider.searchProducts({
+        category: 'FURNITURE',
+      });
+
+      expect(isSuccess(result)).toBe(true);
+      if (isSuccess(result)) {
+        for (const product of result.data.products) {
+          expect(product.category).toBe('FURNITURE');
+        }
+      }
+    });
+
+    it('filters by service type', async () => {
+      const result = await provider.searchProducts({
+        serviceType: 'ONE_TIME_SERVICE',
+      });
+
+      expect(isSuccess(result)).toBe(true);
+      if (isSuccess(result)) {
+        for (const product of result.data.products) {
+          expect(product.serviceType).toBe('ONE_TIME_SERVICE');
+        }
+      }
+    });
+
+    it('filters by in-stock only', async () => {
+      const result = await provider.searchProducts({
+        inStockOnly: true,
+      });
+
+      expect(isSuccess(result)).toBe(true);
+      if (isSuccess(result)) {
+        for (const product of result.data.products) {
+          expect(product.inStock).toBe(true);
+        }
+      }
+    });
+  });
+
+  describe('getProduct', () => {
+    it('returns a product by ID', async () => {
+      // First get a product ID from search
+      const searchResult = await provider.searchProducts({});
+      expect(isSuccess(searchResult)).toBe(true);
+
+      if (isSuccess(searchResult)) {
+        const productId = searchResult.data.products[0]!.productId;
+        const result = await provider.getProduct(productId);
+
+        expect(isSuccess(result)).toBe(true);
+        if (isSuccess(result)) {
+          expect(result.data.productId).toBe(productId);
+        }
+      }
+    });
+
+    it('returns error for non-existent product', async () => {
+      const result = await provider.getProduct('nonexistent');
+
+      expect(isFailure(result)).toBe(true);
+      if (isFailure(result)) {
+        expect(result.error.code).toBe('RESOURCE_NOT_FOUND');
+      }
+    });
+  });
+
+  describe('createOrder', () => {
+    it('creates an order successfully', async () => {
+      // Get vendor and product
+      const vendorResult = await provider.searchVendors({
+        address: {
+          street1: '123 Main St',
+          city: 'New York',
+          state: 'NY',
+          postalCode: '10001',
+          country: 'US',
+        },
+      });
+      expect(isSuccess(vendorResult)).toBe(true);
+
+      const productResult = await provider.searchProducts({});
+      expect(isSuccess(productResult)).toBe(true);
+
+      if (isSuccess(vendorResult) && isSuccess(productResult)) {
+        const vendor = vendorResult.data.vendors[0]!;
+        const product = productResult.data.products[0]!;
+
+        const result = await provider.createOrder({
+          vendorId: vendor.vendorId,
+          items: [{ productId: product.productId, quantity: 1 }],
+          deliveryAddress: {
+            street1: '123 Main St',
+            city: 'New York',
+            state: 'NY',
+            postalCode: '10001',
+            country: 'US',
+          },
+          contact: {
+            firstName: 'John',
+            lastName: 'Doe',
+            email: 'john@example.com',
+          },
+        });
+
+        expect(isSuccess(result)).toBe(true);
+        if (isSuccess(result)) {
+          expect(result.data.orderId).toBeDefined();
+          expect(result.data.confirmationNumber).toBeDefined();
+          expect(result.data.status).toBe('CONFIRMED');
+          expect(result.data.lines.length).toBe(1);
+          expect(result.data.totalAmount.amount).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it('returns error for non-existent vendor', async () => {
+      const result = await provider.createOrder({
+        vendorId: 'nonexistent',
+        items: [{ productId: 'product_0001', quantity: 1 }],
+        deliveryAddress: {
+          street1: '123 Main St',
+          city: 'New York',
+          state: 'NY',
+          postalCode: '10001',
+          country: 'US',
+        },
+        contact: {
+          firstName: 'John',
+          lastName: 'Doe',
+          email: 'john@example.com',
+        },
+      });
+
+      expect(isFailure(result)).toBe(true);
+      if (isFailure(result)) {
+        expect(result.error.code).toBe('RESOURCE_NOT_FOUND');
+      }
+    });
+  });
+
+  describe('getOrder', () => {
+    it('retrieves an existing order', async () => {
+      const vendorResult = await provider.searchVendors({
+        address: {
+          street1: '123 Main St',
+          city: 'New York',
+          state: 'NY',
+          postalCode: '10001',
+          country: 'US',
+        },
+      });
+      const productResult = await provider.searchProducts({});
+
+      expect(isSuccess(vendorResult)).toBe(true);
+      expect(isSuccess(productResult)).toBe(true);
+
+      if (isSuccess(vendorResult) && isSuccess(productResult)) {
+        const createResult = await provider.createOrder({
+          vendorId: vendorResult.data.vendors[0]!.vendorId,
+          items: [{ productId: productResult.data.products[0]!.productId, quantity: 1 }],
+          deliveryAddress: {
+            street1: '123 Main St',
+            city: 'New York',
+            state: 'NY',
+            postalCode: '10001',
+            country: 'US',
+          },
+          contact: {
+            firstName: 'John',
+            lastName: 'Doe',
+            email: 'john@example.com',
+          },
+        });
+
+        expect(isSuccess(createResult)).toBe(true);
+        if (isSuccess(createResult)) {
+          const getResult = await provider.getOrder(createResult.data.orderId);
+
+          expect(isSuccess(getResult)).toBe(true);
+          if (isSuccess(getResult)) {
+            expect(getResult.data.orderId).toBe(createResult.data.orderId);
+          }
+        }
+      }
+    });
+  });
+
+  describe('cancelOrder', () => {
+    it('cancels an existing order', async () => {
+      const vendorResult = await provider.searchVendors({
+        address: {
+          street1: '123 Main St',
+          city: 'New York',
+          state: 'NY',
+          postalCode: '10001',
+          country: 'US',
+        },
+      });
+      const productResult = await provider.searchProducts({});
+
+      expect(isSuccess(vendorResult)).toBe(true);
+      expect(isSuccess(productResult)).toBe(true);
+
+      if (isSuccess(vendorResult) && isSuccess(productResult)) {
+        const createResult = await provider.createOrder({
+          vendorId: vendorResult.data.vendors[0]!.vendorId,
+          items: [{ productId: productResult.data.products[0]!.productId, quantity: 1 }],
+          deliveryAddress: {
+            street1: '123 Main St',
+            city: 'New York',
+            state: 'NY',
+            postalCode: '10001',
+            country: 'US',
+          },
+          contact: {
+            firstName: 'John',
+            lastName: 'Doe',
+            email: 'john@example.com',
+          },
+        });
+
+        expect(isSuccess(createResult)).toBe(true);
+        if (isSuccess(createResult)) {
+          const cancelResult = await provider.cancelOrder(createResult.data.orderId, 'Changed my mind');
+
+          expect(isSuccess(cancelResult)).toBe(true);
+          if (isSuccess(cancelResult)) {
+            expect(cancelResult.data.status).toBe('CANCELLED');
+          }
+        }
+      }
+    });
+  });
+
+  describe('getAvailableSlots', () => {
+    it('returns available time slots', async () => {
+      const productResult = await provider.searchProducts({
+        serviceType: 'ONE_TIME_SERVICE',
+      });
+
+      expect(isSuccess(productResult)).toBe(true);
+      if (isSuccess(productResult) && productResult.data.products.length > 0) {
+        const product = productResult.data.products[0]!;
+        const result = await provider.getAvailableSlots(
+          product.vendorId,
+          product.productId,
+          new Date()
+        );
+
+        expect(isSuccess(result)).toBe(true);
+        if (isSuccess(result)) {
+          expect(Array.isArray(result.data)).toBe(true);
+          // Slots should be in format "HH:MM-HH:MM"
+          for (const slot of result.data) {
+            expect(slot).toMatch(/^\d{2}:\d{2}-\d{2}:\d{2}$/);
+          }
+        }
+      }
+    });
+  });
+});
+
 describe('Deterministic Behavior', () => {
   it('produces same results for same inputs across providers', async () => {
     const address = {
@@ -735,6 +1099,32 @@ describe('Deterministic Behavior', () => {
       expect(moveResult1.data.quotes[0]?.totalPrice.amount).toBe(
         moveResult2.data.quotes[0]?.totalPrice.amount
       );
+    }
+
+    // Vendor provider
+    const vendor1 = new MockVendorProvider();
+    const vendor2 = new MockVendorProvider();
+
+    const vendorRequest = {
+      address: {
+        street1: '123 Main St',
+        city: 'New York',
+        state: 'NY',
+        postalCode: '10001',
+        country: 'US',
+      },
+      categories: ['FURNITURE'] as VendorCategory[],
+    };
+
+    const vendorResult1 = await vendor1.searchVendors(vendorRequest);
+    const vendorResult2 = await vendor2.searchVendors(vendorRequest);
+
+    expect(isSuccess(vendorResult1)).toBe(true);
+    expect(isSuccess(vendorResult2)).toBe(true);
+
+    if (isSuccess(vendorResult1) && isSuccess(vendorResult2)) {
+      expect(vendorResult1.data.vendors.length).toBe(vendorResult2.data.vendors.length);
+      expect(vendorResult1.data.vendors[0]?.name).toBe(vendorResult2.data.vendors[0]?.name);
     }
   });
 });

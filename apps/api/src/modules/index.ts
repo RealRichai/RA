@@ -12,6 +12,7 @@ import { emailTemplateAdminRoutes } from './admin/email-templates';
 import { featureFlagAdminRoutes } from './admin/feature-flags';
 import { impersonationAdminRoutes } from './admin/impersonation';
 import { jobRoutes } from './admin/jobs';
+import { partnerRevenueRoutes } from './admin/partner-revenue';
 import { rateLimitAdminRoutes } from './admin/rate-limits';
 import { roleManagementRoutes } from './admin/roles';
 import { systemSettingsAdminRoutes } from './admin/system-settings';
@@ -163,6 +164,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(dataExportRoutes, { prefix: '/admin/exports' });
       await api.register(roleManagementRoutes, { prefix: '/admin/roles' });
       await api.register(bulkOperationsRoutes, { prefix: '/admin/bulk' });
+      await api.register(partnerRevenueRoutes);
       await api.register(evidenceRoutes);
     },
     { prefix }

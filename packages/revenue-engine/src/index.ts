@@ -21,3 +21,6 @@ export * from './stripe';
 
 // Modules
 export * from './modules';
+
+// Attribution
+export * from './attribution';
