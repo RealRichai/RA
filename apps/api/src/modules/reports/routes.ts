@@ -586,7 +586,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
           timeOfDay: data.timeOfDay,
           format: data.format as PrismaReportFormat,
           recipients: data.recipients,
-          filters: data.filters || {},
+          filters: (data.filters || {}) as object,
           isActive: true,
           nextRunAt,
         },
@@ -649,7 +649,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
       if (data.timeOfDay !== undefined) updateData.timeOfDay = data.timeOfDay;
       if (data.format !== undefined) updateData.format = data.format as PrismaReportFormat;
       if (data.recipients !== undefined) updateData.recipients = data.recipients;
-      if (data.filters !== undefined) updateData.filters = data.filters;
+      if (data.filters !== undefined) updateData.filters = data.filters as object;
       if (data.isActive !== undefined) updateData.isActive = data.isActive;
 
       // Recalculate next run date
