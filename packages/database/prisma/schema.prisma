@@ -36,6 +36,22 @@ enum UserStatus {
   deactivated
 }
 
+// SOC2 Trust Services Criteria categories
+enum SOC2Category {
+  Security
+  Availability
+  ProcessingIntegrity
+  Confidentiality
+  Privacy
+}
+
+// Evidence scope levels
+enum EvidenceScope {
+  org
+  tenant
+  user
+}
+
 model User {
   id                String     @id @default(uuid()) @db.Uuid
   email             String     @unique
@@ -86,6 +102,7 @@ model User {
   reportSchedules            ReportSchedule[]
   activities                 Activity[]
   actorActivities            Activity[]            @relation("ActivityActor")
+  evidenceRecords            EvidenceRecord[]      @relation("EvidenceActor")
 
   @@index([email])
   @@index([role])
@@ -1877,6 +1894,48 @@ model AuditLog {
   @@index([action])
   @@index([timestamp])
   @@map("audit_logs")
+}
+
+// =============================================================================
+// SOC2 Evidence Records
+// =============================================================================
+
+model EvidenceRecord {
+  id                String        @id @default(uuid()) @db.Uuid
+  controlId         String        @map("control_id")
+  category          SOC2Category
+  actorId           String?       @map("actor_id") @db.Uuid
+  actorEmail        String?       @map("actor_email")
+  actorType         String        @map("actor_type")
+  organizationId    String?       @map("organization_id") @db.Uuid
+  tenantId          String?       @map("tenant_id") @db.Uuid
+  scope             EvidenceScope
+  eventType         String        @map("event_type")
+  eventOutcome      String        @map("event_outcome")
+  summary           String
+  details           Json?
+  contentHash       String        @map("content_hash")
+  previousHash      String?       @map("previous_hash")
+  auditLogIds       String[]      @map("audit_log_ids")
+  complianceCheckId String?       @map("compliance_check_id") @db.Uuid
+  entityType        String?       @map("entity_type")
+  entityId          String?       @map("entity_id") @db.Uuid
+  ipAddress         String?       @map("ip_address")
+  userAgent         String?       @map("user_agent")
+  requestId         String?       @map("request_id")
+  occurredAt        DateTime      @map("occurred_at")
+  recordedAt        DateTime      @default(now()) @map("recorded_at")
+
+  actor User? @relation("EvidenceActor", fields: [actorId], references: [id])
+
+  @@index([controlId])
+  @@index([category])
+  @@index([organizationId])
+  @@index([tenantId])
+  @@index([eventType])
+  @@index([occurredAt])
+  @@index([entityType, entityId])
+  @@map("evidence_records")
 }
 
 // =============================================================================

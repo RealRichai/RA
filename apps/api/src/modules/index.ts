@@ -30,6 +30,7 @@ import { communicationRoutes } from './communications/routes';
 import { complianceRoutes } from './compliance/routes';
 import { esignatureRoutes } from './documents/esignature';
 import { documentRoutes } from './documents/routes';
+import { evidenceRoutes } from './evidence/routes';
 import { guestRoutes } from './guests/routes';
 import { healthRoutes } from './health/routes';
 import { hoaRoutes } from './hoa/routes';
@@ -162,6 +163,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(dataExportRoutes, { prefix: '/admin/exports' });
       await api.register(roleManagementRoutes, { prefix: '/admin/roles' });
       await api.register(bulkOperationsRoutes, { prefix: '/admin/bulk' });
+      await api.register(evidenceRoutes);
     },
     { prefix }
   );

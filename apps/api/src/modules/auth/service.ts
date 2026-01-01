@@ -28,6 +28,8 @@ import { hash, verify } from 'argon2';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type Redis from 'ioredis';
 
+import { emitAuthEvidence } from '../evidence/emitters/auth';
+
 // =============================================================================
 // Redis Key Prefixes
 // =============================================================================
@@ -780,6 +782,16 @@ export class AuthService {
     eventType: SecurityEventType,
     context: SecurityEventContext
   ): Promise<void> {
+    // Emit SOC2 evidence (non-blocking)
+    emitAuthEvidence(eventType, {
+      userId: context.userId,
+      email: context.email,
+      sessionId: context.sessionId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: context.metadata,
+    });
+
     // Non-blocking - fire and forget
     setImmediate(async () => {
       try {
