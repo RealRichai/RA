@@ -2,12 +2,13 @@ import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 
 import { computeFileMetadata } from './checksum';
-import { runQA, meetsQualityThreshold } from './qa';
-import { convertPlyToSog, getSplatTransformVersion } from './splat-transform';
+import { runQA, meetsQualityThreshold, getQAMode } from './qa';
+import { convertPlyToSog, getSplatTransformVersion, getBinaryInfo } from './splat-transform';
 import type {
   ConversionJobData,
   ConversionResult,
   ConversionError,
+  ConversionProvenance,
   WorkerConfig,
 } from './types';
 import { DEFAULT_WORKER_CONFIG } from './types';
@@ -54,7 +55,12 @@ export class TourConversionService {
     useMock = false
   ): Promise<ConversionResult> {
     const startTime = Date.now();
+    const startedAt = new Date();
     const workDir = join(this.config.workDir, jobData.tourAssetId);
+
+    // Get binary info for provenance
+    const binaryInfo = getBinaryInfo();
+    const qaMode = getQAMode();
 
     try {
       // Create work directory
@@ -82,6 +88,16 @@ export class TourConversionService {
         useMock
       );
 
+      // Build provenance metadata
+      const provenance: ConversionProvenance = {
+        qaMode,
+        binaryMode: conversionResult.binaryMode,
+        binaryPath: conversionResult.binaryPath,
+        environment: `${process.platform}/${process.arch}/node-${process.version}`,
+        startedAt,
+        completedAt: new Date(),
+      };
+
       if (!conversionResult.success) {
         return this.createErrorResult(
           plyMetadata.checksum,
@@ -94,7 +110,8 @@ export class TourConversionService {
             message: `Splat transform failed: ${conversionResult.stderr}`,
             details: { exitCode: conversionResult.exitCode },
             retryable: true,
-          }
+          },
+          provenance
         );
       }
 
@@ -103,6 +120,9 @@ export class TourConversionService {
 
       // Step 5: Run QA comparison
       const qaReport = await runQA(plyPath, sogPath);
+
+      // Update provenance with completion time
+      provenance.completedAt = new Date();
 
       if (!meetsQualityThreshold(qaReport, jobData.qualityThreshold)) {
         return this.createErrorResult(
@@ -116,7 +136,8 @@ export class TourConversionService {
             message: `QA score ${qaReport.score.toFixed(3)} below threshold ${jobData.qualityThreshold}`,
             details: { qaReport },
             retryable: false,
-          }
+          },
+          provenance
         );
       }
 
@@ -137,10 +158,20 @@ export class TourConversionService {
         iterations: jobData.iterations,
         conversionTimeMs: Date.now() - startTime,
         qaReport,
+        provenance,
       };
     } catch (err) {
       // Cleanup on error
       await this.cleanup(workDir).catch(() => {});
+
+      const provenance: ConversionProvenance = {
+        qaMode,
+        binaryMode: binaryInfo.mode,
+        binaryPath: binaryInfo.path,
+        environment: `${process.platform}/${process.arch}/node-${process.version}`,
+        startedAt,
+        completedAt: new Date(),
+      };
 
       return this.createErrorResult(
         '',
@@ -152,7 +183,8 @@ export class TourConversionService {
           code: 'UNEXPECTED_ERROR',
           message: err instanceof Error ? err.message : 'Unknown error',
           retryable: true,
-        }
+        },
+        provenance
       );
     }
   }
@@ -227,7 +259,8 @@ end_header
     converterVersion: string,
     iterations: number,
     startTime: number,
-    error: ConversionError
+    error: ConversionError,
+    provenance?: ConversionProvenance
   ): ConversionResult {
     return {
       success: false,
@@ -237,6 +270,7 @@ end_header
       iterations,
       conversionTimeMs: Date.now() - startTime,
       error,
+      provenance,
     };
   }
 }

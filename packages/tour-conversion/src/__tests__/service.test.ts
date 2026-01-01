@@ -82,6 +82,41 @@ describe('TourConversionService', () => {
 
       expect(result1.plyChecksum).toBe(result2.plyChecksum);
     });
+
+    it('includes provenance metadata', async () => {
+      const result = await service.processJob(mockJobData, true);
+
+      expect(result.provenance).toBeDefined();
+      expect(result.provenance?.qaMode).toBe('mock');
+      // Binary mode can be 'local' (if package installed) or 'npx' (fallback)
+      expect(['local', 'npx']).toContain(result.provenance?.binaryMode);
+      expect(result.provenance?.binaryPath).toBeDefined();
+      expect(result.provenance?.environment).toBeDefined();
+      expect(result.provenance?.startedAt).toBeInstanceOf(Date);
+      expect(result.provenance?.completedAt).toBeInstanceOf(Date);
+    });
+
+    it('provenance environment includes platform info', async () => {
+      const result = await service.processJob(mockJobData, true);
+
+      expect(result.provenance?.environment).toContain(process.platform);
+      expect(result.provenance?.environment).toContain(process.arch);
+      expect(result.provenance?.environment).toContain('node');
+    });
+
+    it('provenance timestamps are sequential', async () => {
+      const result = await service.processJob(mockJobData, true);
+
+      const startTime = result.provenance?.startedAt?.getTime() ?? 0;
+      const endTime = result.provenance?.completedAt?.getTime() ?? 0;
+      expect(endTime).toBeGreaterThanOrEqual(startTime);
+    });
+
+    it('includes QA mode in QA report', async () => {
+      const result = await service.processJob(mockJobData, true);
+
+      expect(result.qaReport?.mode).toBe('mock');
+    });
   });
 
   describe('singleton', () => {

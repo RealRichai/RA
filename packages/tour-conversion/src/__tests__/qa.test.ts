@@ -7,6 +7,8 @@ import {
   computeSSIM,
   runQA,
   meetsQualityThreshold,
+  getQAMode,
+  isRealQAModeEnabled,
 } from '../qa';
 import { CANONICAL_CAMERA_PATH } from '../types';
 
@@ -134,8 +136,64 @@ describe('QA System', () => {
         { x: 0, y: 0, z: 2, pitch: 0, yaw: 0 },
       ];
 
-      const report = await runQA('/mock/input.ply', '/mock/output.sog', customPath);
+      const report = await runQA('/mock/input.ply', '/mock/output.sog', { cameraPath: customPath });
       expect(report.frameScores).toHaveLength(2);
+    });
+
+    it('includes mode in QA report', async () => {
+      const report = await runQA('/mock/input.ply', '/mock/output.sog');
+
+      expect(report).toHaveProperty('mode');
+      expect(['mock', 'real']).toContain(report.mode);
+    });
+
+    it('uses mock mode in test environment', async () => {
+      const report = await runQA('/mock/input.ply', '/mock/output.sog');
+
+      expect(report.mode).toBe('mock');
+    });
+
+    it('respects forceMode option', async () => {
+      const report = await runQA('/mock/input.ply', '/mock/output.sog', { forceMode: 'mock' });
+      expect(report.mode).toBe('mock');
+    });
+  });
+
+  describe('getQAMode', () => {
+    it('returns mock in test environment', () => {
+      const mode = getQAMode();
+      expect(mode).toBe('mock');
+    });
+
+    it('returns valid QAMode value', () => {
+      const mode = getQAMode();
+      expect(['mock', 'real']).toContain(mode);
+    });
+  });
+
+  describe('isRealQAModeEnabled', () => {
+    it('returns false when REAL_QA_MODE is not set', () => {
+      const originalEnv = process.env['REAL_QA_MODE'];
+      delete process.env['REAL_QA_MODE'];
+
+      expect(isRealQAModeEnabled()).toBe(false);
+
+      if (originalEnv !== undefined) {
+        process.env['REAL_QA_MODE'] = originalEnv;
+      }
+    });
+
+    it('returns true when REAL_QA_MODE is "true"', () => {
+      const originalEnv = process.env['REAL_QA_MODE'];
+      process.env['REAL_QA_MODE'] = 'true';
+
+      expect(isRealQAModeEnabled()).toBe(true);
+
+      if (originalEnv !== undefined) {
+        process.env['REAL_QA_MODE'] = originalEnv;
+      } else {
+        delete process.env['REAL_QA_MODE'];
+      }
     });
   });
 
@@ -156,6 +214,7 @@ describe('QA System', () => {
         },
         generatedAt: new Date(),
         duration: 100,
+        mode: 'mock' as const,
       };
 
       expect(meetsQualityThreshold(report)).toBe(true);
@@ -177,6 +236,7 @@ describe('QA System', () => {
         },
         generatedAt: new Date(),
         duration: 100,
+        mode: 'mock' as const,
       };
 
       expect(meetsQualityThreshold(report)).toBe(false);
@@ -198,10 +258,42 @@ describe('QA System', () => {
         },
         generatedAt: new Date(),
         duration: 100,
+        mode: 'mock' as const,
       };
 
       expect(meetsQualityThreshold(report, 0.85)).toBe(true);
       expect(meetsQualityThreshold(report, 0.95)).toBe(false);
+    });
+
+    it('gates threshold regardless of QA mode', () => {
+      const mockReport = {
+        passed: true,
+        score: 0.9,
+        frameScores: [],
+        metrics: {
+          averageSSIM: 0.9,
+          minSSIM: 0.85,
+          maxSSIM: 0.95,
+          averagePHashDistance: 5,
+          framesRendered: 10,
+          framesPassed: 9,
+          renderTimeMs: 100,
+        },
+        generatedAt: new Date(),
+        duration: 100,
+        mode: 'mock' as const,
+      };
+
+      const realReport = {
+        ...mockReport,
+        mode: 'real' as const,
+      };
+
+      // Both modes should gate at the same threshold
+      expect(meetsQualityThreshold(mockReport, 0.85)).toBe(true);
+      expect(meetsQualityThreshold(realReport, 0.85)).toBe(true);
+      expect(meetsQualityThreshold(mockReport, 0.95)).toBe(false);
+      expect(meetsQualityThreshold(realReport, 0.95)).toBe(false);
     });
   });
 });

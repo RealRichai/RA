@@ -2,7 +2,7 @@ import { mkdir, rm, access, readFile } from 'fs/promises';
 import { join } from 'path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
-import { mockSplatTransform, convertPlyToSog } from '../splat-transform';
+import { mockSplatTransform, convertPlyToSog, getBinaryInfo, resolveBinaryPath } from '../splat-transform';
 
 describe('Splat Transform', () => {
   const testDir = join('/tmp', 'tour-conversion-test-splat');
@@ -114,6 +114,70 @@ end_header
       // Mock doesn't check input file existence in the same way
       // but real implementation would fail
       expect(result.success).toBe(true); // Mock always succeeds
+    });
+
+    it('returns binary mode metadata', async () => {
+      const result = await convertPlyToSog(
+        {
+          inputPath,
+          outputPath: join(testDir, 'output5.sog'),
+          iterations: 1000,
+          format: 'sog',
+        },
+        true
+      );
+
+      expect(result.binaryMode).toBe('local');
+      expect(result.binaryPath).toBeDefined();
+    });
+  });
+
+  describe('getBinaryInfo', () => {
+    it('returns binary info object', () => {
+      const info = getBinaryInfo();
+      expect(info).toHaveProperty('path');
+      expect(info).toHaveProperty('mode');
+      expect(['local', 'npx']).toContain(info.mode);
+    });
+
+    it('returns valid mode value', () => {
+      const info = getBinaryInfo();
+      // Either local (if package installed) or npx fallback
+      // Both are valid modes for the system
+      expect(['local', 'npx']).toContain(info.mode);
+    });
+
+    it('returns non-empty path', () => {
+      const info = getBinaryInfo();
+      expect(info.path.length).toBeGreaterThan(0);
+    });
+
+    it('local mode path does not contain npx', () => {
+      const info = getBinaryInfo();
+      if (info.mode === 'local') {
+        expect(info.path).not.toContain('npx');
+      }
+    });
+
+    it('npx mode path contains npx', () => {
+      const info = getBinaryInfo();
+      if (info.mode === 'npx') {
+        expect(info.path).toContain('npx');
+      }
+    });
+  });
+
+  describe('mockSplatTransform binary metadata', () => {
+    it('returns local mode for mock', async () => {
+      const result = await mockSplatTransform({
+        inputPath,
+        outputPath: join(testDir, 'output6.sog'),
+        iterations: 1000,
+        format: 'sog',
+      });
+
+      expect(result.binaryMode).toBe('local');
+      expect(result.binaryPath).toBe('mock');
     });
   });
 });

@@ -1,17 +1,84 @@
 import { spawn } from 'child_process';
+import { accessSync, constants } from 'fs';
 import { access, mkdir } from 'fs/promises';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 
 import type { SplatTransformOptions, SplatTransformResult } from './types';
+
+// =============================================================================
+// Binary Resolution
+// =============================================================================
+
+/**
+ * Resolve the path to the splat-transform binary
+ * Prefers local node_modules binary over npx
+ */
+export function resolveBinaryPath(): { path: string; mode: 'local' | 'npx' } {
+  // Try to find local binary in node_modules/.bin
+  const localBinary = join(
+    __dirname,
+    '..',
+    'node_modules',
+    '.bin',
+    'splat-transform'
+  );
+
+  // Check common locations for the binary
+  const possiblePaths = [
+    localBinary,
+    join(process.cwd(), 'node_modules', '.bin', 'splat-transform'),
+    join(__dirname, '..', '..', '..', 'node_modules', '.bin', 'splat-transform'),
+  ];
+
+  // In production, we always use local binary
+  // The package.json pins the version for reproducibility
+  for (const binPath of possiblePaths) {
+    try {
+      // Check if file exists and is executable synchronously for startup
+      accessSync(binPath, constants.X_OK);
+      return { path: binPath, mode: 'local' };
+    } catch {
+      // Continue to next path
+    }
+  }
+
+  // Fallback: npx mode - binary not found locally
+  throw new Error('splat-transform binary not found in local paths');
+}
+
+/**
+ * Get binary info for provenance tracking
+ */
+export function getBinaryInfo(): { path: string; mode: 'local' | 'npx' } {
+  try {
+    return resolveBinaryPath();
+  } catch {
+    // If resolution fails, we'll use npx as fallback (not recommended)
+    return { path: 'npx @playcanvas/splat-transform', mode: 'npx' };
+  }
+}
+
+// =============================================================================
+// Version Detection
+// =============================================================================
 
 /**
  * Get the version of the splat-transform CLI
  */
 export async function getSplatTransformVersion(): Promise<string> {
+  const { path: binaryPath, mode } = getBinaryInfo();
+
   return new Promise((resolve, reject) => {
-    const proc = spawn('npx', ['@playcanvas/splat-transform', '--version'], {
-      shell: true,
-    });
+    let proc;
+
+    if (mode === 'local') {
+      proc = spawn(binaryPath, ['--version'], { shell: false });
+    } else {
+      // Fallback to npx (not recommended for production)
+      proc = spawn('npx', ['@playcanvas/splat-transform', '--version'], {
+        shell: true,
+      });
+    }
 
     let stdout = '';
     let stderr = '';
@@ -36,13 +103,19 @@ export async function getSplatTransformVersion(): Promise<string> {
   });
 }
 
+// =============================================================================
+// Conversion Functions
+// =============================================================================
+
 /**
  * Run the splat-transform CLI to convert PLY to SOG format
+ * Uses local binary by default (no npx dependency at runtime)
  */
 export async function runSplatTransform(
   options: SplatTransformOptions
-): Promise<SplatTransformResult> {
+): Promise<SplatTransformResult & { binaryMode: 'local' | 'npx'; binaryPath: string }> {
   const startTime = Date.now();
+  const { path: binaryPath, mode: binaryMode } = getBinaryInfo();
 
   // Ensure output directory exists
   const outputDir = dirname(options.outputPath);
@@ -59,12 +132,14 @@ export async function runSplatTransform(
       stdout: '',
       exitCode: 1,
       durationMs: Date.now() - startTime,
+      binaryMode,
+      binaryPath,
     };
   }
 
   return new Promise((resolve) => {
+    let proc;
     const args = [
-      '@playcanvas/splat-transform',
       options.inputPath,
       '-o', options.outputPath,
       '-i', options.iterations.toString(),
@@ -78,14 +153,28 @@ export async function runSplatTransform(
       args.push('--verbose');
     }
 
-    const proc = spawn('npx', args, {
-      shell: true,
-      env: {
-        ...process.env,
-        // Force deterministic behavior for reproducible builds
-        SPLAT_SEED: '42',
-      },
-    });
+    if (binaryMode === 'local') {
+      proc = spawn(binaryPath, args, {
+        shell: false,
+        env: {
+          ...process.env,
+          // Force deterministic behavior for reproducible builds
+          SPLAT_SEED: '42',
+        },
+      });
+    } else {
+      // Fallback to npx (logs warning)
+      console.warn(
+        '[splat-transform] Using npx fallback. Install @playcanvas/splat-transform locally for better performance.'
+      );
+      proc = spawn('npx', ['@playcanvas/splat-transform', ...args], {
+        shell: true,
+        env: {
+          ...process.env,
+          SPLAT_SEED: '42',
+        },
+      });
+    }
 
     let stdout = '';
     let stderr = '';
@@ -106,6 +195,8 @@ export async function runSplatTransform(
         stdout,
         exitCode: code ?? 1,
         durationMs: Date.now() - startTime,
+        binaryMode,
+        binaryPath,
       });
     });
 
@@ -117,6 +208,8 @@ export async function runSplatTransform(
         stdout: '',
         exitCode: 1,
         durationMs: Date.now() - startTime,
+        binaryMode,
+        binaryPath,
       });
     });
   });
@@ -128,7 +221,7 @@ export async function runSplatTransform(
  */
 export async function mockSplatTransform(
   options: SplatTransformOptions
-): Promise<SplatTransformResult> {
+): Promise<SplatTransformResult & { binaryMode: 'local' | 'npx'; binaryPath: string }> {
   const startTime = performance.now();
   const { writeFile } = await import('fs/promises');
 
@@ -156,6 +249,8 @@ export async function mockSplatTransform(
     stdout: `Mock conversion completed with ${options.iterations} iterations`,
     exitCode: 0,
     durationMs,
+    binaryMode: 'local',
+    binaryPath: 'mock',
   };
 }
 
@@ -165,7 +260,7 @@ export async function mockSplatTransform(
 export async function convertPlyToSog(
   options: SplatTransformOptions,
   useMock = false
-): Promise<SplatTransformResult> {
+): Promise<SplatTransformResult & { binaryMode: 'local' | 'npx'; binaryPath: string }> {
   if (useMock || process.env['NODE_ENV'] === 'test') {
     return mockSplatTransform(options);
   }

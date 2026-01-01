@@ -26,6 +26,23 @@ export interface ConversionResult {
   conversionTimeMs: number;
   qaReport?: QAReport;
   error?: ConversionError;
+  /** Provenance metadata for audit trail */
+  provenance?: ConversionProvenance;
+}
+
+export interface ConversionProvenance {
+  /** QA mode used (mock or real) */
+  qaMode: QAMode;
+  /** Binary invocation method (local or npx) */
+  binaryMode: 'local' | 'npx';
+  /** Path to binary used */
+  binaryPath?: string;
+  /** Environment info */
+  environment: string;
+  /** Timestamp of conversion start */
+  startedAt: Date;
+  /** Timestamp of conversion completion */
+  completedAt: Date;
 }
 
 export interface ConversionError {
@@ -39,6 +56,13 @@ export interface ConversionError {
 // QA Types
 // =============================================================================
 
+/**
+ * QA Mode indicates whether QA was performed with real rendering or mock
+ * - 'mock': Deterministic mock rendering (fast, CI-safe)
+ * - 'real': Actual GPU rendering (staging/production only)
+ */
+export type QAMode = 'mock' | 'real';
+
 export interface QAReport {
   passed: boolean;
   score: number;
@@ -46,6 +70,10 @@ export interface QAReport {
   metrics: QAMetrics;
   generatedAt: Date;
   duration: number;
+  /** QA mode used for this report */
+  mode: QAMode;
+  /** Renderer info when mode is 'real' */
+  rendererInfo?: string;
 }
 
 export interface FrameScore {

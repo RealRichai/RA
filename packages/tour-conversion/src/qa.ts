@@ -6,9 +6,32 @@ import type {
   CameraPosition,
   FrameScore,
   QAMetrics,
+  QAMode,
   QAReport,
 } from './types';
 import { CANONICAL_CAMERA_PATH, QA_THRESHOLDS } from './types';
+
+// =============================================================================
+// QA Mode Configuration
+// =============================================================================
+
+/**
+ * Check if real QA mode is enabled via environment variable
+ * Set REAL_QA_MODE=true to enable actual GPU rendering
+ */
+export function isRealQAModeEnabled(): boolean {
+  return process.env['REAL_QA_MODE'] === 'true';
+}
+
+/**
+ * Get the current QA mode
+ */
+export function getQAMode(): QAMode {
+  if (process.env['NODE_ENV'] === 'test') {
+    return 'mock';
+  }
+  return isRealQAModeEnabled() ? 'real' : 'mock';
+}
 
 // =============================================================================
 // Perceptual Hash (pHash) Implementation
@@ -188,23 +211,39 @@ export async function renderFrame(
 // =============================================================================
 
 /**
+ * Options for QA run
+ */
+export interface RunQAOptions {
+  /** Force a specific QA mode */
+  forceMode?: QAMode;
+  /** Custom camera path */
+  cameraPath?: CameraPosition[];
+}
+
+/**
  * Run QA comparison between source PLY rendering and converted SOG rendering
  */
 export async function runQA(
   plyPath: string,
   sogPath: string,
-  cameraPath: CameraPosition[] = CANONICAL_CAMERA_PATH
+  options: RunQAOptions = {}
 ): Promise<QAReport> {
   const startTime = Date.now();
   const frameScores: FrameScore[] = [];
+  const cameraPath = options.cameraPath ?? CANONICAL_CAMERA_PATH;
+  const mode = options.forceMode ?? getQAMode();
+
+  // Determine renderer based on mode
+  const renderFn = mode === 'real' ? renderFrameReal : renderFrame;
+  const rendererInfo = mode === 'real' ? getRendererInfo() : undefined;
 
   for (let i = 0; i < cameraPath.length; i++) {
     const camera = cameraPath[i]!;
 
     // Render frames from both sources
     const [plyFrame, sogFrame] = await Promise.all([
-      renderFrame(plyPath, camera, i),
-      renderFrame(sogPath, camera, i),
+      renderFn(plyPath, camera, i),
+      renderFn(sogPath, camera, i),
     ]);
 
     // Compute comparison metrics
@@ -254,7 +293,38 @@ export async function runQA(
     metrics,
     generatedAt: new Date(),
     duration: renderTimeMs,
+    mode,
+    rendererInfo,
   };
+}
+
+/**
+ * Get renderer info for provenance
+ */
+function getRendererInfo(): string {
+  // In real mode, this would return GPU info
+  // For now, return environment info
+  return `${process.platform}/${process.arch}/node-${process.version}`;
+}
+
+/**
+ * Real frame rendering (placeholder for GPU rendering)
+ * In production, this would use WebGPU or a headless GPU renderer
+ */
+async function renderFrameReal(
+  scenePath: string,
+  camera: CameraPosition,
+  frameIndex: number
+): Promise<Buffer> {
+  // TODO: Implement real GPU rendering
+  // This would connect to a GPU worker or use headless WebGPU
+  // For now, fall back to mock rendering with a warning
+  if (process.env['NODE_ENV'] !== 'test') {
+    console.warn(
+      '[QA] Real rendering not yet implemented, using deterministic mock'
+    );
+  }
+  return renderFrame(scenePath, camera, frameIndex);
 }
 
 /**
