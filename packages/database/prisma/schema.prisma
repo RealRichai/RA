@@ -8101,3 +8101,71 @@ model Activity {
   @@index([createdAt])
   @@map("activities")
 }
+
+// =============================================================================
+// Workflow Execution - Durable Workflow Foundation
+// =============================================================================
+
+enum WorkflowStatus {
+  pending
+  running
+  completed
+  failed
+  cancelled
+  waiting_signal
+  timed_out
+}
+
+enum ActivityStatus {
+  pending
+  running
+  completed
+  failed
+  retrying
+  timed_out
+}
+
+model WorkflowExecution {
+  id              String         @id @default(uuid()) @db.Uuid
+  workflowId      String         @unique @map("workflow_id")
+  runId           String         @map("run_id")
+  workflowName    String         @map("workflow_name")
+  workflowVersion String         @map("workflow_version")
+  status          WorkflowStatus @default(pending)
+  input           Json
+  output          Json?
+  error           String?
+  currentStep     String?        @map("current_step")
+  stateHistory    Json           @default("[]") @map("state_history")
+  actorId         String?        @map("actor_id") @db.Uuid
+  organizationId  String?        @map("organization_id") @db.Uuid
+  startedAt       DateTime       @default(now()) @map("started_at")
+  completedAt     DateTime?      @map("completed_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@index([workflowName])
+  @@index([status])
+  @@index([organizationId])
+  @@index([startedAt])
+  @@map("workflow_executions")
+}
+
+model ActivityExecution {
+  id              String         @id @default(uuid()) @db.Uuid
+  workflowId      String         @map("workflow_id")
+  activityName    String         @map("activity_name")
+  idempotencyKey  String         @unique @map("idempotency_key")
+  status          ActivityStatus @default(pending)
+  input           Json
+  output          Json?
+  error           String?
+  attempt         Int            @default(1)
+  startedAt       DateTime       @default(now()) @map("started_at")
+  completedAt     DateTime?      @map("completed_at")
+
+  @@index([workflowId])
+  @@index([activityName])
+  @@index([status])
+  @@map("activity_executions")
+}
