@@ -218,6 +218,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check security headers configuration
+        run: ./scripts/check-security-headers.sh
+
+      - name: Check authorization middleware
+        run: ./scripts/check-auth-middleware.sh
+
       - name: Audit dependencies
         run: pnpm audit --audit-level moderate
         continue-on-error: true

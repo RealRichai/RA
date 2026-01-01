@@ -4,7 +4,7 @@
  * API routes for querying and managing SOC2 evidence records.
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import { SOC2_CONTROLS, getControlDetails, getEventTypesForControl } from './control-mappings';
@@ -14,6 +14,13 @@ import { EvidenceQueryParamsSchema, SOC2CategorySchema } from './types';
 export async function evidenceRoutes(fastify: FastifyInstance) {
   const evidenceService = getEvidenceService();
 
+  // All evidence routes require admin authentication
+  const adminAuth = async (request: FastifyRequest, reply: FastifyReply) => {
+    await fastify.authenticate(request, reply);
+    if (reply.sent) return;
+    fastify.authorize(request, reply, { roles: ['admin', 'super_admin'] });
+  };
+
   // ==========================================================================
   // Query Evidence Records
   // ==========================================================================
@@ -21,6 +28,7 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/admin/evidence',
     {
+      preHandler: [adminAuth],
       schema: {
         description: 'Query evidence records with filters',
         tags: ['Evidence'],
@@ -48,6 +56,7 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/admin/evidence/:id',
     {
+      preHandler: [adminAuth],
       schema: {
         description: 'Get a single evidence record by ID',
         tags: ['Evidence'],
@@ -79,6 +88,7 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/admin/evidence/:id/verify',
     {
+      preHandler: [adminAuth],
       schema: {
         description: 'Verify integrity of an evidence record',
         tags: ['Evidence'],
@@ -109,6 +119,7 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/admin/evidence/audit-report',
     {
+      preHandler: [adminAuth],
       schema: {
         description: 'Generate SOC2 audit report for a time period',
         tags: ['Evidence'],
@@ -136,6 +147,7 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/admin/evidence/chain-verify',
     {
+      preHandler: [adminAuth],
       schema: {
         description: 'Verify chain integrity for a time period',
         tags: ['Evidence'],
@@ -171,6 +183,7 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/admin/evidence/controls',
     {
+      preHandler: [adminAuth],
       schema: {
         description: 'List SOC2 controls with evidence counts',
         tags: ['Evidence'],
@@ -203,6 +216,7 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/admin/evidence/controls/:controlId',
     {
+      preHandler: [adminAuth],
       schema: {
         description: 'Get details for a specific SOC2 control',
         tags: ['Evidence'],
@@ -231,6 +245,7 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/admin/evidence/organization/:organizationId',
     {
+      preHandler: [adminAuth],
       schema: {
         description: 'Query evidence for a specific organization',
         tags: ['Evidence'],
@@ -259,6 +274,7 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/admin/evidence/category/:category',
     {
+      preHandler: [adminAuth],
       schema: {
         description: 'Query evidence for a specific SOC2 category',
         tags: ['Evidence'],
