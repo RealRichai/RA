@@ -43,7 +43,7 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
         },
       },
     },
-    async (request: FastifyRequest<{ Querystring: z.infer<typeof EvidenceQueryParamsSchema> }>) => {
+    async (request, _reply) => {
       const params = EvidenceQueryParamsSchema.parse(request.query);
       return evidenceService.query(params);
     }
@@ -106,8 +106,8 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
         },
       },
     },
-    async (request: FastifyRequest<{ Params: { id: string } }>) => {
-      const { id } = request.params;
+    async (request, _reply) => {
+      const { id } = request.params as { id: string };
       return evidenceService.verifyRecord(id);
     }
   );
@@ -130,12 +130,12 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
         }),
       },
     },
-    async (
-      request: FastifyRequest<{
-        Querystring: { startDate: Date; endDate: Date; organizationId?: string };
-      }>
-    ) => {
-      const { startDate, endDate, organizationId } = request.query;
+    async (request, _reply) => {
+      const { startDate, endDate, organizationId } = request.query as {
+        startDate: Date;
+        endDate: Date;
+        organizationId?: string;
+      };
       return evidenceService.generateAuditReport(startDate, endDate, organizationId);
     }
   );
@@ -166,12 +166,12 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
         },
       },
     },
-    async (
-      request: FastifyRequest<{
-        Querystring: { startDate: Date; endDate: Date; organizationId?: string };
-      }>
-    ) => {
-      const { startDate, endDate, organizationId } = request.query;
+    async (request, _reply) => {
+      const { startDate, endDate, organizationId } = request.query as {
+        startDate: Date;
+        endDate: Date;
+        organizationId?: string;
+      };
       return evidenceService.verifyChain(startDate, endDate, organizationId);
     }
   );
@@ -192,8 +192,8 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
         }),
       },
     },
-    async (request: FastifyRequest<{ Querystring: { organizationId?: string } }>) => {
-      const { organizationId } = request.query;
+    async (request, _reply) => {
+      const { organizationId } = request.query as { organizationId?: string };
       const stats = await evidenceService.getControlStats(organizationId);
 
       // Merge with control definitions
@@ -255,13 +255,8 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
         querystring: EvidenceQueryParamsSchema.omit({ organizationId: true }),
       },
     },
-    async (
-      request: FastifyRequest<{
-        Params: { organizationId: string };
-        Querystring: Omit<z.infer<typeof EvidenceQueryParamsSchema>, 'organizationId'>;
-      }>
-    ) => {
-      const { organizationId } = request.params;
+    async (request, _reply) => {
+      const { organizationId } = request.params as { organizationId: string };
       const params = EvidenceQueryParamsSchema.omit({ organizationId: true }).parse(request.query);
       return evidenceService.queryByOrganization(organizationId, params);
     }
@@ -284,13 +279,8 @@ export async function evidenceRoutes(fastify: FastifyInstance) {
         querystring: EvidenceQueryParamsSchema.omit({ category: true }),
       },
     },
-    async (
-      request: FastifyRequest<{
-        Params: { category: z.infer<typeof SOC2CategorySchema> };
-        Querystring: Omit<z.infer<typeof EvidenceQueryParamsSchema>, 'category'>;
-      }>
-    ) => {
-      const { category } = request.params;
+    async (request, _reply) => {
+      const { category } = request.params as { category: z.infer<typeof SOC2CategorySchema> };
       const params = EvidenceQueryParamsSchema.omit({ category: true }).parse(request.query);
       return evidenceService.query({ ...params, category, page: params.page || 1, limit: params.limit || 50 });
     }
