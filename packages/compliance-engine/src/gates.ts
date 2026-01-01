@@ -4,6 +4,12 @@
  * Enforcement gates that block operations when compliance requirements aren't met.
  */
 
+import {
+  validateTransition,
+  validateBackgroundCheck,
+  type FCHATransitionRequest,
+  type FCHABackgroundCheckRequest,
+} from './fcha-state-machine';
 import { getMarketPack, getMarketPackVersion, getMarketPackIdFromMarket } from './market-packs';
 import {
   checkFAREActRules,
@@ -23,12 +29,6 @@ import type {
   FCHAWorkflowState,
   FCHATransitionEvidence,
 } from './types';
-import {
-  validateTransition,
-  validateBackgroundCheck,
-  type FCHATransitionRequest,
-  type FCHABackgroundCheckRequest,
-} from './fcha-state-machine';
 
 const POLICY_VERSION = '1.0.0';
 

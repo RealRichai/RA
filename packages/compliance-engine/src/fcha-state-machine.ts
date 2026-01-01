@@ -9,7 +9,6 @@ import type {
   FCHAWorkflowState,
   FCHAWorkflowRecord,
   FCHATransitionEvidence,
-  FCHANoticeType,
   Violation,
   RecommendedFix,
   MarketPack,
