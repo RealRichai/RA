@@ -168,6 +168,36 @@ Deployment is **manual-only** until AWS infrastructure is configured:
 
 See [docs/release-checklist.md](docs/release-checklist.md) for deployment requirements.
 
+## Exporting the Repo Safely
+
+Use the export script to create a clean zip archive without secrets or build artifacts:
+
+```bash
+# Export to Desktop (default)
+./scripts/export_repo.sh
+
+# Export to custom path
+./scripts/export_repo.sh /path/to/output.zip
+```
+
+**What's excluded:**
+| Category | Patterns |
+|----------|----------|
+| Secrets | `.env`, `.env.*`, `.env.local`, `.env.*.local` |
+| Dependencies | `node_modules/`, `.pnpm-store/` |
+| Build artifacts | `.next/`, `dist/`, `.turbo/`, `coverage/`, `*.tsbuildinfo` |
+| VCS | `.git/` |
+| Other | `logs/`, `tmp/`, `__pycache__/`, `.DS_Store` |
+
+**Validation:**
+The script automatically validates the archive after creation:
+- Fails with exit code 1 if any `.env` files are detected
+- Warns about potential sensitive files (`.pem`, `.key`, credentials)
+- Deletes the archive if validation fails
+
+**Cross-platform:**
+Works on both macOS and Linux.
+
 ## Policy Checks
 
 The codebase enforces policies via CI and local scripts.

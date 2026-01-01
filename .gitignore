@@ -10,9 +10,11 @@ build/
 **/.next/
 out/
 *.tsbuildinfo
+**/*.tsbuildinfo
 
 # Environment files
 .env
+.env.*
 .env.local
 .env.*.local
 !.env.example
