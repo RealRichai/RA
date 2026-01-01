@@ -31,7 +31,7 @@ export function getStripe(): Stripe {
   }
 
   stripeInstance = new Stripe(config.stripe.secretKey, {
-    apiVersion: '2023-10-16',
+    apiVersion: '2025-12-15.clover',
     typescript: true,
     maxNetworkRetries: 2,
     timeout: 30000,
