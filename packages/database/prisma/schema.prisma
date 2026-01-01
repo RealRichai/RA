@@ -7722,3 +7722,176 @@ model ReportRun {
   @@index([startedAt])
   @@map("report_runs")
 }
+
+// =============================================================================
+// Rent Collection Models
+// =============================================================================
+
+enum RentScheduleStatus {
+  active
+  paused
+  cancelled
+  completed
+
+  @@map("rent_schedule_status")
+}
+
+enum ScheduledChargeStatus {
+  pending
+  processing
+  succeeded
+  failed
+  refunded
+  disputed
+
+  @@map("scheduled_charge_status")
+}
+
+enum LateFeeType {
+  flat
+  percentage
+  daily
+  tiered
+
+  @@map("late_fee_type")
+}
+
+enum RentPaymentMethodType {
+  ach
+  credit_card
+  debit_card
+  check
+  cash
+
+  @@map("rent_payment_method_type")
+}
+
+// RentPaymentSchedule Model - Manages recurring rent payment schedules
+model RentPaymentSchedule {
+  id               String              @id @default(uuid()) @db.Uuid
+  leaseId          String              @map("lease_id") @db.Uuid
+  tenantId         String              @map("tenant_id") @db.Uuid
+  propertyId       String              @map("property_id") @db.Uuid
+  amount           Int                 // Amount in cents
+  currency         String              @default("USD")
+  dayOfMonth       Int                 @map("day_of_month") // 1-28
+  gracePeriodDays  Int                 @default(5) @map("grace_period_days")
+  paymentMethod    RentPaymentMethodType @map("payment_method")
+  paymentMethodId  String?             @map("payment_method_id") @db.Uuid
+  autoCharge       Boolean             @default(true) @map("auto_charge")
+  status           RentScheduleStatus  @default(active)
+  nextChargeDate   DateTime            @map("next_charge_date")
+  lastChargeDate   DateTime?           @map("last_charge_date")
+  lateFeeConfig    Json?               @map("late_fee_config") // LateFeeConfig
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+
+  charges          ScheduledRentCharge[]
+
+  @@index([leaseId])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([status])
+  @@index([nextChargeDate])
+  @@map("rent_payment_schedules")
+}
+
+// ScheduledRentCharge Model - Individual rent charges from a schedule
+model ScheduledRentCharge {
+  id               String                @id @default(uuid()) @db.Uuid
+  scheduleId       String                @map("schedule_id") @db.Uuid
+  leaseId          String                @map("lease_id") @db.Uuid
+  tenantId         String                @map("tenant_id") @db.Uuid
+  amount           Int                   // Amount in cents
+  lateFee          Int                   @default(0) @map("late_fee")
+  totalAmount      Int                   @map("total_amount")
+  dueDate          DateTime              @map("due_date")
+  chargeDate       DateTime?             @map("charge_date")
+  status           ScheduledChargeStatus @default(pending)
+  paymentIntentId  String?               @map("payment_intent_id")
+  failureReason    String?               @map("failure_reason")
+  retryCount       Int                   @default(0) @map("retry_count")
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+
+  schedule         RentPaymentSchedule   @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId])
+  @@index([leaseId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("scheduled_rent_charges")
+}
+
+// =============================================================================
+// Background Check Models
+// =============================================================================
+
+enum BackgroundCheckType {
+  criminal_background_check
+  credit_check
+  eviction_history
+
+  @@map("background_check_type")
+}
+
+enum BackgroundCheckStatus {
+  initiated
+  pending
+  completed
+  failed
+
+  @@map("background_check_status")
+}
+
+enum BackgroundCheckReportStatus {
+  clear
+  review_required
+  adverse
+
+  @@map("background_check_report_status")
+}
+
+// BackgroundCheck Model - Tracks background check requests
+model BackgroundCheck {
+  id                      String                @id @default(uuid()) @db.Uuid
+  applicationId           String                @map("application_id") @db.Uuid
+  checkType               BackgroundCheckType   @map("check_type")
+  status                  BackgroundCheckStatus @default(initiated)
+  provider                String
+  estimatedCompletionTime String?               @map("estimated_completion_time")
+  webhookUrl              String?               @map("webhook_url")
+  applicantFirstName      String                @map("applicant_first_name")
+  applicantLastName       String                @map("applicant_last_name")
+  applicantEmail          String                @map("applicant_email")
+  applicantDob            String?               @map("applicant_dob")
+  applicantSsnLast4       String?               @map("applicant_ssn_last4")
+  propertyAddress         String?               @map("property_address")
+  createdAt               DateTime              @default(now()) @map("created_at")
+  updatedAt               DateTime              @updatedAt @map("updated_at")
+
+  report                  BackgroundCheckReport?
+
+  @@index([applicationId])
+  @@index([status])
+  @@index([checkType])
+  @@map("background_checks")
+}
+
+// BackgroundCheckReport Model - Results of completed background checks
+model BackgroundCheckReport {
+  id          String                      @id @default(uuid()) @db.Uuid
+  checkId     String                      @unique @map("check_id") @db.Uuid
+  status      BackgroundCheckReportStatus
+  checkType   BackgroundCheckType         @map("check_type")
+  summary     String
+  details     Json                        @default("{}")
+  completedAt DateTime                    @map("completed_at")
+  createdAt   DateTime                    @default(now()) @map("created_at")
+
+  check       BackgroundCheck             @relation(fields: [checkId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("background_check_reports")
+}

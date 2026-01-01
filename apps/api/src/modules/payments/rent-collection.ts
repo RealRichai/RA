@@ -1,3 +1,9 @@
+import {
+  prisma,
+  RentScheduleStatus,
+  ScheduledChargeStatus,
+  RentPaymentMethodType,
+} from '@realriches/database';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -7,26 +13,6 @@ export type ScheduleStatus = 'active' | 'paused' | 'cancelled' | 'completed';
 export type ChargeStatus = 'pending' | 'processing' | 'succeeded' | 'failed' | 'refunded' | 'disputed';
 export type LateFeeType = 'flat' | 'percentage' | 'daily' | 'tiered';
 
-export interface PaymentSchedule {
-  id: string;
-  leaseId: string;
-  tenantId: string;
-  propertyId: string;
-  amount: number;
-  currency: string;
-  dayOfMonth: number;
-  gracePeriodDays: number;
-  paymentMethod: PaymentMethod;
-  paymentMethodId: string | null;
-  autoCharge: boolean;
-  status: ScheduleStatus;
-  nextChargeDate: Date;
-  lastChargeDate: Date | null;
-  lateFeeConfig: LateFeeConfig | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 export interface LateFeeConfig {
   type: LateFeeType;
   amount: number;
@@ -34,46 +20,6 @@ export interface LateFeeConfig {
   startAfterDays: number;
   tiers?: Array<{ days: number; amount: number }>;
 }
-
-export interface ScheduledCharge {
-  id: string;
-  scheduleId: string;
-  leaseId: string;
-  tenantId: string;
-  amount: number;
-  lateFee: number;
-  totalAmount: number;
-  dueDate: Date;
-  chargeDate: Date | null;
-  status: ChargeStatus;
-  paymentIntentId: string | null;
-  failureReason: string | null;
-  retryCount: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface TenantPaymentMethod {
-  id: string;
-  tenantId: string;
-  type: PaymentMethod;
-  provider: 'stripe' | 'plaid' | 'manual';
-  last4: string;
-  expiryMonth?: number;
-  expiryYear?: number;
-  bankName?: string;
-  accountType?: 'checking' | 'savings';
-  isDefault: boolean;
-  isVerified: boolean;
-  stripePaymentMethodId: string | null;
-  plaidAccountId: string | null;
-  createdAt: Date;
-}
-
-// In-memory stores (placeholder for Prisma)
-const schedules = new Map<string, PaymentSchedule>();
-const charges = new Map<string, ScheduledCharge>();
-const paymentMethods = new Map<string, TenantPaymentMethod>();
 
 // Schemas
 const createScheduleSchema = z.object({
@@ -139,7 +85,7 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function calculateNextChargeDate(dayOfMonth: number): Date {
+export function calculateNextChargeDate(dayOfMonth: number): Date {
   const now = new Date();
   const next = new Date(now.getFullYear(), now.getMonth(), dayOfMonth);
   if (next <= now) {
@@ -148,7 +94,7 @@ function calculateNextChargeDate(dayOfMonth: number): Date {
   return next;
 }
 
-function calculateLateFee(config: LateFeeConfig, baseAmount: number, daysLate: number): number {
+export function calculateLateFee(config: LateFeeConfig, baseAmount: number, daysLate: number): number {
   if (daysLate < config.startAfterDays) {
     return 0;
   }
@@ -196,7 +142,7 @@ interface StripePaymentIntent {
 
 async function createStripePaymentIntent(
   amount: number,
-  currency: string,
+  _currency: string,
   paymentMethodId: string,
   _customerId: string
 ): Promise<StripePaymentIntent> {
@@ -213,69 +159,8 @@ async function createStripePaymentIntent(
   };
 }
 
-async function processAutoCharge(schedule: PaymentSchedule): Promise<ScheduledCharge> {
-  const now = new Date();
-  const dueDate = new Date(schedule.nextChargeDate);
-  const daysLate = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)));
-
-  const lateFee = schedule.lateFeeConfig
-    ? calculateLateFee(schedule.lateFeeConfig, schedule.amount, daysLate)
-    : 0;
-
-  const charge: ScheduledCharge = {
-    id: generateId(),
-    scheduleId: schedule.id,
-    leaseId: schedule.leaseId,
-    tenantId: schedule.tenantId,
-    amount: schedule.amount,
-    lateFee,
-    totalAmount: schedule.amount + lateFee,
-    dueDate,
-    chargeDate: null,
-    status: 'pending',
-    paymentIntentId: null,
-    failureReason: null,
-    retryCount: 0,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  if (schedule.autoCharge && schedule.paymentMethodId) {
-    charge.status = 'processing';
-
-    try {
-      const paymentIntent = await createStripePaymentIntent(
-        charge.totalAmount,
-        schedule.currency,
-        schedule.paymentMethodId,
-        schedule.tenantId
-      );
-
-      charge.paymentIntentId = paymentIntent.id;
-      charge.chargeDate = new Date();
-
-      if (paymentIntent.status === 'succeeded') {
-        charge.status = 'succeeded';
-      } else {
-        charge.status = 'failed';
-        charge.failureReason = 'Payment declined';
-        charge.retryCount = 1;
-      }
-    } catch (error) {
-      charge.status = 'failed';
-      charge.failureReason = error instanceof Error ? error.message : 'Unknown error';
-    }
-  }
-
-  charges.set(charge.id, charge);
-
-  // Update schedule
-  schedule.lastChargeDate = now;
-  schedule.nextChargeDate = calculateNextChargeDate(schedule.dayOfMonth);
-  schedule.updatedAt = now;
-  schedules.set(schedule.id, schedule);
-
-  return charge;
+function mapPaymentMethod(method: PaymentMethod): RentPaymentMethodType {
+  return method as RentPaymentMethodType;
 }
 
 // Route handlers
@@ -283,46 +168,42 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
   // Create payment schedule
   app.post('/schedules', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = createScheduleSchema.parse(request.body);
-    const now = new Date();
 
-    const schedule: PaymentSchedule = {
-      id: generateId(),
-      leaseId: body.leaseId,
-      tenantId: body.tenantId,
-      propertyId: body.propertyId,
-      amount: body.amount,
-      currency: body.currency,
-      dayOfMonth: body.dayOfMonth,
-      gracePeriodDays: body.gracePeriodDays,
-      paymentMethod: body.paymentMethod,
-      paymentMethodId: body.paymentMethodId || null,
-      autoCharge: body.autoCharge,
-      status: 'active',
-      nextChargeDate: calculateNextChargeDate(body.dayOfMonth),
-      lastChargeDate: null,
-      lateFeeConfig: body.lateFeeConfig ? {
-        type: body.lateFeeConfig.type,
-        amount: body.lateFeeConfig.amount,
-        maxAmount: body.lateFeeConfig.maxAmount ?? null,
-        startAfterDays: body.lateFeeConfig.startAfterDays,
-        tiers: body.lateFeeConfig.tiers?.map(t => ({ days: t.days!, amount: t.amount! })),
-      } : null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    schedules.set(schedule.id, schedule);
+    const schedule = await prisma.rentPaymentSchedule.create({
+      data: {
+        leaseId: body.leaseId,
+        tenantId: body.tenantId,
+        propertyId: body.propertyId,
+        amount: Math.round(body.amount * 100), // Store in cents
+        currency: body.currency,
+        dayOfMonth: body.dayOfMonth,
+        gracePeriodDays: body.gracePeriodDays,
+        paymentMethod: mapPaymentMethod(body.paymentMethod),
+        paymentMethodId: body.paymentMethodId,
+        autoCharge: body.autoCharge,
+        status: RentScheduleStatus.active,
+        nextChargeDate: calculateNextChargeDate(body.dayOfMonth),
+        lateFeeConfig: body.lateFeeConfig ?? undefined,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: schedule,
+      data: {
+        ...schedule,
+        amount: schedule.amount / 100,
+      },
     });
   });
 
   // Get payment schedule by ID
   app.get('/schedules/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const schedule = schedules.get(id);
+
+    const schedule = await prisma.rentPaymentSchedule.findUnique({
+      where: { id },
+      include: { charges: true },
+    });
 
     if (!schedule) {
       return reply.status(404).send({
@@ -333,7 +214,10 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
 
     return reply.send({
       success: true,
-      data: schedule,
+      data: {
+        ...schedule,
+        amount: schedule.amount / 100,
+      },
     });
   });
 
@@ -346,25 +230,18 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
       status?: ScheduleStatus;
     };
 
-    let results = Array.from(schedules.values());
+    const where: Record<string, unknown> = {};
+    if (query.leaseId) where.leaseId = query.leaseId;
+    if (query.tenantId) where.tenantId = query.tenantId;
+    if (query.propertyId) where.propertyId = query.propertyId;
+    if (query.status) where.status = query.status;
 
-    if (query.leaseId) {
-      results = results.filter((s) => s.leaseId === query.leaseId);
-    }
-    if (query.tenantId) {
-      results = results.filter((s) => s.tenantId === query.tenantId);
-    }
-    if (query.propertyId) {
-      results = results.filter((s) => s.propertyId === query.propertyId);
-    }
-    if (query.status) {
-      results = results.filter((s) => s.status === query.status);
-    }
+    const schedules = await prisma.rentPaymentSchedule.findMany({ where });
 
     return reply.send({
       success: true,
-      data: results,
-      total: results.length,
+      data: schedules.map(s => ({ ...s, amount: s.amount / 100 })),
+      total: schedules.length,
     });
   });
 
@@ -372,56 +249,55 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
   app.patch('/schedules/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = updateScheduleSchema.parse(request.body);
-    const schedule = schedules.get(id);
 
-    if (!schedule) {
+    const existing = await prisma.rentPaymentSchedule.findUnique({ where: { id } });
+    if (!existing) {
       return reply.status(404).send({
         success: false,
         error: 'Payment schedule not found',
       });
     }
 
-    const { lateFeeConfig: bodyLateFeeConfig, ...bodyRest } = body;
-    const updated: PaymentSchedule = {
-      ...schedule,
-      ...bodyRest,
-      lateFeeConfig: bodyLateFeeConfig ? {
-        type: bodyLateFeeConfig.type,
-        amount: bodyLateFeeConfig.amount,
-        maxAmount: bodyLateFeeConfig.maxAmount ?? null,
-        startAfterDays: bodyLateFeeConfig.startAfterDays,
-        tiers: bodyLateFeeConfig.tiers?.map(t => ({ days: t.days!, amount: t.amount! })),
-      } : schedule.lateFeeConfig,
-      updatedAt: new Date(),
-    };
-
-    if (body.dayOfMonth && body.dayOfMonth !== schedule.dayOfMonth) {
-      updated.nextChargeDate = calculateNextChargeDate(body.dayOfMonth);
+    const updateData: Record<string, unknown> = {};
+    if (body.amount !== undefined) updateData.amount = Math.round(body.amount * 100);
+    if (body.dayOfMonth !== undefined) {
+      updateData.dayOfMonth = body.dayOfMonth;
+      updateData.nextChargeDate = calculateNextChargeDate(body.dayOfMonth);
     }
+    if (body.gracePeriodDays !== undefined) updateData.gracePeriodDays = body.gracePeriodDays;
+    if (body.paymentMethod !== undefined) updateData.paymentMethod = mapPaymentMethod(body.paymentMethod);
+    if (body.paymentMethodId !== undefined) updateData.paymentMethodId = body.paymentMethodId;
+    if (body.autoCharge !== undefined) updateData.autoCharge = body.autoCharge;
+    if (body.status !== undefined) updateData.status = body.status;
+    if (body.lateFeeConfig !== undefined) updateData.lateFeeConfig = body.lateFeeConfig;
 
-    schedules.set(id, updated);
+    const updated = await prisma.rentPaymentSchedule.update({
+      where: { id },
+      data: updateData,
+    });
 
     return reply.send({
       success: true,
-      data: updated,
+      data: { ...updated, amount: updated.amount / 100 },
     });
   });
 
   // Cancel payment schedule
   app.delete('/schedules/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const schedule = schedules.get(id);
 
-    if (!schedule) {
+    const existing = await prisma.rentPaymentSchedule.findUnique({ where: { id } });
+    if (!existing) {
       return reply.status(404).send({
         success: false,
         error: 'Payment schedule not found',
       });
     }
 
-    schedule.status = 'cancelled';
-    schedule.updatedAt = new Date();
-    schedules.set(id, schedule);
+    await prisma.rentPaymentSchedule.update({
+      where: { id },
+      data: { status: RentScheduleStatus.cancelled },
+    });
 
     return reply.send({
       success: true,
@@ -432,14 +308,79 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
   // Process scheduled charges (cron job endpoint)
   app.post('/schedules/process', async (request: FastifyRequest, reply: FastifyReply) => {
     const now = new Date();
-    const activeSchedules = Array.from(schedules.values()).filter(
-      (s) => s.status === 'active' && s.nextChargeDate <= now
-    );
 
-    const results: Array<{ scheduleId: string; chargeId: string; status: ChargeStatus }> = [];
+    const activeSchedules = await prisma.rentPaymentSchedule.findMany({
+      where: {
+        status: RentScheduleStatus.active,
+        nextChargeDate: { lte: now },
+      },
+    });
+
+    const results: Array<{ scheduleId: string; chargeId: string; status: string }> = [];
 
     for (const schedule of activeSchedules) {
-      const charge = await processAutoCharge(schedule);
+      const dueDate = new Date(schedule.nextChargeDate);
+      const daysLate = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)));
+
+      const lateFeeConfig = schedule.lateFeeConfig as unknown as LateFeeConfig | null;
+      const lateFee = lateFeeConfig
+        ? Math.round(calculateLateFee(lateFeeConfig, schedule.amount / 100, daysLate) * 100)
+        : 0;
+
+      let chargeStatus: ScheduledChargeStatus = ScheduledChargeStatus.pending;
+      let paymentIntentId: string | null = null;
+      let failureReason: string | null = null;
+
+      if (schedule.autoCharge && schedule.paymentMethodId) {
+        chargeStatus = ScheduledChargeStatus.processing;
+
+        try {
+          const paymentIntent = await createStripePaymentIntent(
+            (schedule.amount + lateFee) / 100,
+            schedule.currency,
+            schedule.paymentMethodId,
+            schedule.tenantId
+          );
+
+          paymentIntentId = paymentIntent.id;
+
+          if (paymentIntent.status === 'succeeded') {
+            chargeStatus = ScheduledChargeStatus.succeeded;
+          } else {
+            chargeStatus = ScheduledChargeStatus.failed;
+            failureReason = 'Payment declined';
+          }
+        } catch (error) {
+          chargeStatus = ScheduledChargeStatus.failed;
+          failureReason = error instanceof Error ? error.message : 'Unknown error';
+        }
+      }
+
+      const charge = await prisma.scheduledRentCharge.create({
+        data: {
+          scheduleId: schedule.id,
+          leaseId: schedule.leaseId,
+          tenantId: schedule.tenantId,
+          amount: schedule.amount,
+          lateFee,
+          totalAmount: schedule.amount + lateFee,
+          dueDate,
+          chargeDate: chargeStatus !== ScheduledChargeStatus.pending ? now : null,
+          status: chargeStatus,
+          paymentIntentId,
+          failureReason,
+          retryCount: chargeStatus === ScheduledChargeStatus.failed ? 1 : 0,
+        },
+      });
+
+      await prisma.rentPaymentSchedule.update({
+        where: { id: schedule.id },
+        data: {
+          lastChargeDate: now,
+          nextChargeDate: calculateNextChargeDate(schedule.dayOfMonth),
+        },
+      });
+
       results.push({
         scheduleId: schedule.id,
         chargeId: charge.id,
@@ -459,7 +400,10 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
   // Manual charge
   app.post('/charges/manual', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = manualChargeSchema.parse(request.body);
-    const schedule = schedules.get(body.scheduleId);
+
+    const schedule = await prisma.rentPaymentSchedule.findUnique({
+      where: { id: body.scheduleId },
+    });
 
     if (!schedule) {
       return reply.status(404).send({
@@ -472,41 +416,42 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
     const dueDate = new Date(schedule.nextChargeDate);
     const daysLate = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)));
 
-    const baseAmount = body.amount || schedule.amount;
-    const lateFee = body.includeLateFees && schedule.lateFeeConfig
-      ? calculateLateFee(schedule.lateFeeConfig, baseAmount, daysLate)
+    const baseAmount = body.amount ? Math.round(body.amount * 100) : schedule.amount;
+    const lateFeeConfig = schedule.lateFeeConfig as unknown as LateFeeConfig | null;
+    const lateFee = body.includeLateFees && lateFeeConfig
+      ? Math.round(calculateLateFee(lateFeeConfig, baseAmount / 100, daysLate) * 100)
       : 0;
 
-    const charge: ScheduledCharge = {
-      id: generateId(),
-      scheduleId: schedule.id,
-      leaseId: schedule.leaseId,
-      tenantId: schedule.tenantId,
-      amount: baseAmount,
-      lateFee,
-      totalAmount: baseAmount + lateFee,
-      dueDate,
-      chargeDate: now,
-      status: 'pending',
-      paymentIntentId: null,
-      failureReason: null,
-      retryCount: 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    charges.set(charge.id, charge);
+    const charge = await prisma.scheduledRentCharge.create({
+      data: {
+        scheduleId: schedule.id,
+        leaseId: schedule.leaseId,
+        tenantId: schedule.tenantId,
+        amount: baseAmount,
+        lateFee,
+        totalAmount: baseAmount + lateFee,
+        dueDate,
+        chargeDate: now,
+        status: ScheduledChargeStatus.pending,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
-      data: charge,
+      data: {
+        ...charge,
+        amount: charge.amount / 100,
+        lateFee: charge.lateFee / 100,
+        totalAmount: charge.totalAmount / 100,
+      },
     });
   });
 
   // Get charge by ID
   app.get('/charges/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const charge = charges.get(id);
+
+    const charge = await prisma.scheduledRentCharge.findUnique({ where: { id } });
 
     if (!charge) {
       return reply.status(404).send({
@@ -517,7 +462,12 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
 
     return reply.send({
       success: true,
-      data: charge,
+      data: {
+        ...charge,
+        amount: charge.amount / 100,
+        lateFee: charge.lateFee / 100,
+        totalAmount: charge.totalAmount / 100,
+      },
     });
   });
 
@@ -531,39 +481,41 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
       toDate?: string;
     };
 
-    let results = Array.from(charges.values());
-
-    if (query.scheduleId) {
-      results = results.filter((c) => c.scheduleId === query.scheduleId);
-    }
-    if (query.tenantId) {
-      results = results.filter((c) => c.tenantId === query.tenantId);
-    }
-    if (query.status) {
-      results = results.filter((c) => c.status === query.status);
-    }
-    if (query.fromDate) {
-      const from = new Date(query.fromDate);
-      results = results.filter((c) => c.dueDate >= from);
-    }
-    if (query.toDate) {
-      const to = new Date(query.toDate);
-      results = results.filter((c) => c.dueDate <= to);
+    const where: Record<string, unknown> = {};
+    if (query.scheduleId) where.scheduleId = query.scheduleId;
+    if (query.tenantId) where.tenantId = query.tenantId;
+    if (query.status) where.status = query.status;
+    if (query.fromDate || query.toDate) {
+      where.dueDate = {};
+      if (query.fromDate) (where.dueDate as Record<string, Date>).gte = new Date(query.fromDate);
+      if (query.toDate) (where.dueDate as Record<string, Date>).lte = new Date(query.toDate);
     }
 
-    results.sort((a, b) => b.dueDate.getTime() - a.dueDate.getTime());
+    const charges = await prisma.scheduledRentCharge.findMany({
+      where,
+      orderBy: { dueDate: 'desc' },
+    });
 
     return reply.send({
       success: true,
-      data: results,
-      total: results.length,
+      data: charges.map(c => ({
+        ...c,
+        amount: c.amount / 100,
+        lateFee: c.lateFee / 100,
+        totalAmount: c.totalAmount / 100,
+      })),
+      total: charges.length,
     });
   });
 
   // Retry failed charge
   app.post('/charges/:id/retry', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const charge = charges.get(id);
+
+    const charge = await prisma.scheduledRentCharge.findUnique({
+      where: { id },
+      include: { schedule: true },
+    });
 
     if (!charge) {
       return reply.status(404).send({
@@ -572,53 +524,64 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
       });
     }
 
-    if (charge.status !== 'failed') {
+    if (charge.status !== ScheduledChargeStatus.failed) {
       return reply.status(400).send({
         success: false,
         error: 'Only failed charges can be retried',
       });
     }
 
-    const schedule = schedules.get(charge.scheduleId);
-    if (!schedule || !schedule.paymentMethodId) {
+    if (!charge.schedule.paymentMethodId) {
       return reply.status(400).send({
         success: false,
         error: 'No payment method configured',
       });
     }
 
-    charge.status = 'processing';
-    charge.retryCount += 1;
-    charge.updatedAt = new Date();
+    let newStatus: ScheduledChargeStatus = ScheduledChargeStatus.processing;
+    let paymentIntentId: string | null = null;
+    let failureReason: string | null = null;
 
     try {
       const paymentIntent = await createStripePaymentIntent(
-        charge.totalAmount,
-        schedule.currency,
-        schedule.paymentMethodId,
-        schedule.tenantId
+        charge.totalAmount / 100,
+        charge.schedule.currency,
+        charge.schedule.paymentMethodId,
+        charge.schedule.tenantId
       );
 
-      charge.paymentIntentId = paymentIntent.id;
-      charge.chargeDate = new Date();
+      paymentIntentId = paymentIntent.id;
 
       if (paymentIntent.status === 'succeeded') {
-        charge.status = 'succeeded';
-        charge.failureReason = null;
+        newStatus = ScheduledChargeStatus.succeeded;
       } else {
-        charge.status = 'failed';
-        charge.failureReason = 'Payment declined on retry';
+        newStatus = ScheduledChargeStatus.failed;
+        failureReason = 'Payment declined on retry';
       }
     } catch (error) {
-      charge.status = 'failed';
-      charge.failureReason = error instanceof Error ? error.message : 'Unknown error';
+      newStatus = ScheduledChargeStatus.failed;
+      failureReason = error instanceof Error ? error.message : 'Unknown error';
     }
 
-    charges.set(id, charge);
+    const updated = await prisma.scheduledRentCharge.update({
+      where: { id },
+      data: {
+        status: newStatus,
+        paymentIntentId,
+        failureReason,
+        chargeDate: new Date(),
+        retryCount: charge.retryCount + 1,
+      },
+    });
 
     return reply.send({
       success: true,
-      data: charge,
+      data: {
+        ...updated,
+        amount: updated.amount / 100,
+        lateFee: updated.lateFee / 100,
+        totalAmount: updated.totalAmount / 100,
+      },
     });
   });
 
@@ -626,7 +589,8 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
   app.post('/charges/:id/refund', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = (request.body as { amount?: number; reason?: string }) || {};
-    const charge = charges.get(id);
+
+    const charge = await prisma.scheduledRentCharge.findUnique({ where: { id } });
 
     if (!charge) {
       return reply.status(404).send({
@@ -635,14 +599,14 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
       });
     }
 
-    if (charge.status !== 'succeeded') {
+    if (charge.status !== ScheduledChargeStatus.succeeded) {
       return reply.status(400).send({
         success: false,
         error: 'Only successful charges can be refunded',
       });
     }
 
-    const refundAmount = body.amount || charge.totalAmount;
+    const refundAmount = body.amount ? Math.round(body.amount * 100) : charge.totalAmount;
     if (refundAmount > charge.totalAmount) {
       return reply.status(400).send({
         success: false,
@@ -650,61 +614,48 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
       });
     }
 
-    // Mock refund processing
-    charge.status = 'refunded';
-    charge.updatedAt = new Date();
-    charges.set(id, charge);
+    await prisma.scheduledRentCharge.update({
+      where: { id },
+      data: { status: ScheduledChargeStatus.refunded },
+    });
 
     return reply.send({
       success: true,
       data: {
         chargeId: id,
-        refundAmount,
+        refundAmount: refundAmount / 100,
         reason: body.reason || 'Requested refund',
         status: 'refunded',
       },
     });
   });
 
-  // Add payment method for tenant
+  // Add payment method for tenant (uses existing PaymentMethod model)
   app.post('/payment-methods', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = addPaymentMethodSchema.parse(request.body);
-    const now = new Date();
 
     // If setting as default, unset other defaults
     if (body.setAsDefault) {
-      for (const [id, pm] of paymentMethods) {
-        if (pm.tenantId === body.tenantId && pm.isDefault) {
-          pm.isDefault = false;
-          paymentMethods.set(id, pm);
-        }
-      }
+      await prisma.paymentMethod.updateMany({
+        where: { userId: body.tenantId, isDefault: true },
+        data: { isDefault: false },
+      });
     }
 
-    const paymentMethod: TenantPaymentMethod = {
-      id: generateId(),
-      tenantId: body.tenantId,
-      type: body.type,
-      provider: body.stripePaymentMethodId ? 'stripe' : body.plaidAccountId ? 'plaid' : 'manual',
-      last4: Math.random().toString().slice(-4),
-      isDefault: body.setAsDefault,
-      isVerified: body.type !== 'ach', // ACH requires verification
-      stripePaymentMethodId: body.stripePaymentMethodId || null,
-      plaidAccountId: body.plaidAccountId || null,
-      createdAt: now,
-    };
-
-    if (body.type === 'credit_card' || body.type === 'debit_card') {
-      paymentMethod.expiryMonth = Math.floor(Math.random() * 12) + 1;
-      paymentMethod.expiryYear = new Date().getFullYear() + Math.floor(Math.random() * 5) + 1;
-    }
-
-    if (body.type === 'ach') {
-      paymentMethod.bankName = 'Mock Bank';
-      paymentMethod.accountType = 'checking';
-    }
-
-    paymentMethods.set(paymentMethod.id, paymentMethod);
+    const last4 = Math.random().toString().slice(-4);
+    const paymentMethod = await prisma.paymentMethod.create({
+      data: {
+        userId: body.tenantId,
+        type: body.type,
+        isDefault: body.setAsDefault,
+        isVerified: body.type !== 'ach',
+        stripePaymentMethodId: body.stripePaymentMethodId,
+        plaidAccountId: body.plaidAccountId,
+        // Store last4 in appropriate field based on payment type
+        cardLast4: body.type !== 'ach' ? last4 : null,
+        bankLast4: body.type === 'ach' ? last4 : null,
+      },
+    });
 
     return reply.status(201).send({
       success: true,
@@ -723,20 +674,21 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
       });
     }
 
-    const results = Array.from(paymentMethods.values()).filter(
-      (pm) => pm.tenantId === query.tenantId
-    );
+    const paymentMethods = await prisma.paymentMethod.findMany({
+      where: { userId: query.tenantId },
+    });
 
     return reply.send({
       success: true,
-      data: results,
+      data: paymentMethods,
     });
   });
 
   // Delete payment method
   app.delete('/payment-methods/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const paymentMethod = paymentMethods.get(id);
+
+    const paymentMethod = await prisma.paymentMethod.findUnique({ where: { id } });
 
     if (!paymentMethod) {
       return reply.status(404).send({
@@ -746,18 +698,21 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
     }
 
     // Check if any active schedules use this payment method
-    const activeSchedulesUsingMethod = Array.from(schedules.values()).filter(
-      (s) => s.paymentMethodId === id && s.status === 'active'
-    );
+    const activeSchedulesUsingMethod = await prisma.rentPaymentSchedule.count({
+      where: {
+        paymentMethodId: id,
+        status: RentScheduleStatus.active,
+      },
+    });
 
-    if (activeSchedulesUsingMethod.length > 0) {
+    if (activeSchedulesUsingMethod > 0) {
       return reply.status(400).send({
         success: false,
         error: 'Cannot delete payment method used by active schedules',
       });
     }
 
-    paymentMethods.delete(id);
+    await prisma.paymentMethod.delete({ where: { id } });
 
     return reply.send({
       success: true,
@@ -790,56 +745,56 @@ export async function rentCollectionRoutes(app: FastifyInstance): Promise<void> 
   app.get('/summary', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = request.query as { propertyId?: string; month?: string };
 
-    let chargeResults = Array.from(charges.values());
-    let scheduleResults = Array.from(schedules.values());
+    const scheduleWhere: Record<string, unknown> = {};
+    const chargeWhere: Record<string, unknown> = {};
 
     if (query.propertyId) {
-      const propertySchedules = scheduleResults.filter((s) => s.propertyId === query.propertyId);
-      const scheduleIds = new Set(propertySchedules.map((s) => s.id));
-      chargeResults = chargeResults.filter((c) => scheduleIds.has(c.scheduleId));
-      scheduleResults = propertySchedules;
+      scheduleWhere.propertyId = query.propertyId;
+      // Get schedule IDs for this property
+      const propertySchedules = await prisma.rentPaymentSchedule.findMany({
+        where: { propertyId: query.propertyId },
+        select: { id: true },
+      });
+      chargeWhere.scheduleId = { in: propertySchedules.map(s => s.id) };
     }
 
     if (query.month) {
       const [year, month] = query.month.split('-').map(Number);
-      chargeResults = chargeResults.filter((c) => {
-        const d = new Date(c.dueDate);
-        return d.getFullYear() === year && d.getMonth() + 1 === month;
-      });
+      const startOfMonth = new Date(year, month - 1, 1);
+      const endOfMonth = new Date(year, month, 0);
+      chargeWhere.dueDate = { gte: startOfMonth, lte: endOfMonth };
     }
 
-    const totalExpected = chargeResults.reduce((sum, c) => sum + c.totalAmount, 0);
-    const totalCollected = chargeResults
-      .filter((c) => c.status === 'succeeded')
+    const [activeScheduleCount, charges] = await Promise.all([
+      prisma.rentPaymentSchedule.count({
+        where: { ...scheduleWhere, status: RentScheduleStatus.active },
+      }),
+      prisma.scheduledRentCharge.findMany({ where: chargeWhere }),
+    ]);
+
+    const totalExpected = charges.reduce((sum, c) => sum + c.totalAmount, 0);
+    const totalCollected = charges
+      .filter(c => c.status === ScheduledChargeStatus.succeeded)
       .reduce((sum, c) => sum + c.totalAmount, 0);
-    const totalPending = chargeResults
-      .filter((c) => c.status === 'pending' || c.status === 'processing')
+    const totalPending = charges
+      .filter(c => c.status === ScheduledChargeStatus.pending || c.status === ScheduledChargeStatus.processing)
       .reduce((sum, c) => sum + c.totalAmount, 0);
-    const totalFailed = chargeResults
-      .filter((c) => c.status === 'failed')
+    const totalFailed = charges
+      .filter(c => c.status === ScheduledChargeStatus.failed)
       .reduce((sum, c) => sum + c.totalAmount, 0);
-    const totalLateFees = chargeResults.reduce((sum, c) => sum + c.lateFee, 0);
+    const totalLateFees = charges.reduce((sum, c) => sum + c.lateFee, 0);
 
     return reply.send({
       success: true,
       data: {
-        activeSchedules: scheduleResults.filter((s) => s.status === 'active').length,
-        totalExpected,
-        totalCollected,
-        totalPending,
-        totalFailed,
-        totalLateFees,
+        activeSchedules: activeScheduleCount,
+        totalExpected: totalExpected / 100,
+        totalCollected: totalCollected / 100,
+        totalPending: totalPending / 100,
+        totalFailed: totalFailed / 100,
+        totalLateFees: totalLateFees / 100,
         collectionRate: totalExpected > 0 ? (totalCollected / totalExpected) * 100 : 0,
       },
     });
   });
 }
-
-// Export helpers for testing
-export {
-  schedules,
-  charges,
-  paymentMethods,
-  calculateLateFee,
-  calculateNextChargeDate,
-};

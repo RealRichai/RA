@@ -4,7 +4,12 @@
  * Provides background check provider integration for tenant screening.
  */
 
-import { generatePrefixedId } from '@realriches/utils';
+import {
+  prisma,
+  BackgroundCheckType as PrismaCheckType,
+  BackgroundCheckStatus,
+  BackgroundCheckReportStatus,
+} from '@realriches/database';
 
 // =============================================================================
 // Types
@@ -36,7 +41,7 @@ export interface BackgroundCheckResult {
   webhookUrl?: string;
 }
 
-export interface BackgroundCheckReport {
+export interface BackgroundCheckReportData {
   checkId: string;
   status: 'clear' | 'review_required' | 'adverse';
   checkType: BackgroundCheckType;
@@ -92,8 +97,22 @@ const PROVIDERS: Record<string, BackgroundCheckProvider> = {
 // Default provider - would be configurable per customer
 const DEFAULT_PROVIDER = 'transunion_smartmove';
 
-// In-memory store for background check requests (would be database in production)
-const backgroundCheckStore = new Map<string, BackgroundCheckResult>();
+// Helper to convert Prisma enum to string type
+function prismaCheckTypeToString(checkType: PrismaCheckType): BackgroundCheckType {
+  return checkType as BackgroundCheckType;
+}
+
+function stringToPrismaCheckType(checkType: BackgroundCheckType): PrismaCheckType {
+  return checkType as PrismaCheckType;
+}
+
+function prismaStatusToString(status: BackgroundCheckStatus): 'initiated' | 'pending' | 'completed' | 'failed' {
+  return status as 'initiated' | 'pending' | 'completed' | 'failed';
+}
+
+function prismaReportStatusToString(status: BackgroundCheckReportStatus): 'clear' | 'review_required' | 'adverse' {
+  return status as 'clear' | 'review_required' | 'adverse';
+}
 
 // =============================================================================
 // Background Check Service
@@ -106,12 +125,13 @@ export async function initiateBackgroundCheck(
   request: BackgroundCheckRequest
 ): Promise<BackgroundCheckResult> {
   const provider = PROVIDERS[DEFAULT_PROVIDER];
-  const checkId = generatePrefixedId('bgc');
 
   // Validate provider supports this check type
   if (!provider.supportedChecks.includes(request.checkType)) {
     throw new Error(`Provider ${provider.name} does not support ${request.checkType}`);
   }
+
+  const webhookUrl = `${process.env.API_BASE_URL || 'https://api.realriches.com'}/webhooks/background-check`;
 
   // In production, this would make an API call to the provider:
   // const response = await fetch(provider.apiEndpoint + '/checks', {
@@ -123,37 +143,61 @@ export async function initiateBackgroundCheck(
   //   body: JSON.stringify({
   //     applicant: request.applicantInfo,
   //     check_type: request.checkType,
-  //     webhook_url: `${process.env.API_BASE_URL}/webhooks/background-check`,
+  //     webhook_url: webhookUrl,
   //   }),
   // });
 
-  const result: BackgroundCheckResult = {
-    checkId,
-    applicationId: request.applicationId,
-    checkType: request.checkType,
-    status: 'initiated',
-    provider: provider.name,
-    estimatedCompletionTime: provider.estimatedTime[request.checkType],
-    createdAt: new Date().toISOString(),
-    webhookUrl: `${process.env.API_BASE_URL || 'https://api.realriches.com'}/webhooks/background-check/${checkId}`,
+  // Store the background check in database
+  const check = await prisma.backgroundCheck.create({
+    data: {
+      applicationId: request.applicationId,
+      checkType: stringToPrismaCheckType(request.checkType),
+      status: BackgroundCheckStatus.initiated,
+      provider: provider.name,
+      estimatedCompletionTime: provider.estimatedTime[request.checkType],
+      webhookUrl,
+      propertyAddress: request.propertyAddress,
+      // Applicant info
+      applicantFirstName: request.applicantInfo.firstName,
+      applicantLastName: request.applicantInfo.lastName,
+      applicantEmail: request.applicantInfo.email,
+      applicantDob: request.applicantInfo.dateOfBirth || null,
+      applicantSsnLast4: request.applicantInfo.ssn,
+    },
+  });
+
+  return {
+    checkId: check.id,
+    applicationId: check.applicationId,
+    checkType: prismaCheckTypeToString(check.checkType),
+    status: prismaStatusToString(check.status),
+    provider: check.provider,
+    estimatedCompletionTime: check.estimatedCompletionTime || '',
+    createdAt: check.createdAt.toISOString(),
+    webhookUrl: check.webhookUrl || undefined,
   };
-
-  // Store the check request
-  backgroundCheckStore.set(checkId, result);
-
-  // In production, we'd also:
-  // 1. Store in database with all metadata
-  // 2. Set up webhook listener for results
-  // 3. Queue a job to poll for results if no webhook
-
-  return result;
 }
 
 /**
  * Get the status of a background check
  */
 export async function getBackgroundCheckStatus(checkId: string): Promise<BackgroundCheckResult | null> {
-  return backgroundCheckStore.get(checkId) || null;
+  const check = await prisma.backgroundCheck.findUnique({
+    where: { id: checkId },
+  });
+
+  if (!check) return null;
+
+  return {
+    checkId: check.id,
+    applicationId: check.applicationId,
+    checkType: prismaCheckTypeToString(check.checkType),
+    status: prismaStatusToString(check.status),
+    provider: check.provider,
+    estimatedCompletionTime: check.estimatedCompletionTime || '',
+    createdAt: check.createdAt.toISOString(),
+    webhookUrl: check.webhookUrl || undefined,
+  };
 }
 
 /**
@@ -163,8 +207,11 @@ export async function getBackgroundCheckStatus(checkId: string): Promise<Backgro
 export async function processBackgroundCheckWebhook(
   checkId: string,
   providerData: Record<string, unknown>
-): Promise<BackgroundCheckReport> {
-  const existingCheck = backgroundCheckStore.get(checkId);
+): Promise<BackgroundCheckReportData> {
+  const existingCheck = await prisma.backgroundCheck.findUnique({
+    where: { id: checkId },
+  });
+
   if (!existingCheck) {
     throw new Error(`Background check ${checkId} not found`);
   }
@@ -172,21 +219,38 @@ export async function processBackgroundCheckWebhook(
   // Parse provider-specific response format
   // In production, each provider has different response formats
   const status = determineCheckStatus(providerData);
+  const checkType = prismaCheckTypeToString(existingCheck.checkType);
+  const summary = generateCheckSummary(checkType, status);
+  const details = sanitizeProviderData(providerData);
 
-  const report: BackgroundCheckReport = {
-    checkId,
-    status,
-    checkType: existingCheck.checkType,
-    summary: generateCheckSummary(existingCheck.checkType, status),
-    details: sanitizeProviderData(providerData),
-    completedAt: new Date().toISOString(),
+  // Create report and update check status in a transaction
+  const [report] = await prisma.$transaction([
+    prisma.backgroundCheckReport.create({
+      data: {
+        checkId,
+        status: status as BackgroundCheckReportStatus,
+        checkType: existingCheck.checkType,
+        summary,
+        details: details as object,
+        completedAt: new Date(),
+      },
+    }),
+    prisma.backgroundCheck.update({
+      where: { id: checkId },
+      data: {
+        status: BackgroundCheckStatus.completed,
+      },
+    }),
+  ]);
+
+  return {
+    checkId: report.checkId,
+    status: prismaReportStatusToString(report.status),
+    checkType,
+    summary: report.summary,
+    details: report.details as Record<string, unknown>,
+    completedAt: report.completedAt.toISOString(),
   };
-
-  // Update stored check status
-  existingCheck.status = 'completed';
-  backgroundCheckStore.set(checkId, existingCheck);
-
-  return report;
 }
 
 /**
@@ -195,13 +259,21 @@ export async function processBackgroundCheckWebhook(
 export async function getApplicationBackgroundChecks(
   applicationId: string
 ): Promise<BackgroundCheckResult[]> {
-  const checks: BackgroundCheckResult[] = [];
-  for (const check of backgroundCheckStore.values()) {
-    if (check.applicationId === applicationId) {
-      checks.push(check);
-    }
-  }
-  return checks;
+  const checks = await prisma.backgroundCheck.findMany({
+    where: { applicationId },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  return checks.map((check) => ({
+    checkId: check.id,
+    applicationId: check.applicationId,
+    checkType: prismaCheckTypeToString(check.checkType),
+    status: prismaStatusToString(check.status),
+    provider: check.provider,
+    estimatedCompletionTime: check.estimatedCompletionTime || '',
+    createdAt: check.createdAt.toISOString(),
+    webhookUrl: check.webhookUrl || undefined,
+  }));
 }
 
 // =============================================================================
