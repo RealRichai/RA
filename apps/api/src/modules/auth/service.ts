@@ -129,7 +129,7 @@ export class AuthService {
   // Registration
   // ===========================================================================
 
-  async register(input: RegisterInput): Promise<{ user: Omit<User, 'passwordHash'>; tokens: TokenPair }> {
+  async register(input: RegisterInput): Promise<{ user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName' | 'role' | 'phone' | 'createdAt'>; tokens: TokenPair }> {
     const existingUser = await prisma.user.findUnique({
       where: { email: input.email.toLowerCase() },
     });
@@ -184,7 +184,7 @@ export class AuthService {
   // Login
   // ===========================================================================
 
-  async login(input: LoginInput): Promise<{ user: Omit<User, 'passwordHash'>; tokens: TokenPair }> {
+  async login(input: LoginInput): Promise<{ user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName' | 'role' | 'phone'>; tokens: TokenPair }> {
     const email = input.email.toLowerCase();
 
     // Check if account is locked

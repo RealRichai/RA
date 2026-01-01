@@ -43,10 +43,12 @@ const GenerateDocumentSchema = z.object({
 // Helper Functions
 // =============================================================================
 
+import type { UserRole } from '@realriches/document-storage';
+
 interface AuthenticatedUser {
   id: string;
   email: string;
-  role: string;
+  role: UserRole;
   permissions: string[];
   sessionId: string;
 }
@@ -815,10 +817,10 @@ export async function documentRoutes(app: FastifyInstance): Promise<void> {
         template = {
           id: dbTemplate.id,
           name: dbTemplate.name,
-          type: dbTemplate.type as string,
+          type: dbTemplate.type as 'LEASE' | 'AMENDMENT' | 'DISCLOSURE' | 'OTHER',
           format: dbTemplate.format as 'html' | 'docx',
           content: '', // Would need to fetch from storage
-          variables: dbTemplate.variables as Record<string, unknown>,
+          variables: (dbTemplate.variables as unknown[])?.map((v) => v as import('@realriches/document-storage').TemplateVariable) ?? [],
           isSystem: dbTemplate.isSystem,
           version: dbTemplate.version,
           marketId: dbTemplate.marketId || undefined,

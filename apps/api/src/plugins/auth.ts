@@ -193,9 +193,7 @@ export const authPlugin = fp(authPluginCallback, {
 
 // Type augmentation for decorators
 declare module 'fastify' {
-  interface FastifyRequest {
-    user?: AppUser;
-  }
+  // Note: 'user' property is already augmented by @fastify/jwt via FastifyJWT interface
 
   interface FastifyInstance {
     authenticate: (

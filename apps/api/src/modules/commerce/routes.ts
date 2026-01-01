@@ -303,7 +303,7 @@ export async function commerceRoutes(app: FastifyInstance): Promise<void> {
       };
 
       // Get quotes from all or specified providers
-      const providerIds = data.providers as string[] | undefined;
+      const providerIds = data.providers as Parameters<typeof registry.getMultiProviderQuotes>[1];
       const comparisons = await registry.getMultiProviderQuotes(quoteRequest, providerIds);
 
       // Find the best quote (lowest premium with successful status)
