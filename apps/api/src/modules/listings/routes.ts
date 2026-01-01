@@ -1,5 +1,6 @@
 import {
   gateListingPublish,
+  gateListingUpdate,
   gateBrokerFeeChange,
   gateSecurityDepositChange,
   getMarketPackIdFromMarket,
@@ -19,17 +20,37 @@ const CreateListingSchema = z.object({
   brokerFee: z.number().min(0).optional(),
   hasBrokerFee: z.boolean().default(false),
   brokerFeePaidBy: z.enum(['tenant', 'landlord']).optional(),
+  /** Who the broker/agent represents - critical for FARE Act */
+  agentRepresentation: z.enum(['landlord', 'tenant', 'dual', 'none']).optional(),
   availableDate: z.string().datetime(),
   leaseTermMonths: z.number().int().min(1).default(12),
   petPolicy: z.enum(['allowed', 'case_by_case', 'not_allowed']).default('not_allowed'),
   utilitiesIncluded: z.array(z.string()).optional(),
   incomeRequirementMultiplier: z.number().optional(),
   creditScoreThreshold: z.number().optional(),
+  /** Fee disclosure for FARE Act compliance */
+  feeDisclosure: z.object({
+    disclosed: z.boolean(),
+    disclosedFees: z.array(z.object({
+      type: z.string(),
+      amount: z.number(),
+      paidBy: z.enum(['tenant', 'landlord']),
+    })),
+  }).optional(),
 });
 
 const PublishListingSchema = z.object({
   deliveredDisclosures: z.array(z.string()).default([]),
   acknowledgedDisclosures: z.array(z.string()).default([]),
+  /** Fee disclosure for FARE Act compliance */
+  feeDisclosure: z.object({
+    disclosed: z.boolean(),
+    disclosedFees: z.array(z.object({
+      type: z.string(),
+      amount: z.number(),
+      paidBy: z.enum(['tenant', 'landlord']),
+    })),
+  }).optional(),
 });
 
 /**
@@ -377,20 +398,36 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
       // Get market ID from property
       const marketId = listing.unit.property.marketId || listing.marketId || 'US_STANDARD';
 
-      // Run compliance gate
+      // Run compliance gate with FARE Act fields
+      const listingWithExtendedFields = listing as typeof listing & {
+        brokerFeePaidBy?: string;
+        agentRepresentation?: string;
+        incomeRequirementMultiplier?: number;
+        creditScoreThreshold?: number;
+      };
+
       const gateResult = await gateListingPublish({
         listingId: listing.id,
         marketId,
         status: listing.status,
         hasBrokerFee: listing.hasBrokerFee || false,
         brokerFeeAmount: listing.brokerFeeAmount || undefined,
-        brokerFeePaidBy: ((listing as unknown as { brokerFeePaidBy?: string }).brokerFeePaidBy || 'tenant') as 'tenant' | 'landlord',
+        brokerFeePaidBy: (listingWithExtendedFields.brokerFeePaidBy || 'tenant') as 'tenant' | 'landlord',
+        agentRepresentation: (listingWithExtendedFields.agentRepresentation || 'landlord') as 'landlord' | 'tenant' | 'dual' | 'none',
         monthlyRent: listing.rent || 0,
         securityDepositAmount: listing.securityDepositAmount || undefined,
-        incomeRequirementMultiplier: (listing as unknown as { incomeRequirementMultiplier?: number }).incomeRequirementMultiplier,
-        creditScoreThreshold: (listing as unknown as { creditScoreThreshold?: number }).creditScoreThreshold,
+        incomeRequirementMultiplier: listingWithExtendedFields.incomeRequirementMultiplier,
+        creditScoreThreshold: listingWithExtendedFields.creditScoreThreshold,
         deliveredDisclosures: publishData.deliveredDisclosures,
         acknowledgedDisclosures: publishData.acknowledgedDisclosures,
+        feeDisclosure: publishData.feeDisclosure ? {
+          disclosed: publishData.feeDisclosure.disclosed,
+          disclosedFees: publishData.feeDisclosure.disclosedFees.map(fee => ({
+            type: fee.type,
+            amount: fee.amount,
+            paidBy: fee.paidBy,
+          })),
+        } : undefined,
       });
 
       // Store compliance check
@@ -507,6 +544,92 @@ export async function listingRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const data = CreateListingSchema.partial().parse(request.body);
+
+      // Get market ID from property
+      const marketId = listing.unit.property.marketId || listing.marketId || 'US_STANDARD';
+
+      // If listing is active, run compliance validation for updates
+      if (listing.status === 'active') {
+        const listingWithExtendedFields = listing as typeof listing & {
+          brokerFeePaidBy?: string;
+          agentRepresentation?: string;
+          incomeRequirementMultiplier?: number;
+          creditScoreThreshold?: number;
+        };
+
+        const gateResult = await gateListingUpdate({
+          listingId: listing.id,
+          marketId,
+          status: listing.status,
+          hasBrokerFee: data.hasBrokerFee ?? listing.hasBrokerFee ?? false,
+          brokerFeeAmount: data.brokerFee ?? listing.brokerFeeAmount ?? undefined,
+          brokerFeePaidBy: (data.brokerFeePaidBy ?? listingWithExtendedFields.brokerFeePaidBy ?? 'tenant') as 'tenant' | 'landlord',
+          agentRepresentation: (data.agentRepresentation ?? listingWithExtendedFields.agentRepresentation ?? 'landlord') as 'landlord' | 'tenant' | 'dual' | 'none',
+          monthlyRent: data.rent ?? listing.rent ?? 0,
+          securityDepositAmount: data.securityDeposit ?? listing.securityDepositAmount ?? undefined,
+          incomeRequirementMultiplier: data.incomeRequirementMultiplier ?? listingWithExtendedFields.incomeRequirementMultiplier,
+          creditScoreThreshold: data.creditScoreThreshold ?? listingWithExtendedFields.creditScoreThreshold,
+          deliveredDisclosures: [],
+          acknowledgedDisclosures: [],
+          feeDisclosure: data.feeDisclosure ? {
+            disclosed: data.feeDisclosure.disclosed,
+            disclosedFees: data.feeDisclosure.disclosedFees.map(fee => ({
+              type: fee.type,
+              amount: fee.amount,
+              paidBy: fee.paidBy,
+            })),
+          } : undefined,
+          previousState: {
+            hasBrokerFee: listing.hasBrokerFee ?? undefined,
+            brokerFeeAmount: listing.brokerFeeAmount ?? undefined,
+            brokerFeePaidBy: listingWithExtendedFields.brokerFeePaidBy as 'tenant' | 'landlord' | undefined,
+            agentRepresentation: listingWithExtendedFields.agentRepresentation as 'landlord' | 'tenant' | 'dual' | 'none' | undefined,
+          },
+        });
+
+        // Store compliance check
+        const complianceCheckId = await storeComplianceCheck(
+          'listing',
+          listing.id,
+          marketId,
+          gateResult.decision
+        );
+
+        // Store audit log
+        await storeComplianceAuditLog(
+          request.user.id,
+          gateResult.allowed ? 'listing_update_approved' : 'listing_update_blocked',
+          'listing',
+          listing.id,
+          gateResult.decision,
+          request.id
+        );
+
+        // If blocked, return error with violations
+        if (!gateResult.allowed) {
+          logger.warn({
+            msg: 'listing_update_blocked',
+            listingId: listing.id,
+            violations: gateResult.decision.violations,
+            complianceCheckId,
+          });
+
+          return reply.status(422).send({
+            success: false,
+            error: {
+              code: 'COMPLIANCE_VIOLATION',
+              message: gateResult.blockedReason || 'Listing update blocked due to compliance violations',
+              details: {
+                violations: gateResult.decision.violations,
+                recommendedFixes: gateResult.decision.recommendedFixes,
+                complianceCheckId,
+                policyVersion: gateResult.decision.policyVersion,
+                marketPack: gateResult.decision.marketPack,
+              },
+            },
+          });
+        }
+      }
 
       const updated = await prisma.listing.update({
         where: { id: request.params.id },

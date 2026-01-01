@@ -46,6 +46,16 @@ export const NYC_STRICT_V1: MarketPack = {
         expirationDays: 365,
       },
       {
+        type: 'fare_fee_disclosure',
+        requiredBefore: 'listing_publish',
+        signatureRequired: false,
+      },
+      {
+        type: 'fare_fee_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
         type: 'lead_paint_disclosure',
         requiredBefore: 'lease_signing',
         signatureRequired: true,
@@ -80,6 +90,19 @@ export const NYC_STRICT_V1: MarketPack = {
       enabled: true,
       maxIncomeRequirementMultiplier: 40, // Cannot require income > 40x rent
       maxCreditScoreThreshold: 650, // Cannot require credit score > 650
+      listingAgentTenantFeeProhibited: true, // When broker represents landlord, tenant cannot pay
+      feeDisclosureRequired: true, // All tenant-paid fees must be disclosed
+      disclosableFeeTypes: [
+        'broker_fee',
+        'application_fee',
+        'move_in_fee',
+        'amenity_fee',
+        'pet_fee',
+        'parking_fee',
+        'administrative_fee',
+        'credit_check_fee',
+        'background_check_fee',
+      ],
     },
     fcha: {
       enabled: true,

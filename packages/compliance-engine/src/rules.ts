@@ -29,10 +29,23 @@ export interface RuleResult {
 export interface FAREActCheckInput {
   hasBrokerFee: boolean;
   brokerFeeAmount?: number;
+  brokerFeePaidBy?: 'tenant' | 'landlord';
   monthlyRent: number;
   incomeRequirementMultiplier?: number;
   creditScoreThreshold?: number;
-  listingInitiatedBy?: 'landlord' | 'tenant' | 'agent';
+  /** Who the broker/agent represents - critical for FARE Act */
+  agentRepresentation?: 'landlord' | 'tenant' | 'dual' | 'none';
+  /** Fee disclosure status */
+  feeDisclosure?: {
+    disclosed: boolean;
+    disclosedFees: Array<{
+      type: string;
+      amount: number;
+      paidBy: 'tenant' | 'landlord';
+    }>;
+  };
+  /** Context for enforcement */
+  context?: 'listing_publish' | 'listing_update' | 'lease_generation';
 }
 
 export function checkFAREActRules(
@@ -49,15 +62,49 @@ export function checkFAREActRules(
 
   const brokerRules = pack.rules.brokerFee;
 
-  // Check broker fee prohibition
-  if (input.hasBrokerFee && brokerRules.paidBy === 'landlord') {
+  // NYC FARE Act Core Rule: If broker represents landlord (listing agent),
+  // tenant cannot be charged broker fees
+  if (
+    fareRules.listingAgentTenantFeeProhibited !== false &&
+    input.agentRepresentation === 'landlord' &&
+    input.hasBrokerFee &&
+    input.brokerFeePaidBy === 'tenant'
+  ) {
+    violations.push({
+      code: 'FARE_LISTING_AGENT_TENANT_FEE',
+      message: 'NYC FARE Act: When broker represents landlord (listing agent), tenants cannot be charged broker fees',
+      severity: 'critical',
+      evidence: {
+        agentRepresentation: input.agentRepresentation,
+        hasBrokerFee: input.hasBrokerFee,
+        brokerFeeAmount: input.brokerFeeAmount,
+        brokerFeePaidBy: input.brokerFeePaidBy,
+        rule: 'NYC Admin Code § 26-3101(b)',
+        rationale: 'The FARE Act prohibits tenants from paying broker fees when the broker was hired by or represents the landlord.',
+      },
+      ruleReference: 'FARE Act - Listing Agent Tenant Fee Prohibition',
+      documentationUrl: 'https://legistar.council.nyc.gov/LegislationDetail.aspx?ID=6454633',
+    });
+    fixes.push({
+      action: 'remove_tenant_broker_fee',
+      description: 'Remove tenant broker fee or assign fee to landlord (who hired the listing agent)',
+      autoFixAvailable: true,
+      autoFixAction: 'set_broker_fee_paid_by_landlord',
+      priority: 'critical',
+    });
+  }
+
+  // General broker fee prohibition check
+  if (input.hasBrokerFee && brokerRules.paidBy === 'landlord' && input.brokerFeePaidBy === 'tenant') {
     violations.push({
       code: 'FARE_BROKER_FEE_PROHIBITED',
-      message: 'FARE Act prohibits requiring tenant to pay broker fee',
+      message: 'FARE Act prohibits requiring tenant to pay broker fee in NYC',
       severity: 'critical',
       evidence: {
         hasBrokerFee: input.hasBrokerFee,
         brokerFeeAmount: input.brokerFeeAmount,
+        brokerFeePaidBy: input.brokerFeePaidBy,
+        marketRule: brokerRules.paidBy,
         rule: 'NYC Admin Code § 26-3101',
       },
       ruleReference: 'FARE Act - Broker Fee Prohibition',
@@ -70,6 +117,61 @@ export function checkFAREActRules(
       autoFixAction: 'set_broker_fee_to_zero',
       priority: 'critical',
     });
+  }
+
+  // NYC FARE Act: Fee Disclosure Requirement
+  // All tenant-paid fees must be disclosed in listing and rental agreement
+  if (fareRules.feeDisclosureRequired !== false && input.feeDisclosure) {
+    if (!input.feeDisclosure.disclosed) {
+      violations.push({
+        code: 'FARE_FEE_DISCLOSURE_MISSING',
+        message: 'NYC FARE Act requires all tenant-paid fees to be disclosed in listing and rental agreement',
+        severity: 'critical',
+        evidence: {
+          feeDisclosureProvided: false,
+          context: input.context,
+          rule: 'NYC Admin Code § 26-3101(c)',
+          rationale: 'Landlords and their agents must clearly disclose all fees a tenant will be required to pay.',
+        },
+        ruleReference: 'FARE Act - Fee Disclosure Requirement',
+        documentationUrl: 'https://legistar.council.nyc.gov/LegislationDetail.aspx?ID=6454633',
+      });
+      fixes.push({
+        action: 'add_fee_disclosure',
+        description: 'Add complete fee disclosure listing all tenant-paid fees with amounts',
+        autoFixAvailable: false,
+        priority: 'critical',
+      });
+    } else {
+      // Check that all tenant-paid fees in the listing are disclosed
+      const undisclosedFees = input.feeDisclosure.disclosedFees.filter(
+        (fee) => fee.paidBy === 'tenant' && fee.amount > 0
+      );
+
+      // Validate disclosed fees contain required information
+      for (const fee of undisclosedFees) {
+        if (!fee.type || fee.amount === undefined) {
+          violations.push({
+            code: 'FARE_FEE_DISCLOSURE_MISSING',
+            message: `Fee disclosure incomplete: ${fee.type || 'unknown fee'} must include type and amount`,
+            severity: 'violation',
+            evidence: {
+              fee,
+              missingFields: [
+                ...(!fee.type ? ['type'] : []),
+                ...(fee.amount === undefined ? ['amount'] : []),
+              ],
+            },
+          });
+          fixes.push({
+            action: 'complete_fee_disclosure',
+            description: `Provide complete disclosure for ${fee.type || 'fee'} including type and amount`,
+            autoFixAvailable: false,
+            priority: 'high',
+          });
+        }
+      }
+    }
   }
 
   // Check income requirement

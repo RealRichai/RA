@@ -77,7 +77,7 @@ describe('Listing Publish Gate', () => {
         hasBrokerFee: false,
         monthlyRent: 3000,
         securityDepositAmount: 3000, // 1 month is OK
-        deliveredDisclosures: ['fare_act_disclosure'],
+        deliveredDisclosures: ['fare_act_disclosure', 'fare_fee_disclosure'],
         acknowledgedDisclosures: [],
       });
 
@@ -294,7 +294,7 @@ describe('Disclosure Requirement Gate', () => {
       entityType: 'listing',
       marketId: 'nyc',
       action: 'publish',
-      deliveredDisclosures: ['fare_act_disclosure'],
+      deliveredDisclosures: ['fare_act_disclosure', 'fare_fee_disclosure'],
       acknowledgedDisclosures: [],
     });
 

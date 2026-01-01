@@ -28,16 +28,16 @@ describe('FARE Act Rules (NYC)', () => {
         {
           hasBrokerFee: true,
           brokerFeeAmount: 3000,
+          brokerFeePaidBy: 'tenant',
           monthlyRent: 3000,
         },
         pack
       );
 
-      expect(result.violations).toHaveLength(1);
-      expect(result.violations[0]!.code).toBe('FARE_BROKER_FEE_PROHIBITED');
+      expect(result.violations.length).toBeGreaterThanOrEqual(1);
+      expect(result.violations.some((v) => v.code === 'FARE_BROKER_FEE_PROHIBITED')).toBe(true);
       expect(result.violations[0]!.severity).toBe('critical');
-      expect(result.fixes).toHaveLength(1);
-      expect(result.fixes[0]!.action).toBe('remove_broker_fee');
+      expect(result.fixes.length).toBeGreaterThanOrEqual(1);
     });
 
     it('should pass when no broker fee', () => {
@@ -50,6 +50,21 @@ describe('FARE Act Rules (NYC)', () => {
       );
 
       expect(result.violations).toHaveLength(0);
+    });
+
+    it('should pass when broker fee paid by landlord', () => {
+      const result = checkFAREActRules(
+        {
+          hasBrokerFee: true,
+          brokerFeeAmount: 3000,
+          brokerFeePaidBy: 'landlord',
+          monthlyRent: 3000,
+        },
+        pack
+      );
+
+      const brokerViolations = result.violations.filter((v) => v.code.includes('BROKER_FEE'));
+      expect(brokerViolations).toHaveLength(0);
     });
   });
 

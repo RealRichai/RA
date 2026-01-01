@@ -26,6 +26,8 @@ export const ViolationCodeSchema = z.enum([
   'FARE_INCOME_REQUIREMENT_EXCESSIVE',
   'FARE_CREDIT_SCORE_THRESHOLD_EXCESSIVE',
   'FARE_DISCLOSURE_MISSING',
+  'FARE_FEE_DISCLOSURE_MISSING',
+  'FARE_LISTING_AGENT_TENANT_FEE',
 
   // FCHA violations
   'FCHA_CRIMINAL_CHECK_BEFORE_OFFER',
@@ -447,6 +449,20 @@ export const MarketPackRulesSchema = z.object({
     enabled: z.boolean(),
     maxIncomeRequirementMultiplier: z.number().optional(), // e.g., 40 = 40x rent
     maxCreditScoreThreshold: z.number().optional(),
+    /** When broker represents landlord, tenant cannot be charged broker fees */
+    listingAgentTenantFeeProhibited: z.boolean().default(true),
+    /** All tenant-paid fees must be disclosed in listing and rental agreement */
+    feeDisclosureRequired: z.boolean().default(true),
+    /** Fees that must be disclosed to tenants */
+    disclosableFeeTypes: z.array(z.string()).default([
+      'broker_fee',
+      'application_fee',
+      'move_in_fee',
+      'amenity_fee',
+      'pet_fee',
+      'parking_fee',
+      'administrative_fee',
+    ]),
   }).optional(),
   fcha: FCHARuleSchema.optional(),
   goodCause: z.object({

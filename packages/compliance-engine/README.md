@@ -201,6 +201,158 @@ flowchart LR
     style F fill:#51cf66,color:#fff
 ```
 
+## NYC FARE Act Enforcement
+
+The FARE (Fair Access to Rental Equity) Act is enforced through multiple compliance rules in the `NYC_STRICT` market pack.
+
+### Core Rules
+
+#### 1. Listing Agent Tenant Fee Prohibition
+
+When a broker/agent represents the landlord (listing agent), tenants cannot be charged broker fees.
+
+```typescript
+import { gateListingPublish } from '@realriches/compliance-engine';
+
+// BLOCKED: Listing agent charging tenant
+const blocked = await gateListingPublish({
+  listingId: 'lst_123',
+  marketId: 'NYC',
+  hasBrokerFee: true,
+  brokerFeeAmount: 3000,
+  brokerFeePaidBy: 'tenant',        // Tenant pays
+  agentRepresentation: 'landlord',   // Agent represents landlord
+  monthlyRent: 2500,
+  deliveredDisclosures: ['fare_act_disclosure', 'fare_fee_disclosure'],
+  acknowledgedDisclosures: [],
+});
+// result.allowed = false
+// result.decision.violations includes FARE_LISTING_AGENT_TENANT_FEE
+
+// ALLOWED: Landlord pays their agent
+const allowed = await gateListingPublish({
+  listingId: 'lst_456',
+  marketId: 'NYC',
+  hasBrokerFee: true,
+  brokerFeeAmount: 3000,
+  brokerFeePaidBy: 'landlord',       // Landlord pays
+  agentRepresentation: 'landlord',
+  monthlyRent: 2500,
+  deliveredDisclosures: ['fare_act_disclosure', 'fare_fee_disclosure'],
+  acknowledgedDisclosures: [],
+  feeDisclosure: {
+    disclosed: true,
+    disclosedFees: [{ type: 'broker_fee', amount: 3000, paidBy: 'landlord' }],
+  },
+});
+// result.allowed = true
+```
+
+#### 2. Fee Disclosure Requirement
+
+All tenant-paid fees must be disclosed in both the listing and rental agreement.
+
+```typescript
+// BLOCKED: Missing fee disclosure
+const blocked = await gateListingPublish({
+  listingId: 'lst_789',
+  marketId: 'NYC',
+  hasBrokerFee: false,
+  monthlyRent: 2500,
+  deliveredDisclosures: ['fare_act_disclosure', 'fare_fee_disclosure'],
+  acknowledgedDisclosures: [],
+  feeDisclosure: {
+    disclosed: false,  // Not disclosed!
+    disclosedFees: [],
+  },
+});
+// result.allowed = false
+// result.decision.violations includes FARE_FEE_DISCLOSURE_MISSING
+
+// ALLOWED: All fees properly disclosed
+const allowed = await gateListingPublish({
+  listingId: 'lst_abc',
+  marketId: 'NYC',
+  hasBrokerFee: false,
+  monthlyRent: 2500,
+  deliveredDisclosures: ['fare_act_disclosure', 'fare_fee_disclosure'],
+  acknowledgedDisclosures: [],
+  feeDisclosure: {
+    disclosed: true,
+    disclosedFees: [
+      { type: 'application_fee', amount: 50, paidBy: 'tenant' },
+      { type: 'move_in_fee', amount: 200, paidBy: 'tenant' },
+    ],
+  },
+});
+// result.allowed = true
+```
+
+### Evidence and Audit Trail
+
+Every FARE Act violation includes complete evidence for audit and remediation:
+
+```typescript
+const violation = result.decision.violations.find(
+  v => v.code === 'FARE_LISTING_AGENT_TENANT_FEE'
+);
+
+console.log(violation);
+// {
+//   code: 'FARE_LISTING_AGENT_TENANT_FEE',
+//   message: 'NYC FARE Act: When broker represents landlord (listing agent), tenants cannot be charged broker fees',
+//   severity: 'critical',
+//   evidence: {
+//     agentRepresentation: 'landlord',
+//     hasBrokerFee: true,
+//     brokerFeeAmount: 3000,
+//     brokerFeePaidBy: 'tenant',
+//     rule: 'NYC Admin Code § 26-3101(b)',
+//     rationale: 'The FARE Act prohibits tenants from paying broker fees when the broker was hired by or represents the landlord.',
+//   },
+//   ruleReference: 'FARE Act - Listing Agent Tenant Fee Prohibition',
+//   documentationUrl: 'https://legistar.council.nyc.gov/LegislationDetail.aspx?ID=6454633',
+// }
+
+const fix = result.decision.recommendedFixes.find(
+  f => f.action === 'remove_tenant_broker_fee'
+);
+
+console.log(fix);
+// {
+//   action: 'remove_tenant_broker_fee',
+//   description: 'Remove tenant broker fee or assign fee to landlord (who hired the listing agent)',
+//   autoFixAvailable: true,
+//   autoFixAction: 'set_broker_fee_paid_by_landlord',
+//   priority: 'critical',
+// }
+```
+
+### Enforcement Points
+
+FARE Act rules are checked at these workflow boundaries:
+
+| Gate | Checks Performed |
+|------|-----------------|
+| `gateListingPublish` | Broker fee prohibition, fee disclosure, income/credit limits |
+| `gateListingUpdate` | Same as publish (prevents adding illegal fees to active listings) |
+| `gateLeaseCreation` | Broker fee prohibition, fee disclosure (at lease signing) |
+
+### Disclosable Fee Types
+
+The following fee types must be disclosed when charged to tenants:
+
+- `broker_fee` - Broker/agent commission
+- `application_fee` - Application processing fee
+- `move_in_fee` - Move-in costs
+- `credit_check_fee` - Credit report fee
+- `background_check_fee` - Background check fee
+- `security_deposit` - Security deposit
+- `pet_fee` - Pet deposit/fee
+- `amenity_fee` - Amenity access fees
+- `parking_fee` - Parking fees
+- `storage_fee` - Storage fees
+
 ## Violation Codes
 
 ### NYC (FARE Act, FCHA, Good Cause)
@@ -208,6 +360,8 @@ flowchart LR
 | Code | Severity | Description |
 |------|----------|-------------|
 | `FARE_BROKER_FEE_PROHIBITED` | Critical | Tenant cannot pay broker fee |
+| `FARE_LISTING_AGENT_TENANT_FEE` | Critical | Listing agent charging tenant broker fee |
+| `FARE_FEE_DISCLOSURE_MISSING` | Critical | Required fee disclosure not provided |
 | `FARE_INCOME_REQUIREMENT_EXCESSIVE` | Violation | Income requirement > 40x rent |
 | `FARE_CREDIT_SCORE_THRESHOLD_EXCESSIVE` | Violation | Credit score requirement > 650 |
 | `FCHA_CRIMINAL_CHECK_BEFORE_OFFER` | Critical | Background check before conditional offer |

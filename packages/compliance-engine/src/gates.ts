@@ -35,12 +35,23 @@ export interface ListingPublishInput {
   hasBrokerFee: boolean;
   brokerFeeAmount?: number;
   brokerFeePaidBy?: 'tenant' | 'landlord';
+  /** Who the broker/agent represents - critical for FARE Act */
+  agentRepresentation?: 'landlord' | 'tenant' | 'dual' | 'none';
   monthlyRent: number;
   securityDepositAmount?: number;
   incomeRequirementMultiplier?: number;
   creditScoreThreshold?: number;
   deliveredDisclosures: string[];
   acknowledgedDisclosures: string[];
+  /** Fee disclosure for FARE Act compliance */
+  feeDisclosure?: {
+    disclosed: boolean;
+    disclosedFees: Array<{
+      type: string;
+      amount: number;
+      paidBy: 'tenant' | 'landlord';
+    }>;
+  };
 }
 
 export async function gateListingPublish(input: ListingPublishInput): Promise<GateResult> {
@@ -50,16 +61,20 @@ export async function gateListingPublish(input: ListingPublishInput): Promise<Ga
   const fixes: RecommendedFix[] = [];
   const checksPerformed: string[] = [];
 
-  // Check FARE Act compliance
+  // Check FARE Act compliance (NYC-specific)
   if (pack.rules.fareAct?.enabled) {
     checksPerformed.push('fare_act');
     const fareResult = checkFAREActRules(
       {
         hasBrokerFee: input.hasBrokerFee,
         brokerFeeAmount: input.brokerFeeAmount,
+        brokerFeePaidBy: input.brokerFeePaidBy,
+        agentRepresentation: input.agentRepresentation,
         monthlyRent: input.monthlyRent,
         incomeRequirementMultiplier: input.incomeRequirementMultiplier,
         creditScoreThreshold: input.creditScoreThreshold,
+        feeDisclosure: input.feeDisclosure,
+        context: 'listing_publish',
       },
       pack
     );
@@ -493,6 +508,19 @@ export interface LeaseSigningInput {
   preferentialRentAmount?: number;
   deliveredDisclosures: string[];
   acknowledgedDisclosures: string[];
+  /** FARE Act compliance fields */
+  hasBrokerFee?: boolean;
+  brokerFeeAmount?: number;
+  brokerFeePaidBy?: 'tenant' | 'landlord';
+  agentRepresentation?: 'landlord' | 'tenant' | 'dual' | 'none';
+  feeDisclosure?: {
+    disclosed: boolean;
+    disclosedFees: Array<{
+      type: string;
+      amount: number;
+      paidBy: 'tenant' | 'landlord';
+    }>;
+  };
 }
 
 export async function gateLeaseCreation(input: LeaseSigningInput): Promise<GateResult> {
@@ -501,6 +529,25 @@ export async function gateLeaseCreation(input: LeaseSigningInput): Promise<GateR
   const violations: Violation[] = [];
   const fixes: RecommendedFix[] = [];
   const checksPerformed: string[] = [];
+
+  // Check FARE Act compliance for lease generation (NYC)
+  if (pack.rules.fareAct?.enabled) {
+    checksPerformed.push('fare_act');
+    const fareResult = checkFAREActRules(
+      {
+        hasBrokerFee: input.hasBrokerFee ?? false,
+        brokerFeeAmount: input.brokerFeeAmount,
+        brokerFeePaidBy: input.brokerFeePaidBy,
+        agentRepresentation: input.agentRepresentation,
+        monthlyRent: input.monthlyRent,
+        feeDisclosure: input.feeDisclosure,
+        context: 'lease_generation',
+      },
+      pack
+    );
+    violations.push(...fareResult.violations);
+    fixes.push(...fareResult.fixes);
+  }
 
   // Check security deposit
   if (pack.rules.securityDeposit.enabled && input.securityDepositAmount) {
@@ -559,6 +606,7 @@ export async function gateLeaseCreation(input: LeaseSigningInput): Promise<GateR
     metadata: {
       leaseId: input.leaseId,
       isRentStabilized: input.isRentStabilized,
+      fareActEnforced: pack.rules.fareAct?.enabled ?? false,
     },
   };
 
@@ -568,5 +616,104 @@ export async function gateLeaseCreation(input: LeaseSigningInput): Promise<GateR
     blockedReason: passed
       ? undefined
       : `Lease creation blocked: ${criticalViolations.map((v) => v.message).join('; ')}`,
+  };
+}
+
+// ============================================================================
+// Gate: Listing Update
+// ============================================================================
+
+export interface ListingUpdateInput extends ListingPublishInput {
+  previousState?: {
+    hasBrokerFee?: boolean;
+    brokerFeeAmount?: number;
+    brokerFeePaidBy?: 'tenant' | 'landlord';
+    agentRepresentation?: 'landlord' | 'tenant' | 'dual' | 'none';
+  };
+}
+
+export async function gateListingUpdate(input: ListingUpdateInput): Promise<GateResult> {
+  const marketPackId = getMarketPackIdFromMarket(input.marketId);
+  const pack = getMarketPack(marketPackId);
+  const violations: Violation[] = [];
+  const fixes: RecommendedFix[] = [];
+  const checksPerformed: string[] = [];
+
+  // Check FARE Act compliance (NYC-specific)
+  if (pack.rules.fareAct?.enabled) {
+    checksPerformed.push('fare_act');
+    const fareResult = checkFAREActRules(
+      {
+        hasBrokerFee: input.hasBrokerFee,
+        brokerFeeAmount: input.brokerFeeAmount,
+        brokerFeePaidBy: input.brokerFeePaidBy,
+        agentRepresentation: input.agentRepresentation,
+        monthlyRent: input.monthlyRent,
+        incomeRequirementMultiplier: input.incomeRequirementMultiplier,
+        creditScoreThreshold: input.creditScoreThreshold,
+        feeDisclosure: input.feeDisclosure,
+        context: 'listing_update',
+      },
+      pack
+    );
+    violations.push(...fareResult.violations);
+    fixes.push(...fareResult.fixes);
+  }
+
+  // Check broker fee rules
+  if (pack.rules.brokerFee.enabled) {
+    checksPerformed.push('broker_fee');
+    const brokerResult = checkBrokerFeeRules(
+      {
+        hasBrokerFee: input.hasBrokerFee,
+        brokerFeeAmount: input.brokerFeeAmount,
+        monthlyRent: input.monthlyRent,
+        paidBy: input.brokerFeePaidBy,
+      },
+      pack
+    );
+    violations.push(...brokerResult.violations);
+    fixes.push(...brokerResult.fixes);
+  }
+
+  // Check security deposit rules
+  if (pack.rules.securityDeposit.enabled && input.securityDepositAmount) {
+    checksPerformed.push('security_deposit');
+    const depositResult = checkSecurityDepositRules(
+      {
+        securityDepositAmount: input.securityDepositAmount,
+        monthlyRent: input.monthlyRent,
+      },
+      pack
+    );
+    violations.push(...depositResult.violations);
+    fixes.push(...depositResult.fixes);
+  }
+
+  const criticalViolations = violations.filter((v) => v.severity === 'critical');
+  const passed = criticalViolations.length === 0;
+
+  const decision: ComplianceDecision = {
+    passed,
+    violations,
+    recommendedFixes: fixes,
+    policyVersion: POLICY_VERSION,
+    marketPack: pack.id,
+    marketPackVersion: getMarketPackVersion(pack),
+    checkedAt: new Date().toISOString(),
+    checksPerformed,
+    metadata: {
+      listingId: input.listingId,
+      action: 'listing_update',
+      previousState: input.previousState,
+    },
+  };
+
+  return {
+    allowed: passed,
+    decision,
+    blockedReason: passed
+      ? undefined
+      : `Listing update blocked: ${criticalViolations.map((v) => v.message).join('; ')}`,
   };
 }
