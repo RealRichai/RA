@@ -567,6 +567,9 @@ importers:
 
   packages/tour-conversion:
     dependencies:
+      '@playcanvas/splat-transform':
+        specifier: ^0.16.1
+        version: 0.16.1
       '@realriches/database':
         specifier: workspace:*
         version: link:../database
@@ -2824,6 +2827,16 @@ packages:
     requiresBuild: true
     dev: true
     optional: true
+
+  /@playcanvas/splat-transform@0.16.1:
+    resolution: {integrity: sha512-FI+CTilEX6CXinuOLQXJRgPwh7PPN6rQaDHER9dk+ynGYqqQ3O5g1YKGywz9LdTAsORAwvHVt8VNV//lWrShhQ==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
+    dependencies:
+      webgpu: 0.3.8
+    transitivePeerDependencies:
+      - supports-color
+    dev: false
 
   /@prisma/client@5.22.0(prisma@5.22.0):
     resolution: {integrity: sha512-M0SVXfyHnQREBKxCgyo7sffrKttwE6R8PMq330MIUF0pTwjUhLbW84pFDlf06B27XyCR++VtjugEnIHdr07SVA==}
@@ -10930,6 +10943,16 @@ packages:
   /web-streams-polyfill@4.0.0-beta.3:
     resolution: {integrity: sha512-QW95TCTaHmsYfHDybGMwO5IJIM93I/6vTRk+daHTWFPhwh+C8Cg7j7XyKrwrj8Ib6vYXe0ocYNrmzY4xAAN6ug==}
     engines: {node: '>= 14'}
+    dev: false
+
+  /webgpu@0.3.8:
+    resolution: {integrity: sha512-g2YwfCvzHoQHwSEY3fS95sVKdo/JVLL9AnicJyRQBPwWm4j7zISHvk6P85HaWP0LhtBV+aopsShKIaDi4smECg==}
+    requiresBuild: true
+    dependencies:
+      '@webgpu/types': 0.1.68
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
     dev: false
 
   /webidl-conversions@3.0.1:
