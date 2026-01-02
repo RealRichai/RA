@@ -52,4 +52,5 @@ export {
   startWorker,
   stopWorker,
   getWorkerStats,
+  getBackpressureStatus,
 } from './worker';

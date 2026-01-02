@@ -654,7 +654,7 @@ export async function threeDGSControlAdminRoutes(app: FastifyInstance): Promise<
           status = 'critical';
           issues.push(`Queue not accepting jobs: ${backpressure.rejectionReason}`);
         } else if (backpressure && backpressure.utilizationPercent > 80) {
-          if (status !== 'critical') status = 'degraded';
+          status = 'degraded';
           issues.push(`High queue utilization: ${backpressure.utilizationPercent}%`);
         }
 
