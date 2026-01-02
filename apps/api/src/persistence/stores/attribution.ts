@@ -2,11 +2,19 @@
  * Prisma-backed Attribution Store
  *
  * Production implementation of AttributionStore using Prisma/PostgreSQL.
+ * Supports transaction propagation for atomic ledger operations.
  *
  * @see apps/api/src/persistence/index.ts - Composition root
+ * @see docs/architecture/transactions.md - Transaction patterns
  */
 
-import { Prisma, prisma } from '@realriches/database';
+import {
+  Prisma,
+  prisma,
+  withLedgerTransaction,
+  withSerializableTransactionOrExisting,
+  type TransactionClient,
+} from '@realriches/database';
 import type {
   AttributionStore,
   PartnerAttribution,
@@ -347,5 +355,157 @@ export class PrismaAttributionStore implements AttributionStore {
       byProduct: Array.from(productMap.values()),
       recentAttributions,
     };
+  }
+
+  // =========================================================================
+  // Transaction-aware Methods (for atomic ledger operations)
+  // =========================================================================
+
+  /**
+   * Update attribution within an existing transaction.
+   * Use this when coordinating attribution updates with ledger entries.
+   */
+  async updateWithTx(
+    id: string,
+    input: UpdateAttributionInput,
+    tx?: TransactionClient
+  ): Promise<PartnerAttribution> {
+    return withSerializableTransactionOrExisting(tx, async (client) => {
+      const now = new Date();
+
+      const data: Prisma.PartnerAttributionUpdateInput = {
+        updatedAt: now,
+      };
+
+      if (input.status !== undefined) {
+        data.status = input.status;
+
+        if (input.status === 'qualified') {
+          data.qualifiedAt = now;
+        } else if (input.status === 'realized') {
+          data.realizedAt = now;
+        } else if (input.status === 'failed') {
+          data.failedAt = now;
+        }
+      }
+
+      if (input.realizedRevenue !== undefined) {
+        data.realizedRevenue = input.realizedRevenue;
+      }
+
+      if (input.ledgerTransactionId !== undefined) {
+        data.ledgerTransactionId = input.ledgerTransactionId;
+      }
+
+      if (input.notes !== undefined) {
+        data.notes = input.notes;
+      }
+
+      if (input.metadata !== undefined) {
+        data.metadata = input.metadata as Prisma.InputJsonValue;
+      }
+
+      const record = await client.partnerAttribution.update({
+        where: { id },
+        data,
+      });
+
+      return toDomain(record)!;
+    });
+  }
+
+  /**
+   * Atomically realize attribution with ledger entry creation.
+   *
+   * This method uses SERIALIZABLE isolation with retry logic to ensure:
+   * - Ledger entries are created
+   * - Attribution is updated with ledger transaction ID
+   * - Both succeed or both fail (atomicity)
+   *
+   * @example
+   * const result = await store.realizeWithLedger(attributionId, {
+   *   realizedRevenue: 150.00,
+   *   idempotencyKey: `realize_${attributionId}_${Date.now()}`,
+   *   ledgerEntries: [
+   *     { accountCode: 'PARTNER_PAYABLE', accountType: 'liability', amount: 150.00, isDebit: true },
+   *     { accountCode: 'INSURANCE_COMMISSION', accountType: 'revenue', amount: 150.00, isDebit: false },
+   *   ],
+   *   description: 'Lemonade commission for policy POL-123',
+   * });
+   */
+  async realizeWithLedger(
+    attributionId: string,
+    params: {
+      realizedRevenue: number;
+      idempotencyKey: string;
+      ledgerEntries: Array<{
+        accountCode: string;
+        accountType: 'asset' | 'liability' | 'revenue' | 'expense';
+        amount: number;
+        isDebit: boolean;
+      }>;
+      description: string;
+      externalId?: string;
+      metadata?: Record<string, unknown>;
+    }
+  ): Promise<{ attribution: PartnerAttribution; ledgerTransactionId: string }> {
+    const result = await withLedgerTransaction(async (tx) => {
+      // Create ledger transaction
+      const ledgerTxn = await tx.ledgerTransaction.create({
+        data: {
+          idempotencyKey: params.idempotencyKey,
+          type: 'partner_commission',
+          status: 'posted',
+          description: params.description,
+          externalId: params.externalId,
+          referenceType: 'attribution',
+          referenceId: attributionId,
+          postedAt: new Date(),
+          metadata: params.metadata as Prisma.InputJsonValue,
+        },
+      });
+
+      // Create ledger entries
+      await tx.ledgerEntry.createMany({
+        data: params.ledgerEntries.map((entry) => ({
+          transactionId: ledgerTxn.id,
+          accountCode: entry.accountCode,
+          accountType: entry.accountType,
+          amount: entry.amount,
+          isDebit: entry.isDebit,
+        })),
+      });
+
+      // Update attribution with ledger transaction ID
+      const attribution = await this.updateWithTx(
+        attributionId,
+        {
+          status: 'realized',
+          realizedRevenue: params.realizedRevenue,
+          ledgerTransactionId: ledgerTxn.id,
+        },
+        tx
+      );
+
+      // Create audit log entry
+      await tx.auditLog.create({
+        data: {
+          action: 'ATTRIBUTION_REALIZED',
+          entityType: 'PartnerAttribution',
+          entityId: attributionId,
+          changes: {
+            ledgerTransactionId: ledgerTxn.id,
+            realizedRevenue: params.realizedRevenue,
+          },
+          metadata: {
+            ledgerEntryCount: params.ledgerEntries.length,
+          },
+        },
+      });
+
+      return { attribution, ledgerTransactionId: ledgerTxn.id };
+    }, 'attribution-realize');
+
+    return result.result;
   }
 }

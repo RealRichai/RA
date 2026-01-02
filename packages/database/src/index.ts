@@ -201,6 +201,33 @@ export { PrismaClient, Prisma };
 export * from '@prisma/client';
 
 // ============================================================================
+// Serializable Transactions (for critical operations)
+// ============================================================================
+
+export {
+  // Core transaction wrapper
+  withSerializableTransaction,
+  withSerializableTransactionOrExisting,
+  // Specialized wrappers
+  withLedgerTransaction,
+  withComplianceTransaction,
+  withIdempotentTransaction,
+  // Error handling
+  TransactionError,
+  TransactionErrorCode,
+  isSerializationError,
+  isTimeoutError,
+  // Metrics
+  getTransactionMetrics,
+  resetTransactionMetrics,
+  recordTransactionMetrics,
+  // Types
+  type TransactionClient,
+  type SerializableTransactionOptions,
+  type TransactionResult,
+} from './transactions';
+
+// ============================================================================
 // Repositories
 // ============================================================================
 

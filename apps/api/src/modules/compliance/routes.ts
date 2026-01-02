@@ -27,7 +27,7 @@ import {
   type FCHAStage,
   type ComplianceDecision,
 } from '@realriches/compliance-engine';
-import { prisma } from '@realriches/database';
+import { prisma, withComplianceTransaction } from '@realriches/database';
 import { generatePrefixedId, NotFoundError, ForbiddenError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -1351,6 +1351,9 @@ async function runComplianceCheck(
 
 /**
  * Record gate result to audit log and compliance check.
+ *
+ * Uses SERIALIZABLE transaction to ensure compliance decision + audit log
+ * are written atomically. This is critical for SOC2 evidence integrity.
  */
 async function recordGateResult(
   context: {
@@ -1376,53 +1379,65 @@ async function recordGateResult(
       : worst;
   }, 'info');
 
-  const check = await prisma.complianceCheck.create({
-    data: {
-      id: generatePrefixedId('cpl'),
-      entityType: context.entityType,
-      entityId: context.entityId,
-      marketId: context.marketId,
-      checkType: result.decision.checksPerformed.join(','),
-      status: result.allowed ? 'passed' : 'failed',
-      severity: worstSeverity,
-      title: result.allowed
-        ? `Gate passed: ${context.action}`
-        : `Gate blocked: ${context.action}`,
-      description: result.blockedReason || 'All compliance checks passed',
-      result: JSON.parse(JSON.stringify(result.decision)),
-      details: JSON.parse(JSON.stringify({
-        violations: result.decision.violations,
-        fixes: result.decision.recommendedFixes,
-        policyVersion: result.decision.policyVersion,
-        marketPack: result.decision.marketPack,
-        marketPackVersion: result.decision.marketPackVersion,
-      })),
-      checkedAt: new Date(),
-      checkedById: actorId,
-    },
-  });
+  // Use SERIALIZABLE transaction for atomic compliance decision + audit log
+  const txResult = await withComplianceTransaction(async (tx) => {
+    const checkId = generatePrefixedId('cpl');
 
-  // Create audit log entry
-  await createAuditLog({
-    actorId,
-    actorEmail,
-    action: `compliance_gate_${result.allowed ? 'passed' : 'blocked'}`,
-    entityType: context.entityType,
-    entityId: context.entityId,
-    changes: {
-      action: context.action,
-      previousState: context.previousState,
-      newState: context.newState,
-    },
-    metadata: {
-      complianceCheckId: check.id,
-      decision: result.decision,
-      blockedReason: result.blockedReason,
-    },
-    requestId,
-  });
+    // Create compliance check
+    await tx.complianceCheck.create({
+      data: {
+        id: checkId,
+        entityType: context.entityType,
+        entityId: context.entityId,
+        marketId: context.marketId,
+        checkType: result.decision.checksPerformed.join(','),
+        status: result.allowed ? 'passed' : 'failed',
+        severity: worstSeverity,
+        title: result.allowed
+          ? `Gate passed: ${context.action}`
+          : `Gate blocked: ${context.action}`,
+        description: result.blockedReason || 'All compliance checks passed',
+        result: JSON.parse(JSON.stringify(result.decision)),
+        details: JSON.parse(JSON.stringify({
+          violations: result.decision.violations,
+          fixes: result.decision.recommendedFixes,
+          policyVersion: result.decision.policyVersion,
+          marketPack: result.decision.marketPack,
+          marketPackVersion: result.decision.marketPackVersion,
+        })),
+        checkedAt: new Date(),
+        checkedById: actorId,
+      },
+    });
 
-  return check.id;
+    // Create audit log entry atomically
+    await tx.auditLog.create({
+      data: {
+        id: generatePrefixedId('aud'),
+        actorId,
+        actorEmail,
+        action: `compliance_gate_${result.allowed ? 'passed' : 'blocked'}`,
+        entityType: context.entityType,
+        entityId: context.entityId,
+        changes: JSON.parse(JSON.stringify({
+          action: context.action,
+          previousState: context.previousState,
+          newState: context.newState,
+        })),
+        metadata: JSON.parse(JSON.stringify({
+          complianceCheckId: checkId,
+          decision: result.decision,
+          blockedReason: result.blockedReason,
+        })),
+        requestId,
+        timestamp: new Date(),
+      },
+    });
+
+    return checkId;
+  }, `gate-${context.action}`);
+
+  return txResult.result;
 }
 
 /**
