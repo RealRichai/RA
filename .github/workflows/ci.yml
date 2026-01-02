@@ -510,7 +510,7 @@ jobs:
           echo "✅ Persistence guard check passed!"
 
       - name: Run persistence guard tests
-        run: pnpm --filter @realriches/api test -- persistence-guard.test.ts
+        run: cd apps/api && npx vitest run -c vitest.persistence.config.ts
         env:
           NODE_ENV: test
 
