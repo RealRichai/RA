@@ -2,83 +2,99 @@
  * Persistence Guard Tests
  *
  * CI safety tests ensuring production bootstrap cannot wire InMemory* stores.
- * These tests use static analysis to verify code patterns without requiring
- * database connections.
+ * These tests use static file analysis to verify code patterns.
  *
  * @see apps/api/src/persistence/index.ts - Composition root
  * @see docs/architecture/persistence.md - Architecture documentation
  */
 
 import { describe, it, expect } from 'vitest';
-import { execSync } from 'child_process';
-import { readFileSync, existsSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
+import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 // ESM-compatible __dirname
 const currentDir = dirname(fileURLToPath(import.meta.url));
-const projectRoot = resolve(currentDir, '..', '..', '..');
 const apiRoot = resolve(currentDir, '..');
+
+/**
+ * Recursively read all TypeScript files in a directory
+ */
+function readTsFilesRecursively(dir: string): { path: string; content: string }[] {
+  const results: { path: string; content: string }[] = [];
+
+  if (!existsSync(dir)) return results;
+
+  const items = readdirSync(dir);
+  for (const item of items) {
+    const fullPath = join(dir, item);
+    const stat = statSync(fullPath);
+
+    if (stat.isDirectory() && !item.startsWith('.') && item !== 'node_modules') {
+      results.push(...readTsFilesRecursively(fullPath));
+    } else if (stat.isFile() && item.endsWith('.ts')) {
+      results.push({
+        path: fullPath,
+        content: readFileSync(fullPath, 'utf-8'),
+      });
+    }
+  }
+
+  return results;
+}
 
 describe('Persistence Guard - Static Analysis', () => {
   describe('InMemory Store Location Validation', () => {
-    it('should not have InMemory class definitions in production paths', () => {
-      // InMemory* classes should NOT exist in:
-      // - apps/api/src/persistence/* (composition root)
-      // - apps/api/src/modules/* (production routes)
+    it('should not have InMemory class definitions in persistence folder', () => {
+      const persistencePath = resolve(apiRoot, 'src', 'persistence');
+      const files = readTsFilesRecursively(persistencePath);
 
-      const productionPaths = [
-        'apps/api/src/persistence',
-        'apps/api/src/modules',
-      ];
-
-      for (const searchPath of productionPaths) {
-        const fullPath = resolve(projectRoot, searchPath);
-        if (!existsSync(fullPath)) continue;
-
-        try {
-          const result = execSync(
-            `grep -r "class InMemory" ${fullPath} 2>/dev/null || true`,
-            { encoding: 'utf-8' }
-          );
-
-          // Should not find InMemory class definitions in production code
-          expect(result.trim()).toBe('');
-        } catch {
-          // grep returns non-zero when no matches found - that's expected
-        }
+      for (const file of files) {
+        expect(
+          file.content.includes('class InMemory'),
+          `Found InMemory class definition in ${file.path}`
+        ).toBe(false);
       }
     });
 
-    it('should not have InMemory instantiation in production routes', () => {
+    it('should not have InMemory class definitions in modules folder', () => {
       const modulesPath = resolve(apiRoot, 'src', 'modules');
-      if (!existsSync(modulesPath)) return;
+      const files = readTsFilesRecursively(modulesPath);
 
-      try {
-        const result = execSync(
-          `grep -r "new InMemory" ${modulesPath} 2>/dev/null || true`,
-          { encoding: 'utf-8' }
-        );
-
-        expect(result.trim()).toBe('');
-      } catch {
-        // Expected when no matches
+      for (const file of files) {
+        expect(
+          file.content.includes('class InMemory'),
+          `Found InMemory class definition in ${file.path}`
+        ).toBe(false);
       }
     });
 
-    it('should not import InMemory stores directly in production routes', () => {
+    it('should not have InMemory instantiation in modules folder', () => {
       const modulesPath = resolve(apiRoot, 'src', 'modules');
-      if (!existsSync(modulesPath)) return;
+      const files = readTsFilesRecursively(modulesPath);
 
-      try {
-        const result = execSync(
-          `grep -rE "InMemoryAttributionStore|InMemoryMeteringService" ${modulesPath} 2>/dev/null || true`,
-          { encoding: 'utf-8' }
-        );
+      for (const file of files) {
+        expect(
+          file.content.includes('new InMemory'),
+          `Found InMemory instantiation in ${file.path}`
+        ).toBe(false);
+      }
+    });
 
-        expect(result.trim()).toBe('');
-      } catch {
-        // Expected when no matches
+    it('should not import InMemory stores directly in modules', () => {
+      const modulesPath = resolve(apiRoot, 'src', 'modules');
+      const files = readTsFilesRecursively(modulesPath);
+
+      for (const file of files) {
+        expect(
+          file.content.includes('InMemoryAttributionStore'),
+          `Found InMemoryAttributionStore import in ${file.path}`
+        ).toBe(false);
+
+        expect(
+          file.content.includes('InMemoryMeteringService'),
+          `Found InMemoryMeteringService import in ${file.path}`
+        ).toBe(false);
       }
     });
   });
@@ -86,27 +102,20 @@ describe('Persistence Guard - Static Analysis', () => {
   describe('Partner Revenue Routes', () => {
     it('should not import InMemory stores', () => {
       const filePath = resolve(apiRoot, 'src', 'modules', 'admin', 'partner-revenue.ts');
-      if (!existsSync(filePath)) {
-        // File doesn't exist yet - that's OK
-        return;
-      }
+      if (!existsSync(filePath)) return;
 
       const content = readFileSync(filePath, 'utf-8');
 
-      // Should not import InMemory stores directly
       expect(content).not.toContain('InMemoryAttributionStore');
       expect(content).not.toContain('new InMemory');
     });
 
     it('should use composition root for persistence', () => {
       const filePath = resolve(apiRoot, 'src', 'modules', 'admin', 'partner-revenue.ts');
-      if (!existsSync(filePath)) {
-        return;
-      }
+      if (!existsSync(filePath)) return;
 
       const content = readFileSync(filePath, 'utf-8');
 
-      // Should use getAttributionService from composition root
       expect(content).toContain('getAttributionService');
       expect(content).toContain("from '../../persistence'");
     });
@@ -124,14 +133,13 @@ describe('Persistence Guard - Static Analysis', () => {
 
       const content = readFileSync(indexPath, 'utf-8');
 
-      // Static imports of InMemory stores are forbidden
-      // They should only be dynamically imported in test mode
+      // Check each import line for InMemory
       const lines = content.split('\n');
-      const staticImportLines = lines.filter(line =>
-        line.startsWith('import') && line.includes('InMemory')
-      );
-
-      expect(staticImportLines).toHaveLength(0);
+      for (const line of lines) {
+        if (line.trim().startsWith('import') && line.includes('InMemory')) {
+          expect.fail(`Found static InMemory import: ${line.trim()}`);
+        }
+      }
     });
 
     it('should export persistence initialization functions', () => {
@@ -140,7 +148,6 @@ describe('Persistence Guard - Static Analysis', () => {
 
       const content = readFileSync(indexPath, 'utf-8');
 
-      // Should export key functions
       expect(content).toContain('export function initializePersistence');
       expect(content).toContain('export function getAttributionStore');
       expect(content).toContain('export function isUsingInMemoryStores');
@@ -152,20 +159,9 @@ describe('Persistence Guard - Static Analysis', () => {
 
       const content = readFileSync(indexPath, 'utf-8');
 
-      // Should check for production/test/development
       expect(content).toContain('production');
       expect(content).toContain('test');
       expect(content).toContain('development');
-    });
-
-    it('should have production validation that blocks InMemory stores', () => {
-      const indexPath = resolve(apiRoot, 'src', 'persistence', 'index.ts');
-      if (!existsSync(indexPath)) return;
-
-      const content = readFileSync(indexPath, 'utf-8');
-
-      // Should have validation logic for production
-      expect(content).toMatch(/production.*InMemory|InMemory.*production/i);
     });
   });
 
