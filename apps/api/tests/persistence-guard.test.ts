@@ -8,7 +8,7 @@
  * @see docs/architecture/persistence.md - Architecture documentation
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Use isolated imports to test the composition root without side effects
 describe('Persistence Guard', () => {
@@ -197,10 +197,13 @@ describe('InMemory Store Location Validation', () => {
     // - NOT in apps/api/src/modules/* (production routes)
 
     const { execSync } = await import('child_process');
-    const { resolve } = await import('path');
+    const { resolve, dirname } = await import('path');
+    const { fileURLToPath } = await import('url');
 
+    // Get __dirname equivalent for ESM
+    const currentDir = dirname(fileURLToPath(import.meta.url));
     // Get project root (apps/api/tests -> apps/api -> apps -> project root)
-    const projectRoot = resolve(__dirname, '..', '..', '..');
+    const projectRoot = resolve(currentDir, '..', '..', '..');
 
     // Search for InMemory class definitions in production paths
     const productionPaths = [
@@ -225,10 +228,13 @@ describe('InMemory Store Location Validation', () => {
 
   it('should verify no InMemory imports in partner-revenue routes', async () => {
     const { readFileSync } = await import('fs');
-    const { resolve } = await import('path');
+    const { resolve, dirname } = await import('path');
+    const { fileURLToPath } = await import('url');
 
+    // Get __dirname equivalent for ESM
+    const currentDir = dirname(fileURLToPath(import.meta.url));
     // Use relative path from test file location
-    const filePath = resolve(__dirname, '..', 'src', 'modules', 'admin', 'partner-revenue.ts');
+    const filePath = resolve(currentDir, '..', 'src', 'modules', 'admin', 'partner-revenue.ts');
 
     const content = readFileSync(filePath, 'utf-8');
 
