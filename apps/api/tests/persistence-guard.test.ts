@@ -10,6 +10,10 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+// Unmock database to test actual persistence implementation
+// The setup.ts mocks @realriches/database globally, but we need the real module
+vi.unmock('@realriches/database');
+
 // Use isolated imports to test the composition root without side effects
 describe('Persistence Guard', () => {
   // Store original NODE_ENV
