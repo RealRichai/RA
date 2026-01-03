@@ -526,6 +526,43 @@ This document serves as the single source of truth for feature implementation st
 
 ---
 
+## 16. Testing Infrastructure
+
+### 16.1 E2E API Journey Tests
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| Auth Journey | Register, login, token refresh, revocation | Global | E2E | **Implemented** | `tests/e2e/journeys/auth.api.spec.ts` | Playwright |
+| Listing Journey | Draft → NYC compliance gate → publish | `NYC_STRICT` | E2E | **Implemented** | `tests/e2e/journeys/listing.api.spec.ts` | Playwright |
+| Application Journey | Prequal → conditional offer → background check (FCHA) | `NYC_STRICT` | E2E | **Implemented** | `tests/e2e/journeys/application.api.spec.ts` | Playwright |
+| Vault Journey | Document upload → ACL enforcement → signed URL | Global | E2E | **Implemented** | `tests/e2e/journeys/vault.api.spec.ts` | Playwright |
+| Revenue Journey | Partner-attributed transaction → ledger entry | Global | E2E | **Implemented** | `tests/e2e/journeys/revenue.api.spec.ts` | Playwright |
+| Tour Journey | 3D tour listing → signed URL → viewer access | Global | E2E | **Implemented** | `tests/e2e/journeys/tour.api.spec.ts` | Playwright |
+
+### 16.2 E2E Browser Tests
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| Admin Login Flow | Login page, credentials, dashboard redirect | Global | E2E | **Implemented** | `tests/e2e/journeys/admin-login.browser.spec.ts` | Playwright |
+| Dashboard Verification | Welcome message, navigation elements, quick actions | Global | E2E | **Implemented** | `tests/e2e/journeys/admin-login.browser.spec.ts` | Playwright |
+| Auth Persistence | Session survives page refresh | Global | E2E | **Implemented** | `tests/e2e/journeys/admin-login.browser.spec.ts` | Playwright |
+| Listing Compliance Flow | Create Listing button, NYC disclosure gate (via API) | `NYC_STRICT` | E2E | **Implemented** | `tests/e2e/journeys/listing-flow.browser.spec.ts` | Playwright |
+| Tour Demo Page | 3DGS viewer, canvas rendering, tour selector | Global | E2E | **Implemented** | `tests/e2e/journeys/tour-demo.browser.spec.ts` | Playwright |
+| SplatViewer Controls | FPS toggle, auto-rotate, custom SOG URL | Global | E2E | **Implemented** | `tests/e2e/journeys/tour-demo.browser.spec.ts` | Playwright |
+
+### 16.3 Test Infrastructure
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| Playwright Config | Multi-project (chromium, browser, api) | Global | E2E | **Implemented** | `playwright.config.ts` | N/A |
+| Browser Fixtures | Login helpers, admin credentials, locale handling | Global | E2E | **Implemented** | `tests/e2e/fixtures/browser-fixtures.ts` | N/A |
+| API Fixtures | Hermetic test isolation, unique IDs | Global | E2E | **Implemented** | `tests/e2e/fixtures/test-fixtures.ts` | N/A |
+| Market-Ready Reporter | Custom compliance report generator | Global | E2E | **Implemented** | `tests/e2e/reporters/market-ready-reporter.ts` | N/A |
+| Docker Test Environment | Isolated postgres, redis, minio, api, web | Global | E2E | **Implemented** | `docker-compose.test.yml` | N/A |
+| CI Integration | Browser tests in GitHub Actions with artifacts | Global | CI | **Implemented** | `.github/workflows/ci.yml` (e2e-market-ready job) | N/A |
+
+---
+
 ## Summary Statistics
 
 | Category | Implemented | Partial | Missing | Total |
@@ -545,7 +582,8 @@ This document serves as the single source of truth for feature implementation st
 | Email Service | 11 | 0 | 0 | 11 |
 | Partner Contracts | 9 | 0 | 0 | 9 |
 | Feature Flags | 4 | 0 | 0 | 4 |
-| **TOTAL** | **171** | **1** | **4** | **176** |
+| Testing Infrastructure | 18 | 0 | 0 | 18 |
+| **TOTAL** | **189** | **1** | **4** | **194** |
 
 ---
 
