@@ -2,8 +2,8 @@
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Globe } from 'lucide-react';
-import { useLocale } from 'next-intl';
 import { usePathname, useRouter } from 'next/navigation';
+import { useLocale } from 'next-intl';
 
 import { localeFlags, localeNames, locales, type Locale } from '@/i18n/config';
 import { cn } from '@/lib/utils';

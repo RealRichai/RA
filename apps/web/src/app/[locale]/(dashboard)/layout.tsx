@@ -14,10 +14,9 @@ import {
   Users,
   Shield,
 } from 'lucide-react';
-import { useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { useEffect } from 'react';
 
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
