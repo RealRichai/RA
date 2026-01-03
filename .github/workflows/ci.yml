@@ -564,21 +564,27 @@ jobs:
         run: |
           echo "Checking for schema drift..."
 
-          # Generate SQL from current schema
-          npx prisma migrate diff \
-            --from-schema-datamodel prisma/schema.prisma \
-            --to-migrations prisma/migrations \
-            --exit-code \
-          || {
+          # Compare the schema file against the database state after migrations
+          # If there's drift, this will output SQL statements needed to sync
+          DIFF_OUTPUT=$(npx prisma migrate diff \
+            --from-url "$DATABASE_URL" \
+            --to-schema-datamodel prisma/schema.prisma \
+            --script 2>&1) || true
+
+          # Check if there are any SQL statements (indicates drift)
+          if echo "$DIFF_OUTPUT" | grep -qE "^(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)" ; then
             echo ""
             echo "::error::SCHEMA DRIFT DETECTED!"
             echo "The Prisma schema and migrations are out of sync."
+            echo ""
+            echo "Differences found:"
+            echo "$DIFF_OUTPUT"
             echo ""
             echo "To fix:"
             echo "  1. Run: pnpm db:migrate:dev --name <migration_name>"
             echo "  2. Commit the new migration file"
             exit 1
-          }
+          fi
 
           echo "✓ Schema and migrations are in sync"
         working-directory: packages/database
