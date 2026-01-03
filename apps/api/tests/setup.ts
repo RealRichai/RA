@@ -194,6 +194,10 @@ export const mockPrisma = {
   showingAgent: createModelMock(),
   listingAvailability: createModelMock(),
 
+  // Listing models
+  listing: createModelMock(),
+  listingMedia: createModelMock(),
+
   // Budget models
   budget: createModelMock(),
   budgetActual: createModelMock(),

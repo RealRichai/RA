@@ -16,4 +16,5 @@ export { PartnerHealthJob } from './partner-health';
 export { PaymentReminderJob } from './payment-reminder';
 export { PolicyExpirationJob } from './policy-expiration';
 export { setupJobs, stopJobs, getJobScheduler } from './setup';
+export { SyndicationSyncJob } from './syndication-sync';
 export { WebhookRetryJob } from './webhook-retry';

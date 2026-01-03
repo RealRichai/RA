@@ -17,6 +17,7 @@ import { PartnerHealthJob } from './partner-health';
 import { PaymentReminderJob } from './payment-reminder';
 import { PolicyExpirationJob } from './policy-expiration';
 import { JobScheduler } from './scheduler';
+import { SyndicationSyncJob } from './syndication-sync';
 import { WebhookRetryJob } from './webhook-retry';
 
 let scheduler: JobScheduler | null = null;
@@ -38,6 +39,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   AnalyticsAggregationJob.initializeRedis(redis);
   ComplianceAuditJob.initializeRedis(redis);
   DocumentExpirationJob.initializeRedis(redis);
+  SyndicationSyncJob.initializeRedis(redis);
 
   // Create scheduler with Redis connection
   scheduler = new JobScheduler({
@@ -57,6 +59,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   scheduler.register(AnalyticsAggregationJob.getDefinition());
   scheduler.register(ComplianceAuditJob.getDefinition());
   scheduler.register(DocumentExpirationJob.getDefinition());
+  scheduler.register(SyndicationSyncJob.getDefinition());
 
   // Start the scheduler
   await scheduler.start();

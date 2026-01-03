@@ -71,6 +71,7 @@ import { screeningRoutes } from './screening/routes';
 import { searchRoutes } from './search/routes';
 import { showingRoutes } from './showings/routes';
 import { storageRoutes } from './storage/routes';
+import { syndicationRoutes } from './syndication/routes';
 import { taxDocumentRoutes } from './tax-documents/routes';
 import { tenantPortalRoutes } from './tenant-portal/routes';
 import { userRoutes } from './users/routes';
@@ -157,6 +158,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(violationRoutes, { prefix: '/violations' });
       await api.register(rentRollRoutes, { prefix: '/rent-roll' });
       await api.register(propertyComparisonRoutes, { prefix: '/property-comparison' });
+      await api.register(syndicationRoutes);
 
       // Admin routes
       await api.register(auditLogRoutes, { prefix: '/admin/audit-logs' });
