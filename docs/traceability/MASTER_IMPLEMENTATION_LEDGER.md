@@ -2,7 +2,7 @@
 
 > **Version:** 1.0.0
 > **Last Updated:** 2026-01-03
-> **Audit Commit:** 0e8e8637b2138317c4793fb8a7b641d202f8847b
+> **Audit Commit:** 5b3e403e6a2c7f1db44c3b0ceaf4e27eb39dffed
 > **Branch:** main
 
 This document serves as the single source of truth for feature implementation status across the RealRiches platform. Each feature is tracked with evidence paths, test coverage, and clear status indicators.
@@ -304,6 +304,22 @@ This document serves as the single source of truth for feature implementation st
 | Local Demo Assets | Bundled PLY demo files with graceful fallback | `TOUR_WEBGPU_VIEWER` | `@realriches/web` | **Implemented** | `apps/web/public/demo/sog/`, `apps/web/src/app/[locale]/debug/tour-demo/page.tsx` | `apps/web/src/__tests__/tour-demo.test.ts` |
 | Demo Asset Generator | Script to regenerate demo SOG assets | `TOUR_WEBGPU_VIEWER` | Root | **Implemented** | `scripts/generate_demo_assets.ts` | `apps/web/src/__tests__/tour-demo.test.ts` |
 
+### 7.4 SOG Compliance Controls
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| PLY Retention Guard | Blocks PLY delete unless SUPERADMIN + PLY_DELETE_OVERRIDE=true | Global | `@realriches/tour-delivery` | **Implemented** | `packages/tour-delivery/src/retention-guard.ts` | `packages/tour-delivery/src/__tests__/retention-guard.test.ts` |
+| Retention Evidence Recording | SOC2 CC6.1 evidence for all delete attempts | Global | `@realriches/tour-delivery` | **Implemented** | `packages/tour-delivery/src/retention-guard.ts:147-180` | `packages/tour-delivery/src/__tests__/retention-guard.test.ts` |
+| S3 Provider Retention Integration | S3 delete blocked for .ply files via guard | Global | `@realriches/tour-delivery` | **Implemented** | `packages/tour-delivery/src/providers/s3.ts:129-141` | `packages/tour-delivery/src/__tests__/service.test.ts` |
+| Asset Provenance Service | Lifecycle event tracking (upload, conversion, QA, access) | Global | `@realriches/tour-conversion` | **Implemented** | `packages/tour-conversion/src/provenance.ts` | `packages/tour-conversion/src/__tests__/provenance.test.ts` |
+| Provenance Verification | Validates completeness of provenance chain | Global | `@realriches/tour-conversion` | **Implemented** | `packages/tour-conversion/src/provenance.ts:313-357` | `packages/tour-conversion/src/__tests__/provenance.test.ts` |
+| PLY/SOG Integrity Check | SHA256 verification with evidence emission | Global | `@realriches/tour-conversion` | **Implemented** | `packages/tour-conversion/src/provenance.ts:189-308` | `packages/tour-conversion/src/__tests__/provenance.test.ts` |
+| Quality Regression Harness | Detects quality drops against stored baselines | Global | `@realriches/tour-conversion` | **Implemented** | `packages/tour-conversion/src/quality-regression.ts` | `packages/tour-conversion/src/__tests__/quality-regression.test.ts` |
+| Baseline Management | Register, load, compare quality baselines | Global | `@realriches/tour-conversion` | **Implemented** | `packages/tour-conversion/src/quality-regression.ts:66-96` | `packages/tour-conversion/src/__tests__/quality-regression.test.ts` |
+| Regression Severity Classification | minor/moderate/severe based on score/pHash delta | Global | `@realriches/tour-conversion` | **Implemented** | `packages/tour-conversion/src/quality-regression.ts:148-158` | `packages/tour-conversion/src/__tests__/quality-regression.test.ts` |
+| CI Regression Test Runner | runCIRegressionTest with exit code for CI | Global | `@realriches/tour-conversion` | **Implemented** | `packages/tour-conversion/src/quality-regression.ts:306-352` | `.github/workflows/ci.yml` (tour-conversion-validation job) |
+| CI Tour Conversion Validation | Validates retention guard, checksums, provenance, QA harness | Global | CI | **Implemented** | `.github/workflows/ci.yml` (tour-conversion-validation job) | N/A |
+
 ---
 
 ## 8. Mobile
@@ -598,7 +614,7 @@ This document serves as the single source of truth for feature implementation st
 | AI Agents | 16 | 0 | 0 | 16 |
 | Agent Governance | 11 | 0 | 0 | 11 |
 | Media Generation | 9 | 0 | 0 | 9 |
-| 3D Tours | 16 | 0 | 0 | 16 |
+| 3D Tours | 27 | 0 | 0 | 27 |
 | Mobile | 2 | 0 | 3 | 5 |
 | Security/SOC2 | 12 | 0 | 0 | 12 |
 | Multi-Market/i18n | 11 | 0 | 0 | 11 |
@@ -608,7 +624,7 @@ This document serves as the single source of truth for feature implementation st
 | Partner Contracts | 9 | 0 | 0 | 9 |
 | Feature Flags | 4 | 0 | 0 | 4 |
 | Testing Infrastructure | 32 | 0 | 0 | 32 |
-| **TOTAL** | **210** | **1** | **3** | **214** |
+| **TOTAL** | **221** | **1** | **3** | **225** |
 
 ---
 
