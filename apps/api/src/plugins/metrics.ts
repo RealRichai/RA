@@ -5,6 +5,7 @@
  * Collects HTTP request metrics, business metrics, and system metrics.
  */
 
+import { getConfig } from '@realriches/config';
 import { prisma } from '@realriches/database';
 import { logger } from '@realriches/utils';
 import type { FastifyInstance, FastifyPluginCallback, FastifyRequest, FastifyReply } from 'fastify';
@@ -435,18 +436,105 @@ export const metricsPlugin = fp(metricsPluginCallback, {
 // Metrics Routes
 // =============================================================================
 
+/**
+ * Metrics authentication hook.
+ * Allows access if:
+ * 1. User is authenticated with ADMIN role via JWT, OR
+ * 2. X-Metrics-Token header matches METRICS_TOKEN env var
+ */
+async function metricsAuth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  app: FastifyInstance
+): Promise<void> {
+  const config = getConfig();
+  const metricsToken = config.observability?.metricsToken;
+
+  // Check X-Metrics-Token header first (for Prometheus scraping)
+  const headerToken = request.headers['x-metrics-token'] as string | undefined;
+  if (metricsToken && headerToken === metricsToken) {
+    return; // Token auth successful
+  }
+
+  // Fall back to JWT auth with ADMIN role
+  try {
+    await app.authenticate(request, reply);
+    if (reply.sent) return; // Auth failed, response already sent
+
+    if (request.user?.role !== 'ADMIN') {
+      reply.status(403).send({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Admin access required for metrics endpoint',
+        },
+      });
+      return;
+    }
+  } catch {
+    // No valid auth method
+    reply.status(401).send({
+      success: false,
+      error: {
+        code: 'AUTH_REQUIRED',
+        message: 'Authentication required. Provide X-Metrics-Token header or valid JWT.',
+      },
+    });
+  }
+}
+
 export async function metricsRoutes(app: FastifyInstance): Promise<void> {
-  // GET /metrics - Prometheus metrics endpoint
+  // GET /metrics - Prometheus metrics endpoint (protected)
   app.get(
     '/metrics',
     {
       schema: {
-        description: 'Prometheus metrics endpoint',
+        description: 'Prometheus metrics endpoint (requires ADMIN role or X-Metrics-Token)',
         tags: ['Metrics'],
         produces: ['text/plain'],
+        security: [{ bearerAuth: [] }],
+        headers: {
+          type: 'object',
+          properties: {
+            'x-metrics-token': { type: 'string', description: 'Metrics access token' },
+          },
+        },
+        response: {
+          401: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: {
+                type: 'object',
+                properties: {
+                  code: { type: 'string' },
+                  message: { type: 'string' },
+                },
+              },
+            },
+          },
+          403: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: {
+                type: 'object',
+                properties: {
+                  code: { type: 'string' },
+                  message: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: async (request, reply) => {
+        await metricsAuth(request, reply, app);
       },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      if (reply.sent) return; // Auth failed
+
       try {
         const metrics = await register.metrics();
         reply.header('Content-Type', register.contentType);
@@ -458,16 +546,22 @@ export async function metricsRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // GET /metrics/json - Metrics as JSON (for debugging)
+  // GET /metrics/json - Metrics as JSON (for debugging, protected)
   app.get(
     '/metrics/json',
     {
       schema: {
-        description: 'Metrics as JSON for debugging',
+        description: 'Metrics as JSON for debugging (requires ADMIN role or X-Metrics-Token)',
         tags: ['Metrics'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: async (request, reply) => {
+        await metricsAuth(request, reply, app);
       },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      if (reply.sent) return; // Auth failed
+
       try {
         const metrics = await register.getMetricsAsJSON();
         return reply.send({

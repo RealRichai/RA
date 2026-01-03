@@ -5,11 +5,12 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
-    // Exclude tests that need separate configs (no mocks)
+    // Exclude tests that need separate configs (no mocks or isolated mocks)
     exclude: [
       'tests/persistence-guard.test.ts',
       'tests/transactions.test.ts',
       'tests/transactions-integration.test.ts',
+      'tests/metrics.test.ts',
     ],
     coverage: {
       provider: 'v8',

@@ -619,6 +619,11 @@ jobs:
           cd apps/api
           NODE_ENV=test npx vitest run --config vitest.evidence-audit.config.ts --reporter=verbose
 
+      - name: Run metrics endpoint tests
+        run: |
+          cd apps/api
+          NODE_ENV=test npx vitest run --config vitest.metrics.config.ts --reporter=verbose
+
   # ---------------------------------------------------------------------------
   # PERSISTENCE GUARD - No InMemory stores in production
   # ---------------------------------------------------------------------------

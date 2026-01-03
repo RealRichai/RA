@@ -103,6 +103,7 @@ const ObservabilityConfigSchema = z.object({
   sentryEnvironment: z.string().optional(),
   ddApiKey: z.string().optional(),
   ddAppKey: z.string().optional(),
+  metricsToken: z.string().optional(),
 });
 
 const FeatureFlagConfigSchema = z.object({
@@ -351,6 +352,7 @@ function parseConfig(): Config {
       sentryEnvironment: process.env['SENTRY_ENVIRONMENT'],
       ddApiKey: process.env['DD_API_KEY'],
       ddAppKey: process.env['DD_APP_KEY'],
+      metricsToken: process.env['METRICS_TOKEN'],
     },
 
     jobs: {
