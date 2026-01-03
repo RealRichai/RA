@@ -520,7 +520,7 @@ export class TwilioVoiceProviderProduction implements VoiceProviderInterface {
       }
     }
 
-    return Ok({
+    return Promise.resolve(Ok({
       type: eventType,
       callId: call?.id || callSid,
       externalId: callSid,
@@ -529,7 +529,7 @@ export class TwilioVoiceProviderProduction implements VoiceProviderInterface {
         ...data,
         internalCallId: call?.id,
       },
-    });
+    }));
   }
 
   /**
