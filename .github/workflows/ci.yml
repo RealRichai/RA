@@ -1180,6 +1180,8 @@ jobs:
           # Build packages that tour-delivery and tour-conversion depend on
           pnpm --filter @realriches/utils build
           pnpm --filter @realriches/config build
+          # Database needs prisma generate before build
+          pnpm --filter @realriches/database exec prisma generate
           pnpm --filter @realriches/database build
           pnpm --filter @realriches/feature-flags build
 
