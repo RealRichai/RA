@@ -529,6 +529,13 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
 
+      - name: Build shared packages
+        run: |
+          # Build packages that metrics tests depend on
+          pnpm --filter @realriches/config build
+          pnpm --filter @realriches/database build
+          pnpm --filter @realriches/utils build
+
       - name: Validate Evidence Control Catalog
         run: |
           echo "Validating EVIDENCE_CONTROL_CATALOG.md..."
