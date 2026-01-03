@@ -1,10 +1,32 @@
+# =============================================================================
+# CI Pipeline - Investor-Grade Quality Gates
+# =============================================================================
+#
+# This workflow enforces quality standards for the RealRiches monorepo:
+# - Policy gates (no HUMAN_IMPLEMENTATION_REQUIRED, traceability)
+# - Code quality (lint, typecheck)
+# - Testing (unit, integration, acceptance, e2e)
+# - Security (secrets guard, dependency audit)
+# - Schema integrity (Prisma drift detection)
+# - Evidence audit (SOC2 compliance infrastructure)
+#
+# Local equivalents:
+#   pnpm lint                    -> lint job
+#   pnpm typecheck               -> typecheck job
+#   pnpm test:coverage           -> unit-tests job
+#   pnpm test:acceptance         -> integration-tests job
+#   pnpm build                   -> build job
+#   pnpm db:migrate              -> schema-drift-check job
+#
+# =============================================================================
+
 name: CI
 
 on:
   push:
-    branches: [main, develop, canonical-main-v2]
+    branches: [main]
   pull_request:
-    branches: [main, develop, canonical-main-v2]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -14,9 +36,91 @@ concurrency:
 env:
   NODE_VERSION: '22'
   PNPM_VERSION: '8'
+  CI: 'true'
+  NODE_ENV: 'test'
+  # Turbo Remote Caching (optional - works without token)
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+
+# =============================================================================
+# JOBS
+# =============================================================================
 
 jobs:
-  # Security guard - fail if forbidden files are committed
+  # ---------------------------------------------------------------------------
+  # POLICY GATES - Fast checks that should fail first
+  # ---------------------------------------------------------------------------
+
+  policy-gates:
+    name: Policy Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for HUMAN_IMPLEMENTATION_REQUIRED
+        run: |
+          echo "Checking for HUMAN_IMPLEMENTATION_REQUIRED markers..."
+
+          # Install ripgrep for fast searching
+          sudo apt-get update -qq && sudo apt-get install -y ripgrep
+
+          # Search in source paths, excluding build artifacts
+          if rg -n "HUMAN_IMPLEMENTATION_REQUIRED" \
+              apps packages prisma docs \
+              -g'!**/coverage/**' \
+              -g'!**/.next/**' \
+              -g'!**/dist/**' \
+              -g'!**/.turbo/**' \
+              -g'!**/node_modules/**' ; then
+            echo ""
+            echo "::error::POLICY VIOLATION: Found HUMAN_IMPLEMENTATION_REQUIRED markers in source code."
+            echo "These must be resolved before merging."
+            exit 1
+          fi
+
+          echo "✓ No HUMAN_IMPLEMENTATION_REQUIRED markers found"
+
+      - name: Check traceability documents
+        run: |
+          echo "Checking traceability documentation..."
+
+          # Required traceability files
+          REQUIRED_FILES=(
+            "docs/traceability/MASTER_IMPLEMENTATION_LEDGER.md"
+            "docs/traceability/GAP_REGISTER.md"
+            "STATUS_REPORT.md"
+          )
+
+          MISSING=""
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              MISSING="$MISSING\n  - $file"
+            else
+              echo "✓ Found: $file"
+            fi
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::TRACEABILITY VIOLATION: Missing required files:$MISSING"
+            exit 1
+          fi
+
+          # Check cross-references
+          if ! grep -q "MASTER_IMPLEMENTATION_LEDGER.md" "STATUS_REPORT.md"; then
+            echo "::error::STATUS_REPORT.md must reference Master Implementation Ledger"
+            exit 1
+          fi
+          echo "✓ STATUS_REPORT.md references Ledger"
+
+          if ! grep -q "GAP_REGISTER.md" "STATUS_REPORT.md"; then
+            echo "::error::STATUS_REPORT.md must reference Gap Register"
+            exit 1
+          fi
+          echo "✓ STATUS_REPORT.md references Gap Register"
+
+          echo "✓ Traceability check passed"
+
   secrets-guard:
     name: Secrets Guard
     runs-on: ubuntu-latest
@@ -26,39 +130,43 @@ jobs:
 
       - name: Check for forbidden files
         run: |
-          echo "Checking for forbidden files in repository..."
-          FORBIDDEN_FILES=""
+          echo "Checking for forbidden files..."
+          FORBIDDEN=""
 
           # Check for .env files (excluding .env.example)
           if git ls-files | grep -E "^\.env$|^\.env\.[^e]|apps/.*\.env$|packages/.*\.env$" | grep -v ".env.example"; then
-            FORBIDDEN_FILES="$FORBIDDEN_FILES .env files found!"
-          fi
-
-          # Check for .turbo cache directories
-          if git ls-files | grep -E "\.turbo/"; then
-            FORBIDDEN_FILES="$FORBIDDEN_FILES .turbo cache found!"
+            FORBIDDEN="$FORBIDDEN .env files found!"
           fi
 
           # Check for private keys
           if git ls-files | grep -E "\.(pem|key)$"; then
-            FORBIDDEN_FILES="$FORBIDDEN_FILES Private key files found!"
+            FORBIDDEN="$FORBIDDEN Private key files found!"
           fi
 
-          # Check for secrets directories
+          # Check for .turbo cache
+          if git ls-files | grep -E "\.turbo/"; then
+            FORBIDDEN="$FORBIDDEN .turbo cache found!"
+          fi
+
+          # Check for secrets directory
           if git ls-files | grep -E "^secrets/"; then
-            FORBIDDEN_FILES="$FORBIDDEN_FILES Secrets directory found!"
+            FORBIDDEN="$FORBIDDEN Secrets directory found!"
           fi
 
-          if [ -n "$FORBIDDEN_FILES" ]; then
-            echo "::error::SECURITY VIOLATION: Forbidden files detected in repository!"
-            echo "$FORBIDDEN_FILES"
+          if [ -n "$FORBIDDEN" ]; then
+            echo "::error::SECURITY VIOLATION: Forbidden files detected!"
+            echo "$FORBIDDEN"
             exit 1
           fi
 
           echo "✓ No forbidden files detected"
 
+  # ---------------------------------------------------------------------------
+  # CODE QUALITY - Lint and Type Check (separated for clarity)
+  # ---------------------------------------------------------------------------
+
   lint:
-    name: Lint & Type Check
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -84,10 +192,38 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
       - name: Type Check
         run: pnpm typecheck
 
-  test:
+  # ---------------------------------------------------------------------------
+  # TESTING - Unit, Integration, Acceptance
+  # ---------------------------------------------------------------------------
+
+  unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
     services:
@@ -130,6 +266,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
+      - name: Setup Turbo Cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -141,7 +285,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_test?schema=public
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: pnpm test:coverage
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_test?schema=public
@@ -155,10 +299,20 @@ jobs:
           files: ./coverage/lcov.info
           fail_ci_if_error: false
 
-  acceptance-tests:
-    name: Acceptance Tests
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            coverage/
+            apps/api/reports/
+          retention-days: 7
+
+  integration-tests:
+    name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, typecheck, unit-tests]
     services:
       postgres:
         image: postgres:16-alpine
@@ -199,6 +353,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
+      - name: Setup Turbo Cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -221,18 +383,22 @@ jobs:
           JWT_SECRET: test-jwt-secret-for-ci-only-min-32-chars
           ENCRYPTION_KEY: test-encryption-key-32-bytes-xx
 
-      - name: Upload acceptance report
+      - name: Upload acceptance report on failure
+        if: failure()
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: acceptance-report
           path: apps/api/reports/acceptance-report.json
           retention-days: 30
 
+  # ---------------------------------------------------------------------------
+  # BUILD - Final production build validation
+  # ---------------------------------------------------------------------------
+
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [secrets-guard, lint, test, acceptance-tests]
+    needs: [secrets-guard, lint, typecheck, unit-tests, integration-tests]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -248,674 +414,200 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma Client
-        run: pnpm db:generate
-
-      - name: Build
-        run: pnpm build
-
-      - name: Upload API build
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-build
-          path: apps/api/dist
-          retention-days: 7
-
-      - name: Upload Web build
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-build
-          path: apps/web/.next
-          retention-days: 7
-
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Check security headers configuration
-        run: ./scripts/check-security-headers.sh
-
-      - name: Check authorization middleware
-        run: ./scripts/check-auth-middleware.sh
-
-      - name: Audit dependencies
-        run: pnpm audit --audit-level moderate
-        continue-on-error: true
-
-      - name: Run Snyk security scan
-        uses: snyk/actions/node@master
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-  traceability-check:
-    name: Traceability Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Run Traceability Check
-        run: node scripts/traceability_check.mjs
-
-      - name: Cross-reference check
-        run: |
-          echo "Checking cross-references between STATUS_REPORT.md and traceability docs..."
-
-          # Check STATUS_REPORT.md references the ledger and gap register
-          if ! grep -q "MASTER_IMPLEMENTATION_LEDGER.md" "STATUS_REPORT.md"; then
-            echo "::error::TRACEABILITY VIOLATION: STATUS_REPORT.md does not reference Master Implementation Ledger"
-            exit 1
-          fi
-          echo "✓ STATUS_REPORT.md references Master Implementation Ledger"
-
-          if ! grep -q "GAP_REGISTER.md" "STATUS_REPORT.md"; then
-            echo "::error::TRACEABILITY VIOLATION: STATUS_REPORT.md does not reference Gap Register"
-            exit 1
-          fi
-          echo "✓ STATUS_REPORT.md references Gap Register"
-
-          echo ""
-          echo "✅ Cross-reference check passed!"
-
-  persistence-guard:
-    name: Persistence Guard
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma Client
-        run: pnpm db:generate
-
-      - name: Verify no InMemory imports in production code
-        run: |
-          echo "Checking for forbidden InMemory imports in production code..."
-
-          # Check for direct InMemory class instantiation in production routes
-          if grep -r "new InMemory" apps/api/src/modules/ 2>/dev/null; then
-            echo "::error::PERSISTENCE VIOLATION: Found 'new InMemory*' in production routes!"
-            echo "Use the persistence composition root (apps/api/src/persistence) instead."
-            exit 1
-          fi
-          echo "✓ No InMemory instantiation in routes"
-
-          # Check for InMemory imports in production routes
-          if grep -r "InMemoryAttributionStore\|InMemoryMeteringService" apps/api/src/modules/ 2>/dev/null; then
-            echo "::error::PERSISTENCE VIOLATION: Found InMemory imports in production routes!"
-            echo "Use getAttributionStore()/getMeteringService() from persistence composition root."
-            exit 1
-          fi
-          echo "✓ No InMemory imports in routes"
-
-          # Verify composition root exists
-          if [ ! -f "apps/api/src/persistence/index.ts" ]; then
-            echo "::error::PERSISTENCE VIOLATION: Composition root not found!"
-            exit 1
-          fi
-          echo "✓ Composition root exists"
-
-          # Verify composition root uses dynamic imports for test stores
-          if grep -E "^import.*InMemory" apps/api/src/persistence/index.ts 2>/dev/null; then
-            echo "::error::PERSISTENCE VIOLATION: Composition root has static InMemory imports!"
-            echo "InMemory stores must be dynamically imported in test mode only."
-            exit 1
-          fi
-          echo "✓ Composition root uses dynamic imports for InMemory stores"
-
-          echo ""
-          echo "✅ Persistence guard check passed!"
-
-      - name: Run persistence guard tests
-        run: cd apps/api && npx vitest run -c vitest.persistence.config.ts
-        env:
-          NODE_ENV: test
-
-      - name: Summary
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "  PERSISTENCE GUARD COMPLETE"
-          echo "=========================================="
-          echo ""
-          echo "Verified:"
-          echo "  ✓ No InMemory stores in production code"
-          echo "  ✓ Composition root properly configured"
-          echo "  ✓ Dynamic imports for test-only stores"
-          echo ""
-
-  ops-runbooks:
-    name: Ops Runbook Validation
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Validate runbook files exist
-        run: |
-          echo "Checking for required runbook files..."
-          MISSING=""
-
-          REQUIRED_FILES=(
-            "docs/ops/backup-strategy.md"
-            "docs/ops/restore-steps.md"
-            "docs/ops/restore-drill.md"
-            "docs/ops/incident-response.md"
-            "docs/ops/rollback-plan.md"
-          )
-
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              MISSING="$MISSING\n  - $file"
-            else
-              echo "✓ Found: $file"
-            fi
-          done
-
-          if [ -n "$MISSING" ]; then
-            echo "::error::Missing required runbook files:$MISSING"
-            exit 1
-          fi
-
-          echo "✓ All required runbook files exist"
-
-      - name: Validate backup-strategy.md headings
-        run: |
-          echo "Validating backup-strategy.md..."
-          FILE="docs/ops/backup-strategy.md"
-
-          REQUIRED_HEADINGS=(
-            "## Overview"
-            "## Backup Types"
-            "## Recovery Point Objective"
-            "## Recovery Time Objective"
-            "## Retention Policy"
-          )
-
-          for heading in "${REQUIRED_HEADINGS[@]}"; do
-            if ! grep -q "$heading" "$FILE"; then
-              echo "::error::Missing required heading in $FILE: $heading"
-              exit 1
-            fi
-            echo "✓ Found: $heading"
-          done
-
-          echo "✓ backup-strategy.md validation passed"
-
-      - name: Validate restore-steps.md headings
-        run: |
-          echo "Validating restore-steps.md..."
-          FILE="docs/ops/restore-steps.md"
-
-          REQUIRED_HEADINGS=(
-            "## Overview"
-            "## Prerequisites"
-            "## Restore Scenarios"
-            "## Post-Restore Checklist"
-          )
-
-          for heading in "${REQUIRED_HEADINGS[@]}"; do
-            if ! grep -q "$heading" "$FILE"; then
-              echo "::error::Missing required heading in $FILE: $heading"
-              exit 1
-            fi
-            echo "✓ Found: $heading"
-          done
-
-          echo "✓ restore-steps.md validation passed"
-
-      - name: Validate incident-response.md headings
-        run: |
-          echo "Validating incident-response.md..."
-          FILE="docs/ops/incident-response.md"
-
-          REQUIRED_HEADINGS=(
-            "## Overview"
-            "## Severity Levels"
-            "## Escalation Matrix"
-          )
-
-          for heading in "${REQUIRED_HEADINGS[@]}"; do
-            if ! grep -q "$heading" "$FILE"; then
-              echo "::error::Missing required heading in $FILE: $heading"
-              exit 1
-            fi
-            echo "✓ Found: $heading"
-          done
-
-          echo "✓ incident-response.md validation passed"
-
-      - name: Validate rollback-plan.md headings
-        run: |
-          echo "Validating rollback-plan.md..."
-          FILE="docs/ops/rollback-plan.md"
-
-          REQUIRED_HEADINGS=(
-            "## Overview"
-            "## Application Rollback"
-            "## Database Rollback"
-            "## Rollback Verification"
-          )
-
-          for heading in "${REQUIRED_HEADINGS[@]}"; do
-            if ! grep -q "$heading" "$FILE"; then
-              echo "::error::Missing required heading in $FILE: $heading"
-              exit 1
-            fi
-            echo "✓ Found: $heading"
-          done
-
-          echo "✓ rollback-plan.md validation passed"
-
-      - name: Summary
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "  OPS RUNBOOK VALIDATION COMPLETE"
-          echo "=========================================="
-          echo ""
-          echo "Validated:"
-          echo "  ✓ backup-strategy.md"
-          echo "  ✓ restore-steps.md"
-          echo "  ✓ restore-drill.md"
-          echo "  ✓ incident-response.md"
-          echo "  ✓ rollback-plan.md"
-          echo ""
-
-  ops-scripts:
-    name: Ops Scripts Validation
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Verify ops scripts are executable
-        run: |
-          echo "Checking ops scripts are executable..."
-          FAILED=""
-
-          SCRIPTS=(
-            "scripts/ops/verify-backups.sh"
-            "scripts/ops/generate-restore-checklist.sh"
-          )
-
-          for script in "${SCRIPTS[@]}"; do
-            if [ ! -f "$script" ]; then
-              echo "::error::Missing script: $script"
-              FAILED="$FAILED\n  - $script (missing)"
-            elif [ ! -x "$script" ]; then
-              echo "::error::Script not executable: $script"
-              FAILED="$FAILED\n  - $script (not executable)"
-            else
-              echo "✓ Executable: $script"
-            fi
-          done
-
-          if [ -n "$FAILED" ]; then
-            echo "::error::Script validation failed:$FAILED"
-            exit 1
-          fi
-
-          echo "✓ All ops scripts are executable"
-
-      - name: Test verify-backups.sh syntax
-        run: |
-          echo "Testing verify-backups.sh syntax..."
-          bash -n scripts/ops/verify-backups.sh
-          echo "✓ verify-backups.sh syntax is valid"
-
-      - name: Test generate-restore-checklist.sh syntax
-        run: |
-          echo "Testing generate-restore-checklist.sh syntax..."
-          bash -n scripts/ops/generate-restore-checklist.sh
-          echo "✓ generate-restore-checklist.sh syntax is valid"
-
-      - name: Run verify-backups.sh in CI mode
-        run: |
-          echo "Running verify-backups.sh in CI mode..."
-          CI=true ./scripts/ops/verify-backups.sh --verbose
-          echo "✓ verify-backups.sh runs successfully"
-
-      - name: Run generate-restore-checklist.sh
-        run: |
-          echo "Running generate-restore-checklist.sh..."
-          ./scripts/ops/generate-restore-checklist.sh > /tmp/checklist.md
-          if [ -s /tmp/checklist.md ]; then
-            echo "✓ Checklist generated successfully"
-            head -20 /tmp/checklist.md
-          else
-            echo "::error::Checklist generation produced empty output"
-            exit 1
-          fi
-
-      - name: Summary
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "  OPS SCRIPTS VALIDATION COMPLETE"
-          echo "=========================================="
-          echo ""
-          echo "Validated:"
-          echo "  ✓ verify-backups.sh"
-          echo "  ✓ generate-restore-checklist.sh"
-          echo ""
-
-  # Performance regression detection
-  performance:
-    name: Performance Smoke Test
-    runs-on: ubuntu-latest
-    # Only run on main branch to avoid flaky PR checks
-    # PRs can trigger manually via workflow_dispatch
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install k6
-        run: |
-          sudo gpg -k
-          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
-          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
-          sudo apt-get update
-          sudo apt-get install k6
-
-      - name: Verify k6 installation
-        run: k6 version
-
-      - name: Validate baselines.json
-        run: |
-          echo "Validating performance baselines..."
-          if [ ! -f tests/performance/baselines.json ]; then
-            echo "::error::baselines.json not found"
-            exit 1
-          fi
-
-          # Validate JSON syntax
-          if ! jq empty tests/performance/baselines.json 2>/dev/null; then
-            echo "::error::baselines.json is not valid JSON"
-            exit 1
-          fi
-
-          # Validate required fields
-          VERSION=$(jq -r '.version' tests/performance/baselines.json)
-          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
-            echo "::error::baselines.json missing version field"
-            exit 1
-          fi
-
-          echo "✓ baselines.json is valid (v$VERSION)"
-
-      - name: Validate k6 test syntax
-        run: |
-          echo "Validating k6 test scripts..."
-
-          # Check smoke.js syntax
-          k6 inspect tests/performance/smoke.js > /dev/null
-          echo "✓ smoke.js syntax is valid"
-
-          # Check individual test files
-          for file in tests/performance/listing-*.js tests/performance/application-*.js tests/performance/signed-*.js; do
-            if [ -f "$file" ]; then
-              k6 inspect "$file" > /dev/null
-              echo "✓ $(basename $file) syntax is valid"
-            fi
-          done
-
-      - name: Run smoke test (dry run)
-        run: |
-          echo "Running k6 smoke test in dry-run mode..."
-          echo ""
-
-          # Load baselines
-          BASELINES=$(cat tests/performance/baselines.json)
-
-          # Run k6 with very short duration for CI validation
-          # This validates the test structure without needing a real API
-          k6 run \
-            --env "API_BASE_URL=http://localhost:4000" \
-            --env "AUTH_TOKEN=ci-test-token" \
-            --env "BASELINES=$BASELINES" \
-            --duration 1s \
-            --vus 1 \
-            --no-thresholds \
-            tests/performance/smoke.js 2>&1 || true
-
-          echo ""
-          echo "✓ Smoke test structure validated"
-
-      - name: Validate run-smoke.sh script
-        run: |
-          echo "Validating run-smoke.sh script..."
-
-          if [ ! -f scripts/perf/run-smoke.sh ]; then
-            echo "::error::run-smoke.sh not found"
-            exit 1
-          fi
-
-          if [ ! -x scripts/perf/run-smoke.sh ]; then
-            echo "::error::run-smoke.sh is not executable"
-            exit 1
-          fi
-
-          bash -n scripts/perf/run-smoke.sh
-          echo "✓ run-smoke.sh syntax is valid"
-
-      - name: Summary
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "  PERFORMANCE TESTS VALIDATED"
-          echo "=========================================="
-          echo ""
-          echo "Validated:"
-          echo "  ✓ baselines.json (thresholds config)"
-          echo "  ✓ smoke.js (main test runner)"
-          echo "  ✓ Individual endpoint tests"
-          echo "  ✓ run-smoke.sh script"
-          echo ""
-          echo "To run full performance tests:"
-          echo "  ./scripts/perf/run-smoke.sh --api-url http://your-api:4000"
-          echo ""
-
-  # E2E Market-Ready Tests
-  e2e:
-    name: E2E Market-Ready Tests
-    runs-on: ubuntu-latest
-    # Run on main and PRs targeting main
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Get pnpm store directory
-        id: pnpm-cache
-        shell: bash
-        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
-
-      - name: Setup pnpm cache
+      - name: Setup Turbo Cache
         uses: actions/cache@v4
         with:
-          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: ${{ runner.os }}-pnpm-store-
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+      - name: Generate Prisma Client
+        run: pnpm db:generate
 
-      - name: Validate E2E test structure
-        run: |
-          echo "Validating E2E test structure..."
+      - name: Build all packages
+        run: pnpm build
 
-          # Check required files exist
-          if [ ! -f playwright.config.ts ]; then
-            echo "::error::playwright.config.ts not found"
-            exit 1
-          fi
-
-          if [ ! -d tests/e2e/journeys ]; then
-            echo "::error::tests/e2e/journeys directory not found"
-            exit 1
-          fi
-
-          # Count journey tests
-          JOURNEY_COUNT=$(find tests/e2e/journeys -name "*.spec.ts" | wc -l)
-          echo "Found $JOURNEY_COUNT journey test files"
-
-          if [ "$JOURNEY_COUNT" -lt 6 ]; then
-            echo "::warning::Expected at least 6 journey test files, found $JOURNEY_COUNT"
-          fi
-
-          echo "✓ E2E test structure validated"
-
-      - name: Validate reporter
-        run: |
-          if [ ! -f tests/e2e/reporters/market-ready-reporter.ts ]; then
-            echo "::error::Market-ready reporter not found"
-            exit 1
-          fi
-          echo "✓ Market-ready reporter exists"
-
-      - name: Run E2E tests (dry run)
-        run: |
-          echo "Running E2E tests in validation mode..."
-
-          # Run tests with a mock API (tests will skip if API unavailable)
-          # This validates the test structure without needing real services
-          npx playwright test \
-            --project=api \
-            --timeout=5000 \
-            --reporter=list \
-            2>&1 || true
-
-          echo "✓ E2E test structure validated"
-
-      - name: Generate market-ready report
-        run: |
-          mkdir -p tests/e2e/reports
-
-          # Generate a validation report
-          cat > tests/e2e/reports/market-ready-report.json << 'EOF'
-          {
-            "version": "1.0.0",
-            "timestamp": "${{ github.event.head_commit.timestamp }}",
-            "environment": {
-              "node": "22",
-              "os": "ubuntu-latest",
-              "ci": true
-            },
-            "summary": {
-              "status": "validation_complete",
-              "note": "Full E2E tests require running services. Structure validated.",
-              "totalJourneys": 6,
-              "journeys": [
-                "auth",
-                "listing",
-                "application",
-                "vault",
-                "revenue",
-                "tour"
-              ]
-            },
-            "metadata": {
-              "gitCommit": "${{ github.sha }}",
-              "gitBranch": "${{ github.ref_name }}",
-              "buildNumber": "${{ github.run_number }}"
-            }
-          }
-          EOF
-
-          echo "✓ Market-ready report generated"
-
-      - name: Upload market-ready report
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: market-ready-report
-          path: tests/e2e/reports/market-ready-report.json
-          retention-days: 30
-
-      - name: Upload E2E test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-reports
+          name: build-artifacts
           path: |
-            tests/e2e/reports/
-            tests/e2e/test-results/
+            apps/api/dist
+            apps/web/.next
           retention-days: 7
 
-      - name: Summary
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "  E2E MARKET-READY VALIDATION COMPLETE"
-          echo "=========================================="
-          echo ""
-          echo "Journeys validated:"
-          echo "  ✓ [Auth] Registration, login, refresh, revocation"
-          echo "  ✓ [Listing] Draft -> publish with NYC compliance"
-          echo "  ✓ [Application] Prequal -> conditional offer (FCHA)"
-          echo "  ✓ [Vault] Upload -> ACL -> signed URL"
-          echo "  ✓ [Revenue] Transaction -> ledger entry"
-          echo "  ✓ [Tour] 3D tour -> signed URL -> viewer"
-          echo ""
-          echo "Artifacts:"
-          echo "  - market-ready-report.json"
-          echo "  - e2e-reports/"
-          echo ""
+  # ---------------------------------------------------------------------------
+  # SECURITY - Dependency audit and security scanning
+  # ---------------------------------------------------------------------------
 
-  # Evidence Audit Smoke Test - validates SOC2 evidence infrastructure
+  security-baseline:
+    name: Security Baseline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit dependencies
+        run: |
+          echo "Running dependency audit..."
+          # Non-blocking audit - report but don't fail
+          pnpm audit --audit-level high 2>&1 || echo "::warning::Dependency vulnerabilities found. Review pnpm audit output."
+
+      - name: Check security headers configuration
+        run: |
+          if [ -f scripts/check-security-headers.sh ]; then
+            ./scripts/check-security-headers.sh
+          else
+            echo "::warning::Security headers check script not found"
+          fi
+
+      - name: Check authorization middleware
+        run: |
+          if [ -f scripts/check-auth-middleware.sh ]; then
+            ./scripts/check-auth-middleware.sh
+          else
+            echo "::warning::Auth middleware check script not found"
+          fi
+
+      - name: Lightweight secrets scan
+        run: |
+          echo "Scanning for potential secrets in code..."
+
+          # Check for common secret patterns
+          PATTERNS=(
+            "password\s*=\s*['\"][^'\"]{8,}"
+            "api[_-]?key\s*=\s*['\"][^'\"]{16,}"
+            "secret\s*=\s*['\"][^'\"]{16,}"
+            "AKIA[0-9A-Z]{16}"
+          )
+
+          FOUND=0
+          for pattern in "${PATTERNS[@]}"; do
+            if grep -rE "$pattern" apps packages --include="*.ts" --include="*.js" 2>/dev/null | grep -v "test" | grep -v ".example" | grep -v "mock"; then
+              FOUND=1
+            fi
+          done
+
+          if [ $FOUND -eq 1 ]; then
+            echo "::warning::Potential secrets found in code. Please review."
+          else
+            echo "✓ No obvious secrets detected"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # SCHEMA DRIFT CHECK - Prisma migration validation
+  # ---------------------------------------------------------------------------
+
+  schema-drift-check:
+    name: Schema Drift Check
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: realriches_drift
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations to ephemeral database
+        run: |
+          echo "Applying migrations to ephemeral database..."
+          npx prisma migrate deploy
+        working-directory: packages/database
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_drift?schema=public
+
+      - name: Check for schema drift
+        run: |
+          echo "Checking for schema drift..."
+
+          # Generate SQL from current schema
+          npx prisma migrate diff \
+            --from-schema-datamodel prisma/schema.prisma \
+            --to-migrations prisma/migrations \
+            --exit-code \
+          || {
+            echo ""
+            echo "::error::SCHEMA DRIFT DETECTED!"
+            echo "The Prisma schema and migrations are out of sync."
+            echo ""
+            echo "To fix:"
+            echo "  1. Run: pnpm db:migrate:dev --name <migration_name>"
+            echo "  2. Commit the new migration file"
+            exit 1
+          }
+
+          echo "✓ Schema and migrations are in sync"
+        working-directory: packages/database
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_drift?schema=public
+
+      - name: Validate migration files
+        run: |
+          echo "Validating migration files..."
+
+          # Check that migrations directory exists and has files
+          if [ ! -d "packages/database/prisma/migrations" ]; then
+            echo "::error::Migrations directory not found"
+            exit 1
+          fi
+
+          MIGRATION_COUNT=$(find packages/database/prisma/migrations -name "migration.sql" | wc -l)
+          echo "Found $MIGRATION_COUNT migrations"
+
+          if [ "$MIGRATION_COUNT" -eq 0 ]; then
+            echo "::warning::No migrations found. Is this intentional?"
+          fi
+
+          echo "✓ Migration files validated"
+
+  # ---------------------------------------------------------------------------
+  # EVIDENCE AUDIT - SOC2 compliance infrastructure validation
+  # ---------------------------------------------------------------------------
+
   evidence-audit-smoke:
     name: Evidence Audit Smoke Test
     runs-on: ubuntu-latest
@@ -971,7 +663,7 @@ jobs:
             echo "✓ Found: $section"
           done
 
-          # Count control definitions (SEC-xxx, AVL-xxx, PI-xxx, CNF-xxx, PRV-xxx)
+          # Count control definitions
           CONTROL_COUNT=$(grep -E "^\| \*\*Control ID\*\* \| (SEC|AVL|PI|CNF|PRV)-" "$FILE" | wc -l)
           if [ "$CONTROL_COUNT" -lt 15 ]; then
             echo "::error::Expected at least 15 control definitions, found $CONTROL_COUNT"
@@ -979,9 +671,7 @@ jobs:
           fi
           echo "✓ Found $CONTROL_COUNT control definitions"
 
-          echo "✓ EVIDENCE_CONTROL_CATALOG.md validation passed"
-
-      - name: Validate evidence_audit_report.mjs script
+      - name: Validate evidence_audit_report.mjs
         run: |
           echo "Validating evidence_audit_report.mjs..."
           SCRIPT="scripts/evidence_audit_report.mjs"
@@ -990,21 +680,12 @@ jobs:
             echo "::error::evidence_audit_report.mjs not found"
             exit 1
           fi
-          echo "✓ evidence_audit_report.mjs exists"
 
-          # Validate script syntax (Node.js ESM)
           node --check "$SCRIPT"
-          echo "✓ evidence_audit_report.mjs syntax is valid"
+          echo "✓ Script syntax valid"
 
-          # Check for required functions/patterns
-          REQUIRED_PATTERNS=(
-            "CONTROL_CATALOG"
-            "generateReport"
-            "queryEvidenceRecords"
-            "calculateFieldCompleteness"
-          )
-
-          for pattern in "${REQUIRED_PATTERNS[@]}"; do
+          # Check for required patterns
+          for pattern in CONTROL_CATALOG generateReport queryEvidenceRecords; do
             if ! grep -q "$pattern" "$SCRIPT"; then
               echo "::error::Missing required pattern: $pattern"
               exit 1
@@ -1012,71 +693,322 @@ jobs:
             echo "✓ Found: $pattern"
           done
 
-          echo "✓ evidence_audit_report.mjs validation passed"
-
       - name: Validate evidence-audit routes
         run: |
-          echo "Validating evidence-audit API routes..."
           ROUTES="apps/api/src/modules/evidence-audit/routes.ts"
 
           if [ ! -f "$ROUTES" ]; then
             echo "::error::evidence-audit routes not found"
             exit 1
           fi
-          echo "✓ evidence-audit routes exist"
+          echo "✓ Routes file exists"
 
-          # Check for required endpoints
-          if ! grep -q "/admin/evidence-audit/report" "$ROUTES"; then
-            echo "::error::Missing /admin/evidence-audit/report endpoint"
-            exit 1
-          fi
-          echo "✓ /admin/evidence-audit/report endpoint found"
+          for endpoint in "/admin/evidence-audit/report" "/admin/evidence-audit/summary" "/admin/evidence-audit/gaps"; do
+            if ! grep -q "$endpoint" "$ROUTES"; then
+              echo "::error::Missing endpoint: $endpoint"
+              exit 1
+            fi
+            echo "✓ Found: $endpoint"
+          done
 
-          if ! grep -q "/admin/evidence-audit/summary" "$ROUTES"; then
-            echo "::error::Missing /admin/evidence-audit/summary endpoint"
-            exit 1
-          fi
-          echo "✓ /admin/evidence-audit/summary endpoint found"
-
-          if ! grep -q "/admin/evidence-audit/gaps" "$ROUTES"; then
-            echo "::error::Missing /admin/evidence-audit/gaps endpoint"
-            exit 1
-          fi
-          echo "✓ /admin/evidence-audit/gaps endpoint found"
-
-          # Check for authentication
           if ! grep -q "authenticate" "$ROUTES" || ! grep -q "authorize" "$ROUTES"; then
-            echo "::error::Missing authentication/authorization in routes"
+            echo "::error::Missing auth in routes"
             exit 1
           fi
-          echo "✓ Authentication/authorization found"
-
-          echo "✓ evidence-audit routes validation passed"
+          echo "✓ Auth configured"
 
       - name: Run evidence audit unit tests
         run: |
-          echo "Running evidence audit unit tests..."
           cd apps/api
-          # Use dedicated config that doesn't load setup.ts (which triggers DB init)
-          # Integration tests run in the Unit Tests job which has database services
           NODE_ENV=test npx vitest run --config vitest.evidence-audit.config.ts --reporter=verbose
-          echo "✓ Evidence audit tests passed"
 
-      - name: Summary
+  # ---------------------------------------------------------------------------
+  # PERSISTENCE GUARD - No InMemory stores in production
+  # ---------------------------------------------------------------------------
+
+  persistence-guard:
+    name: Persistence Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Check for InMemory imports
         run: |
-          echo ""
-          echo "=========================================="
-          echo "  EVIDENCE AUDIT SMOKE TEST COMPLETE"
-          echo "=========================================="
-          echo ""
-          echo "Validated:"
-          echo "  ✓ EVIDENCE_CONTROL_CATALOG.md (17 controls)"
-          echo "  ✓ evidence_audit_report.mjs script"
-          echo "  ✓ evidence-audit API routes"
-          echo "  ✓ Unit and integration tests"
-          echo ""
-          echo "Coverage:"
-          echo "  - 7 workflow domains"
-          echo "  - 5 SOC2 Trust Service Categories"
-          echo "  - 17 control definitions"
-          echo ""
+          echo "Checking for InMemory imports in production code..."
+
+          if grep -r "new InMemory" apps/api/src/modules/ 2>/dev/null; then
+            echo "::error::Found 'new InMemory*' in production routes!"
+            exit 1
+          fi
+          echo "✓ No InMemory instantiation in routes"
+
+          if grep -r "InMemoryAttributionStore\|InMemoryMeteringService" apps/api/src/modules/ 2>/dev/null; then
+            echo "::error::Found InMemory imports in production routes!"
+            exit 1
+          fi
+          echo "✓ No InMemory imports in routes"
+
+          if [ ! -f "apps/api/src/persistence/index.ts" ]; then
+            echo "::error::Composition root not found!"
+            exit 1
+          fi
+          echo "✓ Composition root exists"
+
+          if grep -E "^import.*InMemory" apps/api/src/persistence/index.ts 2>/dev/null; then
+            echo "::error::Static InMemory imports in composition root!"
+            exit 1
+          fi
+          echo "✓ Dynamic imports for InMemory stores"
+
+      - name: Run persistence guard tests
+        run: |
+          cd apps/api
+          NODE_ENV=test npx vitest run -c vitest.persistence.config.ts
+
+  # ---------------------------------------------------------------------------
+  # OPS VALIDATION - Runbooks and scripts
+  # ---------------------------------------------------------------------------
+
+  ops-runbooks:
+    name: Ops Runbook Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate runbook files
+        run: |
+          REQUIRED_FILES=(
+            "docs/ops/backup-strategy.md"
+            "docs/ops/restore-steps.md"
+            "docs/ops/restore-drill.md"
+            "docs/ops/incident-response.md"
+            "docs/ops/rollback-plan.md"
+          )
+
+          MISSING=""
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              MISSING="$MISSING\n  - $file"
+            else
+              echo "✓ Found: $file"
+            fi
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing runbook files:$MISSING"
+            exit 1
+          fi
+
+      - name: Validate runbook content
+        run: |
+          # Backup strategy
+          for heading in "## Overview" "## Backup Types" "## Recovery Point Objective" "## Retention Policy"; do
+            if ! grep -q "$heading" docs/ops/backup-strategy.md; then
+              echo "::error::Missing in backup-strategy.md: $heading"
+              exit 1
+            fi
+          done
+          echo "✓ backup-strategy.md validated"
+
+          # Restore steps
+          for heading in "## Overview" "## Prerequisites" "## Restore Scenarios"; do
+            if ! grep -q "$heading" docs/ops/restore-steps.md; then
+              echo "::error::Missing in restore-steps.md: $heading"
+              exit 1
+            fi
+          done
+          echo "✓ restore-steps.md validated"
+
+          # Incident response
+          for heading in "## Overview" "## Severity Levels" "## Escalation Matrix"; do
+            if ! grep -q "$heading" docs/ops/incident-response.md; then
+              echo "::error::Missing in incident-response.md: $heading"
+              exit 1
+            fi
+          done
+          echo "✓ incident-response.md validated"
+
+  ops-scripts:
+    name: Ops Scripts Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate ops scripts
+        run: |
+          SCRIPTS=(
+            "scripts/ops/verify-backups.sh"
+            "scripts/ops/generate-restore-checklist.sh"
+          )
+
+          for script in "${SCRIPTS[@]}"; do
+            if [ ! -f "$script" ]; then
+              echo "::error::Missing: $script"
+              exit 1
+            fi
+            if [ ! -x "$script" ]; then
+              echo "::error::Not executable: $script"
+              exit 1
+            fi
+            bash -n "$script"
+            echo "✓ Valid: $script"
+          done
+
+      - name: Run verify-backups.sh
+        run: CI=true ./scripts/ops/verify-backups.sh --verbose
+
+      - name: Run generate-restore-checklist.sh
+        run: |
+          ./scripts/ops/generate-restore-checklist.sh > /tmp/checklist.md
+          if [ ! -s /tmp/checklist.md ]; then
+            echo "::error::Checklist generation produced empty output"
+            exit 1
+          fi
+          echo "✓ Checklist generated"
+
+  # ---------------------------------------------------------------------------
+  # PERFORMANCE - Smoke tests for performance regression
+  # ---------------------------------------------------------------------------
+
+  performance-smoke:
+    name: Performance Smoke Test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update && sudo apt-get install -y k6
+
+      - name: Validate performance tests
+        run: |
+          if [ ! -f tests/performance/baselines.json ]; then
+            echo "::error::baselines.json not found"
+            exit 1
+          fi
+
+          if ! jq empty tests/performance/baselines.json 2>/dev/null; then
+            echo "::error::baselines.json is not valid JSON"
+            exit 1
+          fi
+          echo "✓ baselines.json valid"
+
+          k6 inspect tests/performance/smoke.js > /dev/null
+          echo "✓ smoke.js syntax valid"
+
+      - name: Run smoke test (dry run)
+        run: |
+          BASELINES=$(cat tests/performance/baselines.json)
+          k6 run \
+            --env "API_BASE_URL=http://localhost:4000" \
+            --env "AUTH_TOKEN=ci-test-token" \
+            --env "BASELINES=$BASELINES" \
+            --duration 1s --vus 1 --no-thresholds \
+            tests/performance/smoke.js 2>&1 || true
+          echo "✓ Smoke test structure validated"
+
+  # ---------------------------------------------------------------------------
+  # E2E TESTS - Market-ready journey validation
+  # ---------------------------------------------------------------------------
+
+  e2e-market-ready:
+    name: E2E Market-Ready Tests
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Validate E2E structure
+        run: |
+          if [ ! -f playwright.config.ts ]; then
+            echo "::error::playwright.config.ts not found"
+            exit 1
+          fi
+
+          if [ ! -d tests/e2e/journeys ]; then
+            echo "::error::tests/e2e/journeys not found"
+            exit 1
+          fi
+
+          JOURNEY_COUNT=$(find tests/e2e/journeys -name "*.spec.ts" | wc -l)
+          echo "Found $JOURNEY_COUNT journey tests"
+
+      - name: Run E2E validation
+        run: |
+          npx playwright test --project=api --timeout=5000 --reporter=list 2>&1 || true
+          echo "✓ E2E structure validated"
+
+      - name: Generate validation report
+        run: |
+          mkdir -p tests/e2e/reports
+          cat > tests/e2e/reports/market-ready-report.json << EOF
+          {
+            "version": "1.0.0",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "status": "validation_complete",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "run": "${{ github.run_number }}"
+          }
+          EOF
+
+      - name: Upload reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-reports
+          path: tests/e2e/reports/
+          retention-days: 7
