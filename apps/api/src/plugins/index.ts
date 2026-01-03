@@ -17,6 +17,8 @@ import { emailPlugin } from './email';
 import { errorHandler } from './error-handler';
 import { jobsPlugin } from './jobs';
 import { metricsPlugin } from './metrics';
+import { planEnforcementPlugin } from './plan-enforcement';
+import { prismaPlugin } from './prisma';
 import { rateLimitPlugin } from './rate-limit';
 import rawBodyPlugin from './raw-body';
 import { redisPlugin } from './redis';
@@ -115,6 +117,9 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
     },
   });
 
+  // Prisma database client
+  await app.register(prismaPlugin);
+
   // Redis
   await app.register(redisPlugin);
 
@@ -132,6 +137,12 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
     redisPrefix: 'rl',
     includeHeaders: true,
     logExceeded: true,
+  });
+
+  // Plan enforcement (depends on Redis and Prisma)
+  await app.register(planEnforcementPlugin, {
+    enabled: true,
+    cacheTtlSeconds: 60,
   });
 
   // Prometheus metrics

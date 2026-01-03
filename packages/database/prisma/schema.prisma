@@ -497,6 +497,7 @@ model Listing {
   tourAssets         TourAsset[]
   collateralGenerations CollateralGeneration[]
   collateralBatches     CollateralGenerationBatch[]
+  agentModifications    ListingAgentModification[]
 
   @@index([propertyId])
   @@index([landlordId])
@@ -1627,6 +1628,9 @@ model AgentRun {
   providerRequestId     String?        @map("provider_request_id")
   createdAt             DateTime       @default(now()) @map("created_at")
   updatedAt             DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  agentModifications    ListingAgentModification[]
 
   @@index([userId])
   @@index([organizationId])
@@ -8478,4 +8482,340 @@ model ActivityExecution {
   @@index([activityName])
   @@index([status])
   @@map("activity_executions")
+}
+
+// =============================================================================
+// Agent Plans & Subscription Tiers
+// =============================================================================
+
+enum AgentPlanTier {
+  free
+  starter
+  professional
+  enterprise
+}
+
+enum PlanStatus {
+  active
+  trial
+  past_due
+  cancelled
+  suspended
+}
+
+model AgentPlan {
+  id                      String        @id @default(uuid()) @db.Uuid
+  name                    String        @unique
+  tier                    AgentPlanTier @unique
+  description             String?
+  monthlyCallLimit        Int           @map("monthly_call_limit")
+  monthlyGenerationLimit  Int           @map("monthly_generation_limit")
+  monthlyTaskLimit        Int           @map("monthly_task_limit")
+  callsPerMinute          Int           @default(10) @map("calls_per_minute")
+  generationsPerMinute    Int           @default(5) @map("generations_per_minute")
+  features                Json          @default("{}")
+  maxConcurrentRequests   Int           @default(5) @map("max_concurrent_requests")
+  prioritySupport         Boolean       @default(false) @map("priority_support")
+  customBranding          Boolean       @default(false) @map("custom_branding")
+  apiAccess               Boolean       @default(false) @map("api_access")
+  monthlyPriceCents       Int           @default(0) @map("monthly_price_cents")
+  annualPriceCents        Int           @default(0) @map("annual_price_cents")
+  isPublic                Boolean       @default(true) @map("is_public")
+  sortOrder               Int           @default(0) @map("sort_order")
+  createdAt               DateTime      @default(now()) @map("created_at")
+  updatedAt               DateTime      @updatedAt @map("updated_at")
+
+  organizationPlans OrganizationPlan[]
+
+  @@index([tier])
+  @@index([isPublic])
+  @@map("agent_plans")
+}
+
+model OrganizationPlan {
+  id                    String      @id @default(uuid()) @db.Uuid
+  organizationId        String      @unique @map("organization_id") @db.Uuid
+  planId                String      @map("plan_id") @db.Uuid
+  status                PlanStatus  @default(active)
+  billingCycleStart     DateTime    @map("billing_cycle_start")
+  billingCycleEnd       DateTime    @map("billing_cycle_end")
+  billingPeriod         String      @default("monthly") @map("billing_period")
+  trialEndsAt           DateTime?   @map("trial_ends_at")
+  trialDays             Int?        @map("trial_days")
+  customCallLimit       Int?        @map("custom_call_limit")
+  customGenerationLimit Int?        @map("custom_generation_limit")
+  customTaskLimit       Int?        @map("custom_task_limit")
+  stripeSubscriptionId  String?     @map("stripe_subscription_id")
+  stripeCustomerId      String?     @map("stripe_customer_id")
+  metadata              Json?
+  createdAt             DateTime    @default(now()) @map("created_at")
+  updatedAt             DateTime    @updatedAt @map("updated_at")
+  cancelledAt           DateTime?   @map("cancelled_at")
+
+  plan         AgentPlan   @relation(fields: [planId], references: [id])
+  usageRecords PlanUsage[]
+
+  @@index([organizationId])
+  @@index([planId])
+  @@index([status])
+  @@index([billingCycleEnd])
+  @@map("organization_plans")
+}
+
+model PlanUsage {
+  id                 String           @id @default(uuid()) @db.Uuid
+  organizationPlanId String           @map("organization_plan_id") @db.Uuid
+  organizationId     String           @map("organization_id") @db.Uuid
+  periodStart        DateTime         @map("period_start") @db.Date
+  periodEnd          DateTime         @map("period_end") @db.Date
+  callsUsed          Int              @default(0) @map("calls_used")
+  generationsUsed    Int              @default(0) @map("generations_used")
+  tasksUsed          Int              @default(0) @map("tasks_used")
+  callsLimit         Int              @map("calls_limit")
+  generationsLimit   Int              @map("generations_limit")
+  tasksLimit         Int              @map("tasks_limit")
+  callsOverage       Int              @default(0) @map("calls_overage")
+  generationsOverage Int              @default(0) @map("generations_overage")
+  tasksOverage       Int              @default(0) @map("tasks_overage")
+  overageCost        Int              @default(0) @map("overage_cost")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  organizationPlan OrganizationPlan @relation(fields: [organizationPlanId], references: [id])
+
+  @@unique([organizationPlanId, periodStart])
+  @@unique([organizationId, periodStart])
+  @@index([organizationId])
+  @@index([periodStart])
+  @@index([periodEnd])
+  @@map("plan_usage")
+}
+
+// =============================================================================
+// Voice Calls & Recording
+// =============================================================================
+
+enum CallStatus {
+  initiated
+  ringing
+  in_progress
+  on_hold
+  completed
+  failed
+  no_answer
+  busy
+  canceled
+}
+
+enum CallDirection {
+  inbound
+  outbound
+}
+
+enum CallOutcome {
+  successful
+  no_answer
+  busy
+  failed
+  voicemail
+  callback_requested
+}
+
+enum ConsentType {
+  recording
+  transcription
+  ai_analysis
+  data_retention
+}
+
+enum ConsentStatus {
+  pending
+  granted
+  denied
+  revoked
+  expired
+}
+
+enum ConsentVerificationMethod {
+  voice
+  dtmf
+  web
+  sms
+  pre_agreed
+}
+
+enum RecordingStatus {
+  recording
+  processing
+  completed
+  failed
+  deleted
+  retention_expired
+}
+
+enum TranscriptStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+model Call {
+  id                      String        @id @default(uuid()) @db.Uuid
+  organizationId          String        @map("organization_id") @db.Uuid
+  provider                String        @default("twilio")
+  providerCallId          String?       @map("provider_call_id")
+  direction               CallDirection
+  status                  CallStatus    @default(initiated)
+  fromNumber              String        @map("from_number")
+  toNumber                String        @map("to_number")
+  userId                  String?       @map("user_id") @db.Uuid
+  agentType               String?       @map("agent_type")
+  agentRunId              String?       @map("agent_run_id") @db.Uuid
+  propertyId              String?       @map("property_id") @db.Uuid
+  leadId                  String?       @map("lead_id") @db.Uuid
+  recordingConsent        Boolean       @default(false) @map("recording_consent")
+  transcriptionConsent    Boolean       @default(false) @map("transcription_consent")
+  aiAnalysisConsent       Boolean       @default(false) @map("ai_analysis_consent")
+  initiatedAt             DateTime      @default(now()) @map("initiated_at")
+  answeredAt              DateTime?     @map("answered_at")
+  endedAt                 DateTime?     @map("ended_at")
+  durationSeconds         Int?          @map("duration_seconds")
+  outcome                 CallOutcome?
+  notes                   String?
+  market                  String?
+  twoPartyConsentRequired Boolean       @default(false) @map("two_party_consent_required")
+  policyViolations        Json          @default("[]") @map("policy_violations")
+  costUsd                 Decimal?      @map("cost_usd") @db.Decimal(10, 4)
+  sentimentScore          Float?        @map("sentiment_score")
+  intentDetected          String?       @map("intent_detected")
+  keyTopics               String[]      @default([]) @map("key_topics")
+  summary                 String?
+  metadata                Json          @default("{}")
+  createdAt               DateTime      @default(now()) @map("created_at")
+  updatedAt               DateTime      @updatedAt @map("updated_at")
+
+  consents   CallConsent[]
+  recordings CallRecording[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([providerCallId])
+  @@index([userId])
+  @@index([propertyId])
+  @@index([initiatedAt])
+  @@map("calls")
+}
+
+model CallConsent {
+  id                  String                     @id @default(uuid()) @db.Uuid
+  callId              String                     @map("call_id") @db.Uuid
+  participantId       String                     @map("participant_id")
+  consentType         ConsentType                @map("consent_type")
+  status              ConsentStatus              @default(pending)
+  grantedAt           DateTime?                  @map("granted_at")
+  revokedAt           DateTime?                  @map("revoked_at")
+  expiresAt           DateTime?                  @map("expires_at")
+  verificationMethod  ConsentVerificationMethod? @map("verification_method")
+  ipAddress           String?                    @map("ip_address")
+  userAgent           String?                    @map("user_agent")
+  consentRecordingUrl String?                    @map("consent_recording_url")
+  metadata            Json                       @default("{}")
+  createdAt           DateTime                   @default(now()) @map("created_at")
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@unique([callId, participantId, consentType])
+  @@index([callId])
+  @@index([participantId])
+  @@index([expiresAt])
+  @@map("call_consents")
+}
+
+model CallRecording {
+  id                  String          @id @default(uuid()) @db.Uuid
+  callId              String          @map("call_id") @db.Uuid
+  organizationId      String          @map("organization_id") @db.Uuid
+  provider            String          @default("twilio")
+  providerRecordingId String?         @map("provider_recording_id")
+  status              RecordingStatus @default(recording)
+  startedAt           DateTime        @default(now()) @map("started_at")
+  endedAt             DateTime?       @map("ended_at")
+  durationSeconds     Int?            @map("duration_seconds")
+  storageBucket       String?         @map("storage_bucket")
+  storageKey          String?         @map("storage_key")
+  storageUrl          String?         @map("storage_url")
+  sizeBytes           Int?            @map("size_bytes")
+  format              String          @default("audio/wav")
+  checksumSha256      String?         @map("checksum_sha256")
+  encrypted           Boolean         @default(true)
+  retentionDays       Int             @default(90) @map("retention_days")
+  retentionExpiresAt  DateTime?       @map("retention_expires_at")
+  deletedAt           DateTime?       @map("deleted_at")
+  deletionReason      String?         @map("deletion_reason")
+  metadata            Json            @default("{}")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  call        Call             @relation(fields: [callId], references: [id], onDelete: Cascade)
+  transcripts CallTranscript[]
+
+  @@index([callId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([retentionExpiresAt])
+  @@map("call_recordings")
+}
+
+model CallTranscript {
+  id                String           @id @default(uuid()) @db.Uuid
+  callId            String           @map("call_id") @db.Uuid
+  recordingId       String           @map("recording_id") @db.Uuid
+  organizationId    String           @map("organization_id") @db.Uuid
+  status            TranscriptStatus @default(pending)
+  provider          String           @default("deepgram")
+  fullTextEncrypted String?          @map("full_text_encrypted")
+  redactedFullText  String?          @map("redacted_full_text")
+  segmentsEncrypted String?          @map("segments_encrypted")
+  languageCode      String           @default("en-US") @map("language_code")
+  wordCount         Int?             @map("word_count")
+  piiDetected       Boolean          @default(false) @map("pii_detected")
+  piiTypesFound     String[]         @default([]) @map("pii_types_found")
+  processedAt       DateTime?        @map("processed_at")
+  processingTimeMs  Int?             @map("processing_time_ms")
+  costUsd           Decimal?         @map("cost_usd") @db.Decimal(10, 4)
+  metadata          Json             @default("{}")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  recording CallRecording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@index([recordingId])
+  @@index([organizationId])
+  @@index([status])
+  @@map("call_transcripts")
+}
+
+// =============================================================================
+// Listing Agent Modifications (Evidence Trail)
+// =============================================================================
+
+model ListingAgentModification {
+  id            String   @id @default(uuid()) @db.Uuid
+  listingId     String   @map("listing_id") @db.Uuid
+  agentRunId    String   @map("agent_run_id") @db.Uuid
+  field         String
+  previousValue Json?    @map("previous_value")
+  newValue      Json     @map("new_value")
+  reason        String
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  listing  Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([agentRunId])
+  @@index([createdAt])
+  @@map("listing_agent_modifications")
 }

@@ -19,6 +19,7 @@ export const AgentTypeSchema = z.enum([
   'voice_agent',
   'notification_agent',
   'analytics_agent',
+  'listing_ops',
 ]);
 export type AgentType = z.infer<typeof AgentTypeSchema>;
 

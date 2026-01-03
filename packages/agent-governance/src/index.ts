@@ -22,3 +22,6 @@ export * from './queues';
 
 // Voice AI module - use namespace to avoid conflicts with core types
 export * as voice from './voice';
+
+// Agents module
+export * from './agents';
