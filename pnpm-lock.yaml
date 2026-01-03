@@ -598,6 +598,43 @@ importers:
         specifier: ^1.2.0
         version: 1.6.1(@types/node@20.19.27)
 
+  packages/listing-copilot:
+    dependencies:
+      '@realriches/agent-governance':
+        specifier: workspace:*
+        version: link:../agent-governance
+      '@realriches/ai-sdk':
+        specifier: workspace:*
+        version: link:../ai-sdk
+      '@realriches/compliance-engine':
+        specifier: workspace:*
+        version: link:../compliance-engine
+      '@realriches/database':
+        specifier: workspace:*
+        version: link:../database
+      '@realriches/document-storage':
+        specifier: workspace:*
+        version: link:../document-storage
+      '@realriches/media-generator':
+        specifier: workspace:*
+        version: link:../media-generator
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.27
+      '@vitest/coverage-v8':
+        specifier: ^1.6.1
+        version: 1.6.1(vitest@1.6.1)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.27)
+
   packages/media-generator:
     dependencies:
       '@realriches/compliance-engine':

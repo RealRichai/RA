@@ -1,0 +1,33 @@
+{
+  "name": "@realriches/listing-copilot",
+  "version": "1.0.0",
+  "description": "End-to-end Listing Copilot workflow for AI-powered listing optimization and collateral generation",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "zod": "^3.22.4"
+  },
+  "peerDependencies": {
+    "@realriches/ai-sdk": "workspace:*",
+    "@realriches/agent-governance": "workspace:*",
+    "@realriches/compliance-engine": "workspace:*",
+    "@realriches/database": "workspace:*",
+    "@realriches/document-storage": "workspace:*",
+    "@realriches/media-generator": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vitest/coverage-v8": "^1.6.1",
+    "typescript": "^5.3.3",
+    "vitest": "^1.6.0"
+  }
+}

@@ -651,6 +651,98 @@ This document serves as the single source of truth for feature implementation st
 
 ---
 
+## 18. Listing Copilot
+
+### 18.1 Core Workflow
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| ListingCopilotWorkflow | Main orchestrator coordinating copy, artifacts, compliance | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/workflow/listing-copilot-workflow.ts` | `packages/listing-copilot/src/__tests__/workflow.test.ts` |
+| CopilotInput Schema | Zod-validated input: listingDraft, propertyFacts, options | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/types.ts` | `packages/listing-copilot/src/__tests__/workflow.test.ts` |
+| CopilotResult Schema | Typed output: runId, status, artifacts, evidence | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/types.ts` | `packages/listing-copilot/src/__tests__/workflow.test.ts` |
+| Kill Switch Integration | Respects global/tenant/market kill switches | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/workflow/listing-copilot-workflow.ts:85-92` | `packages/listing-copilot/src/__tests__/workflow.test.ts` |
+| Budget Integration | Checks/consumes agent budget before execution | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/workflow/listing-copilot-workflow.ts:94-103` | `packages/listing-copilot/src/__tests__/workflow.test.ts` |
+| Dry-Run Mode Default | dryRun: true by default, simulates without posting | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/workflow/listing-copilot-workflow.ts:160-166` | `packages/listing-copilot/src/__tests__/workflow.test.ts` |
+
+### 18.2 Copy Generation
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| CopyGenerator | LLM-powered listing copy optimization | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/generators/copy-generator.ts` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Market-Aware Prompts | NYC strict disclosure vs standard language | NYC | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/generators/copy-generator.ts:61-95` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| OptimizedListingCopy | Title, description, highlights, SEO keywords, disclosures | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/types.ts:112-122` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Prompt Hash Recording | SHA-256 hash of prompt for evidence | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/generators/copy-generator.ts:123-127` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Token Usage Tracking | Records prompt/completion/total tokens | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/generators/copy-generator.ts:129-135` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+
+### 18.3 Artifact Generation
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| ArtifactOrchestrator | Coordinates PDF/PPTX generation | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/generators/artifact-orchestrator.ts` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Flyer PDF Generation | Single-page property flyer | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/generators/artifact-orchestrator.ts:67-85` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Brochure PDF Generation | Multi-page detailed brochure | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/generators/artifact-orchestrator.ts:87-105` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Broker Deck PPTX | PowerPoint presentation for brokers | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/generators/artifact-orchestrator.ts:107-125` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Vault Storage | Artifacts stored in document vault | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/generators/artifact-orchestrator.ts:127-145` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Checksum Generation | SHA-256 checksums for integrity | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/generators/artifact-orchestrator.ts:147-155` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+
+### 18.4 Compliance Integration
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| CopilotComplianceGate | Pre-publish compliance validation | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/compliance/copilot-compliance-gate.ts` | `packages/listing-copilot/src/__tests__/compliance-gate.test.ts` |
+| FARE Act Validation | NYC broker fee rules enforcement | NYC | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/compliance/copilot-compliance-gate.ts:47-65` | `packages/listing-copilot/src/__tests__/compliance-gate.test.ts` |
+| ComplianceBlockedError | Custom error with violations array | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/types.ts:189-202` | `packages/listing-copilot/src/__tests__/compliance-gate.test.ts` |
+| validateSafe Method | Non-throwing validation for UI | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/compliance/copilot-compliance-gate.ts:87-105` | `packages/listing-copilot/src/__tests__/compliance-gate.test.ts` |
+| validateDisclosures | Check copy contains required disclosures | NYC | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/compliance/copilot-compliance-gate.ts:107-135` | `packages/listing-copilot/src/__tests__/compliance-gate.test.ts` |
+| Workflow Blocking | Compliance blocks before artifact generation | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/workflow/listing-copilot-workflow.ts:110-125` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+
+### 18.5 Channel Simulation
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| ChannelSimulator | Dry-run channel posting simulation | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/channels/channel-simulator.ts` | `packages/listing-copilot/src/__tests__/channel-simulator.test.ts` |
+| Zillow Payload Builder | Zillow-specific listing format | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/channels/channel-simulator.ts:67-95` | `packages/listing-copilot/src/__tests__/channel-simulator.test.ts` |
+| StreetEasy Payload Builder | StreetEasy-specific listing format | NYC | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/channels/channel-simulator.ts:97-125` | `packages/listing-copilot/src/__tests__/channel-simulator.test.ts` |
+| MLS RESO Payload Builder | MLS RESO Data Dictionary format | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/channels/channel-simulator.ts:127-155` | `packages/listing-copilot/src/__tests__/channel-simulator.test.ts` |
+| Payload Validation | Per-channel field validation | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/channels/channel-simulator.ts:157-185` | `packages/listing-copilot/src/__tests__/channel-simulator.test.ts` |
+| getAvailableChannels | Market-based channel availability | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/channels/channel-simulator.ts:187-210` | `packages/listing-copilot/src/__tests__/channel-simulator.test.ts` |
+| Syndication Integration | publish() calls real syndication service | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/channels/channel-simulator.ts:212-245` | `packages/listing-copilot/src/__tests__/channel-simulator.test.ts` |
+
+### 18.6 Template Management
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| DefaultTemplateLoader | Load bundled default templates | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/templates/template-loader.ts` | N/A |
+| UserTemplateLoader | Load user-uploaded templates from vault | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/templates/template-loader.ts:67-95` | N/A |
+| TemplateSanitizer | Security validation for uploads | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/templates/template-sanitizer.ts` | N/A |
+| Script Tag Removal | Strip <script> tags from HTML | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/templates/template-sanitizer.ts:27-45` | N/A |
+| Event Handler Removal | Strip on* handlers from HTML | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/templates/template-sanitizer.ts:47-65` | N/A |
+| Handlebars Validation | Validate template syntax | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/templates/template-sanitizer.ts:67-85` | N/A |
+
+### 18.7 Evidence & Governance
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| CopilotEvidenceEmitter | SOC2 evidence recording for copilot runs | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/evidence/copilot-evidence.ts` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Tool Usage Recording | Track each tool invocation | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/evidence/copilot-evidence.ts:45-65` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Policy Gate Recording | Track compliance gate decisions | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/evidence/copilot-evidence.ts:67-85` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Artifact Evidence IDs | Link artifacts to evidence records | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/evidence/copilot-evidence.ts:87-95` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+| Budget Consumption Tracking | Record tokens consumed | Global | `@realriches/listing-copilot` | **Implemented** | `packages/listing-copilot/src/evidence/copilot-evidence.ts:97-105` | `packages/listing-copilot/src/__tests__/integration/copilot-integration.test.ts` |
+
+### 18.8 API & Data Models
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| POST /copilot/execute | Run copilot workflow | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/copilot/routes.ts` | N/A |
+| GET /copilot/runs/:id | Get run status/result | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/copilot/routes.ts` | N/A |
+| GET /copilot/artifacts/:id | Download generated artifact | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/copilot/routes.ts` | N/A |
+| Template CRUD | Create/list/delete user templates | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/copilot/routes.ts` | N/A |
+| CopilotRun Model | Prisma model for workflow executions | Global | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| CopilotArtifact Model | Prisma model for generated artifacts | Global | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| CopilotTemplate Model | Prisma model for user templates | Global | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+
+---
+
 ## Summary Statistics
 
 | Category | Implemented | Partial | Missing | Total |
@@ -672,7 +764,8 @@ This document serves as the single source of truth for feature implementation st
 | Feature Flags | 4 | 0 | 0 | 4 |
 | Testing Infrastructure | 32 | 0 | 0 | 32 |
 | External Alerting | 12 | 0 | 0 | 12 |
-| **TOTAL** | **233** | **1** | **3** | **237** |
+| Listing Copilot | 48 | 0 | 0 | 48 |
+| **TOTAL** | **281** | **1** | **3** | **285** |
 
 ---
 

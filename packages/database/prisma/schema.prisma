@@ -500,6 +500,7 @@ model Listing {
   collateralGenerations CollateralGeneration[]
   collateralBatches     CollateralGenerationBatch[]
   agentModifications    ListingAgentModification[]
+  copilotRuns           CopilotRun[]
 
   @@index([propertyId])
   @@index([landlordId])
@@ -8879,4 +8880,80 @@ model NotificationTemplate {
   @@index([category])
   @@index([locale])
   @@map("notification_templates")
+}
+
+// =============================================================================
+// Listing Copilot
+// =============================================================================
+
+enum CopilotRunStatus {
+  pending
+  running
+  completed
+  blocked
+  failed
+}
+
+model CopilotRun {
+  id               String           @id @default(uuid()) @db.Uuid
+  tenantId         String           @map("tenant_id") @db.Uuid
+  listingId        String?          @map("listing_id") @db.Uuid
+  marketId         String           @map("market_id")
+  status           CopilotRunStatus @default(pending)
+  input            Json
+  result           Json?
+  generatedCopy    Json?            @map("generated_copy")
+  complianceResult Json?            @map("compliance_result")
+  evidenceId       String?          @map("evidence_id")
+  tokensUsed       Int              @default(0) @map("tokens_used")
+  dryRun           Boolean          @default(true) @map("dry_run")
+  error            String?
+  createdAt        DateTime         @default(now()) @map("created_at")
+  completedAt      DateTime?        @map("completed_at")
+
+  artifacts CopilotArtifact[]
+  listing   Listing?          @relation(fields: [listingId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([listingId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("copilot_runs")
+}
+
+model CopilotArtifact {
+  id          String   @id @default(uuid()) @db.Uuid
+  runId       String   @map("run_id") @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  type        String
+  vaultPath   String   @map("vault_path")
+  contentType String   @map("content_type")
+  checksum    String
+  sizeBytes   Int      @map("size_bytes")
+  evidenceId  String?  @map("evidence_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  run CopilotRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([tenantId])
+  @@index([type])
+  @@map("copilot_artifacts")
+}
+
+model CopilotTemplate {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  name               String
+  type               String
+  vaultPath          String   @map("vault_path")
+  validated          Boolean  @default(false)
+  validationWarnings String[] @default([]) @map("validation_warnings")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, name, type])
+  @@index([tenantId])
+  @@index([type])
+  @@map("copilot_templates")
 }

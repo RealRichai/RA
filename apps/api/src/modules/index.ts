@@ -32,6 +32,7 @@ import { commercialRoutes } from './commercial/routes';
 import { commonAreaRoutes } from './common-areas/routes';
 import { communicationRoutes } from './communications/routes';
 import { complianceRoutes } from './compliance/routes';
+import { copilotRoutes } from './copilot/routes';
 import { demoRoutes } from './demo/routes';
 import { esignatureRoutes } from './documents/esignature';
 import { documentRoutes } from './documents/routes';
@@ -112,6 +113,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(listingRoutes, { prefix: '/listings' });
       await api.register(leaseRoutes, { prefix: '/leases' });
       await api.register(complianceRoutes, { prefix: '/compliance' });
+      await api.register(copilotRoutes, { prefix: '/copilot' });
       await api.register(agentUsageRoutes, { prefix: '/agent-usage' });
       await api.register(aiRoutes, { prefix: '/ai' });
       await api.register(paymentRoutes, { prefix: '/payments' });
