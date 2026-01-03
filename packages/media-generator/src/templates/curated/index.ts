@@ -85,16 +85,20 @@ export function loadCuratedTemplate(templateId: string): CollateralTemplate | nu
     id: `curated-${config.id}`,
     name: config.name,
     type: config.type,
+    source: 'system' as const,
     version: config.version,
     htmlTemplate: htmlContent,
     variables: config.variables.map(v => ({
       name: v,
-      type: 'object',
+      type: 'string' as const,
       required: true,
     })),
-    marketPackId: '*', // Supports all markets
+    requiredComplianceBlocks: ['fair_housing_notice'],
+    supportedFormats: ['pdf' as const, 'pptx' as const],
+    marketId: '*', // Supports all markets
     isActive: true,
-    source: 'system',
+    isSystem: true,
+    createdBy: 'system',
     createdAt: new Date('2024-01-01'),
     updatedAt: new Date('2024-01-01'),
   };

@@ -5,8 +5,9 @@
  * No authentication required.
  */
 
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { createHash } from 'crypto';
+
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 
 // ============================================================================
 // Demo Fixtures

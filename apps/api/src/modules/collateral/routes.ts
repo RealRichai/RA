@@ -5,6 +5,8 @@
  * Includes compliance block enforcement and evidence emission.
  */
 
+import { createHash, randomBytes } from 'crypto';
+
 import { prisma } from '@realriches/database';
 import { generatePrefixedId, NotFoundError, ForbiddenError, ValidationError } from '@realriches/utils';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
@@ -313,8 +315,7 @@ export async function collateralRoutes(app: FastifyInstance): Promise<void> {
       };
 
       // Calculate input hash for determinism
-      const inputHash = require('crypto')
-        .createHash('sha256')
+      const inputHash = createHash('sha256')
         .update(JSON.stringify({
           listingId: listing.id,
           templateId: template.id,
@@ -353,7 +354,7 @@ export async function collateralRoutes(app: FastifyInstance): Promise<void> {
               format: format,
               fileUrl: `https://storage.realriches.com/collateral/${generatePrefixedId('file')}.${format === 'pdf' || format === 'pptx' ? format : 'jpg'}`,
               fileSize: format === 'pdf' ? 250000 : format === 'pptx' ? 500000 : 150000,
-              checksum: require('crypto').randomBytes(32).toString('hex'),
+              checksum: randomBytes(32).toString('hex'),
               listingSnapshot: JSON.parse(JSON.stringify(listingSnapshot)),
               complianceBlocks: template.requiredComplianceBlocks.map((blockId) => ({
                 blockId,

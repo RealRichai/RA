@@ -38,8 +38,6 @@ function loadListingFixture(name: string): ListingSnapshot {
     propertyType: data.propertyType,
     yearBuilt: data.yearBuilt,
     petPolicy: data.petPolicy,
-    snapshotAt: new Date(),
-    snapshotVersion: '1.0.0',
   };
 }
 
@@ -51,12 +49,16 @@ function loadTemplateFixture(): CollateralTemplate {
     id: 'fixture-template-001',
     name: 'Minimal Flyer',
     type: 'flyer',
+    source: 'system',
     version: '1.0.0',
     htmlTemplate: htmlContent,
     variables: [],
-    marketPackId: 'NYC_STRICT',
+    requiredComplianceBlocks: ['fair_housing_notice'],
+    supportedFormats: ['pdf', 'pptx'],
+    marketId: 'NYC_STRICT',
     isActive: true,
-    source: 'system',
+    isSystem: true,
+    createdBy: 'system',
     createdAt: new Date('2024-01-01'),
     updatedAt: new Date('2024-01-01'),
   };

@@ -209,12 +209,12 @@ export class ComplianceEnforcer {
     // Extract <style> contents
     let match;
     while ((match = stylePattern.exec(html)) !== null) {
-      allStyles.push(match[1]);
+      if (match[1]) allStyles.push(match[1]);
     }
 
     // Extract inline styles
     while ((match = inlineStylePattern.exec(html)) !== null) {
-      allStyles.push(match[1]);
+      if (match[1]) allStyles.push(match[1]);
     }
 
     // Check for blacklisted CSS patterns
@@ -235,7 +235,9 @@ export class ComplianceEnforcer {
     // Check for small font sizes on compliance blocks
     const fontSizePattern = /\.compliance-block[^{]*\{[^}]*font-size:\s*(\d+)px/gi;
     while ((match = fontSizePattern.exec(html)) !== null) {
-      const fontSize = parseInt(match[1], 10);
+      const fontSizeStr = match[1];
+      if (!fontSizeStr) continue;
+      const fontSize = parseInt(fontSizeStr, 10);
       if (fontSize < config.minFontSizePx) {
         violations.push({
           code: 'CSS_VIOLATION',

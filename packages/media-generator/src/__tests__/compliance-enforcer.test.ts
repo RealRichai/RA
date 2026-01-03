@@ -87,7 +87,9 @@ describe('ComplianceEnforcer', () => {
       const violations = enforcer.validateCssVisibility(html, config);
 
       expect(violations.length).toBeGreaterThan(0);
-      expect(violations[0].code).toBe('CSS_VIOLATION');
+      const firstViolation = violations[0];
+      expect(firstViolation).toBeDefined();
+      expect(firstViolation?.code).toBe('CSS_VIOLATION');
     });
 
     it('should detect visibility:hidden in strict markets', () => {

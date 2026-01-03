@@ -183,6 +183,9 @@ export class ImageGenerator {
       try {
         // Fetch and resize the first photo
         const photoUrl = listing.photos[0];
+        if (!photoUrl) {
+          throw new Error('Photo URL is undefined');
+        }
         const photoBuffer = await this.fetchImage(photoUrl);
         image = sharp(photoBuffer).resize(dimensions.width, photoHeight, {
           fit: 'cover',
