@@ -1,0 +1,23 @@
+{
+  "name": "@realriches/alerting",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@realriches/utils": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "msw": "^2.7.3",
+    "typescript": "^5.7.3",
+    "vitest": "^1.6.1"
+  }
+}

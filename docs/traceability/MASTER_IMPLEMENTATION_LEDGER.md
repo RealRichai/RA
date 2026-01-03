@@ -604,6 +604,37 @@ This document serves as the single source of truth for feature implementation st
 
 ---
 
+## 17. External Alerting
+
+### 17.1 Alert Providers
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| Slack Provider | Slack webhook alerts with severity-based colors | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/providers/slack.ts` | `packages/alerting/src/__tests__/providers/slack.test.ts` |
+| PagerDuty Provider | PagerDuty Events API v2 integration | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/providers/pagerduty.ts` | `packages/alerting/src/__tests__/providers/pagerduty.test.ts` |
+| OpsGenie Provider | OpsGenie Alert API integration | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/providers/opsgenie.ts` | `packages/alerting/src/__tests__/providers/opsgenie.test.ts` |
+| Base Provider | Abstract provider with retry logic, HTTP helpers | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/providers/provider-interface.ts` | `packages/alerting/src/__tests__/router.test.ts` |
+
+### 17.2 Alert Routing
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| AlertRouter | Coordinates routing to providers based on severity | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/router/alert-router.ts` | `packages/alerting/src/__tests__/router.test.ts` |
+| Severity-Based Routing | Routes info→slack, warning→slack+opsgenie, critical→all | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/types.ts:47-51` | `packages/alerting/src/__tests__/router.test.ts` |
+| Alert Deduplication | In-memory cooldown cache (default 5min TTL) | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/router/alert-router.ts:217-240` | `packages/alerting/src/__tests__/router.test.ts` |
+| Explicit Provider Targeting | Override routing with targetProviders array | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/router/alert-router.ts:196-205` | `packages/alerting/src/__tests__/router.test.ts` |
+
+### 17.3 Evidence & Configuration
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| Alert Evidence Emitter | SOC2 CC7.4 evidence for all alert dispatches | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/evidence/alert-evidence.ts` | N/A (log-based) |
+| PII Sanitization | Filters sensitive fields from evidence records | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/evidence/alert-evidence.ts:53-100` | N/A |
+| Environment Config Loader | Load provider configs from env variables | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/config/env-config.ts` | `packages/alerting/src/__tests__/router.test.ts` |
+| Config Summary | Get enabled providers summary for logging | Global | `@realriches/alerting` | **Implemented** | `packages/alerting/src/config/env-config.ts:193-213` | N/A |
+
+---
+
 ## Summary Statistics
 
 | Category | Implemented | Partial | Missing | Total |
@@ -624,7 +655,8 @@ This document serves as the single source of truth for feature implementation st
 | Partner Contracts | 9 | 0 | 0 | 9 |
 | Feature Flags | 4 | 0 | 0 | 4 |
 | Testing Infrastructure | 32 | 0 | 0 | 32 |
-| **TOTAL** | **221** | **1** | **3** | **225** |
+| External Alerting | 12 | 0 | 0 | 12 |
+| **TOTAL** | **233** | **1** | **3** | **237** |
 
 ---
 
