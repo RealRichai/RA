@@ -223,6 +223,17 @@ This document serves as the single source of truth for feature implementation st
 | Fee Rules | Fee structure enforcement | Various | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/policy/rules/fee-rules.ts` | `packages/agent-governance/tests/policy-gate.test.ts` |
 | Market Rules | Market-specific policy enforcement | Various | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/policy/rules/market-rules.ts` | `packages/agent-governance/tests/policy-gate.test.ts` |
 
+### 5.4 Agent Usage & Cost Tracking
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| PrismaAgentRunStore | Database-backed agent run persistence | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/persistence/prisma-run-store.ts` | `apps/api/tests/agent-usage.test.ts` |
+| AgentUsageService | Real-time cost tracking with Redis + DB | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/usage/agent-usage.service.ts` | `apps/api/tests/agent-usage.test.ts` |
+| Budget Enforcement Plugin | Daily/monthly budget limits with headers | Global | `@realriches/api` | **Implemented** | `apps/api/src/plugins/agent-budget.ts` | `apps/api/tests/agent-usage.test.ts` |
+| Agent Usage API Routes | Summary, breakdown, runs, budget status | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/agent-usage/routes.ts` | `apps/api/tests/agent-usage.test.ts` |
+| Usage Aggregation Job | Hourly Redis→DB aggregation + alerts | Global | `@realriches/api` | **Implemented** | `apps/api/src/jobs/agent-usage-aggregation.ts` | `apps/api/tests/agent-usage.test.ts` |
+| Budget Alerts | 80%/90%/100% threshold notifications | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/usage/agent-usage.service.ts` | `apps/api/tests/agent-usage.test.ts` |
+
 ---
 
 ## 6. Media Generation
