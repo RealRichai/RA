@@ -555,6 +555,8 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
         working-directory: packages/database
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_schema?schema=public
 
       - name: Validate schema syntax
         run: |
@@ -562,6 +564,8 @@ jobs:
           npx prisma validate
           echo "✓ Prisma schema is valid"
         working-directory: packages/database
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_schema?schema=public
 
       - name: Test schema applies cleanly (db push)
         run: |
