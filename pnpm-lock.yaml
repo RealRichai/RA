@@ -317,9 +317,6 @@ importers:
 
   packages/agent-governance:
     dependencies:
-      '@realriches/database':
-        specifier: workspace:*
-        version: link:../database
       '@realriches/types':
         specifier: workspace:*
         version: link:../types
@@ -333,6 +330,9 @@ importers:
         specifier: ^3.22.0
         version: 3.25.76
     devDependencies:
+      '@realriches/database':
+        specifier: workspace:*
+        version: link:../database
       '@types/node':
         specifier: ^20.10.0
         version: 20.19.27
