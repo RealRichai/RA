@@ -58,28 +58,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Self-test forbid_human_todos script
+        run: ./scripts/ci/forbid_human_todos.sh --test
+
       - name: Check for HUMAN_IMPLEMENTATION_REQUIRED
-        run: |
-          echo "Checking for HUMAN_IMPLEMENTATION_REQUIRED markers..."
-
-          # Install ripgrep for fast searching
-          sudo apt-get update -qq && sudo apt-get install -y ripgrep
-
-          # Search in source paths, excluding build artifacts
-          if rg -n "HUMAN_IMPLEMENTATION_REQUIRED" \
-              apps packages prisma docs \
-              -g'!**/coverage/**' \
-              -g'!**/.next/**' \
-              -g'!**/dist/**' \
-              -g'!**/.turbo/**' \
-              -g'!**/node_modules/**' ; then
-            echo ""
-            echo "::error::POLICY VIOLATION: Found HUMAN_IMPLEMENTATION_REQUIRED markers in source code."
-            echo "These must be resolved before merging."
-            exit 1
-          fi
-
-          echo "✓ No HUMAN_IMPLEMENTATION_REQUIRED markers found"
+        run: ./scripts/ci/forbid_human_todos.sh
 
       - name: Check traceability documents
         run: |

@@ -265,30 +265,42 @@ The codebase enforces policies via the CI pipeline's **Policy Gates** job.
 
 ### HUMAN_IMPLEMENTATION_REQUIRED Policy
 
-Source files must not contain `HUMAN_IMPLEMENTATION_REQUIRED` markers. This policy ensures all implementation TODOs are resolved before merging.
+Source files must not contain `TODO: HUMAN_IMPLEMENTATION_REQUIRED` markers. This policy ensures all implementation TODOs are resolved before merging.
 
 **CI Enforcement:**
 - Job: `Policy Gates` in `.github/workflows/ci.yml`
+- Script: `scripts/ci/forbid_human_todos.sh`
 - Runs on: push/PR to `main`
-- Scans: `apps/`, `packages/`, `prisma/`, `docs/`
+- Scans: `apps/`, `packages/`, `prisma/`, `docs/`, `.github/`, `scripts/`
 - Excludes: `coverage/`, `.next/`, `dist/`, `.turbo/`, `node_modules/`
+- Uses `git ls-files` as source-of-truth (only scans tracked files)
 
 **Run Locally:**
 
 ```bash
-# Using the script
+# Using the CI script (recommended)
+./scripts/ci/forbid_human_todos.sh
+
+# Self-test the script
+./scripts/ci/forbid_human_todos.sh --test
+
+# Using the legacy script
 ./scripts/policy_scan.sh
-
-# Using pnpm
-pnpm policy:no-human-todos
-
-# Using ripgrep directly
-rg "HUMAN_IMPLEMENTATION_REQUIRED" apps packages prisma docs
 ```
 
 **Exit Codes:**
 - `0` - No violations found
 - `1` - Violations found (blocks CI)
+- `2` - Script error
+
+### Coverage Exclusion Policy
+
+Test coverage artifacts (`coverage/`, `**/coverage/`) are:
+- **Never committed** - Listed in `.gitignore`
+- **Never exported** - Excluded from `scripts/export_repo.sh`
+- **Never scanned** - Excluded from policy checks
+
+This ensures generated artifacts don't pollute the repository or trigger false positives in policy scans.
 
 ### Traceability Policy
 

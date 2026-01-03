@@ -346,6 +346,7 @@ This document serves as the single source of truth for feature implementation st
 | PII Redaction | AI input/output redaction | Global | `@realriches/ai-sdk` | **Implemented** | `packages/ai-sdk/src/redaction/` | `packages/ai-sdk/src/__tests__/redaction.test.ts` |
 | Document Encryption | At-rest encryption for sensitive docs | Global | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/acl.ts:244-287` | `apps/api/tests/security/encryption.test.ts` |
 | Secrets Guard | CI secrets detection | Global | `.github/workflows/ci.yml` | **Implemented** | `.github/workflows/ci.yml` (secrets-guard job) | N/A (CI) |
+| Forbid Human TODOs | CI policy gate for `HUMAN_IMPLEMENTATION_REQUIRED` markers | Global | `scripts/ci/forbid_human_todos.sh` | **Implemented** | `scripts/ci/forbid_human_todos.sh`, `.github/workflows/ci.yml` (policy-gates job) | `--test` self-test flag |
 
 ---
 
