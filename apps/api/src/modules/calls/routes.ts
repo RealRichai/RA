@@ -4,11 +4,12 @@
  * API endpoints for voice call management with Twilio integration.
  */
 
-import {
-  getTwilioProductionProvider,
-  requiresTwoPartyConsent,
-} from '@realriches/agent-governance';
-import type { TwilioConfig, VoiceCall } from '@realriches/agent-governance';
+import { voice } from '@realriches/agent-governance';
+import type { voice as VoiceTypes, ResultErr } from '@realriches/agent-governance';
+
+const { getTwilioProductionProvider, requiresTwoPartyConsent } = voice;
+type TwilioConfig = VoiceTypes.TwilioConfig;
+type VoiceCall = VoiceTypes.VoiceCall;
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -99,15 +100,11 @@ export async function callRoutes(fastify: FastifyInstance) {
       // Enforce plan limits
       const enforcement = await fastify.enforcePlanLimit(request, reply, 'calls');
       if (enforcement && !enforcement.allowed) {
-        return; // Reply already sent by enforcer
+        return undefined; // Reply already sent by enforcer
       }
 
-      // Get market from organization
-      const org = await fastify.prisma.organization.findUnique({
-        where: { id: organizationId },
-        select: { defaultMarket: true },
-      });
-      const market = org?.defaultMarket || 'DEFAULT';
+      // Get market from user's organization settings (default to NYC_STRICT)
+      const market = 'NYC_STRICT';
 
       // Initialize provider
       const provider = getTwilioProductionProvider(twilioConfig);
@@ -127,9 +124,10 @@ export async function callRoutes(fastify: FastifyInstance) {
       });
 
       if (!result.ok) {
+        const { error } = result as ResultErr;
         return reply.status(500).send({
           success: false,
-          error: { code: result.error.code, message: result.error.message },
+          error: { code: error.code, message: error.message },
         });
       }
 
@@ -272,7 +270,7 @@ export async function callRoutes(fastify: FastifyInstance) {
         include: {
           recordings: {
             include: {
-              transcript: true,
+              transcripts: true,
             },
           },
         },
@@ -286,7 +284,7 @@ export async function callRoutes(fastify: FastifyInstance) {
       }
 
       const transcripts = call.recordings
-        .map(r => r.transcript)
+        .flatMap(r => r.transcripts)
         .filter(Boolean);
 
       if (transcripts.length === 0) {
@@ -306,7 +304,7 @@ export async function callRoutes(fastify: FastifyInstance) {
             redactedText: t!.redactedFullText,
             piiDetected: t!.piiDetected,
             piiTypesFound: t!.piiTypesFound,
-            language: t!.language,
+            languageCode: t!.languageCode,
             createdAt: t!.createdAt,
           })),
         },
@@ -365,9 +363,10 @@ export async function callRoutes(fastify: FastifyInstance) {
       const result = await provider.endCall(id, body.reason);
 
       if (!result.ok) {
+        const { error } = result as ResultErr;
         return reply.status(500).send({
           success: false,
-          error: { code: result.error.code, message: result.error.message },
+          error: { code: error.code, message: error.message },
         });
       }
 
@@ -405,7 +404,8 @@ export async function callRoutes(fastify: FastifyInstance) {
       const result = await provider.handleWebhook(body);
 
       if (!result.ok) {
-        request.log.error({ error: result.error }, 'Webhook processing failed');
+        const { error } = result as ResultErr;
+        request.log.error({ error }, 'Webhook processing failed');
         return reply.status(500).send();
       }
 
@@ -472,12 +472,12 @@ export async function callRoutes(fastify: FastifyInstance) {
           await fastify.prisma.callRecording.create({
             data: {
               callId: call.id,
+              organizationId: call.organizationId,
               providerRecordingId: recordingSid,
               encrypted: true, // Will be encrypted when stored
               retentionDays: 90, // Default retention
               retentionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-              format: 'wav',
-              channels: 2,
+              format: 'audio/wav',
               durationSeconds: recordingDuration ? parseInt(recordingDuration, 10) : null,
             },
           });

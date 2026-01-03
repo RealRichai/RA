@@ -304,6 +304,21 @@ function createDatabaseAdapter(fastify: FastifyInstance) {
       const updateField = type === 'calls' ? 'callsUsed' :
                           type === 'generations' ? 'generationsUsed' : 'tasksUsed';
 
+      // Calculate end of month for periodEnd
+      const endOfMonth = new Date(startOfMonth);
+      endOfMonth.setMonth(endOfMonth.getMonth() + 1);
+      endOfMonth.setDate(0); // Last day of previous month
+
+      // Get the organization plan ID
+      const orgPlan = await fastify.prisma.organizationPlan.findUnique({
+        where: { organizationId },
+        select: { id: true },
+      });
+
+      if (!orgPlan) {
+        throw new Error('No plan found for organization');
+      }
+
       const result = await fastify.prisma.planUsage.upsert({
         where: {
           organizationId_periodStart: {
@@ -312,10 +327,13 @@ function createDatabaseAdapter(fastify: FastifyInstance) {
           },
         },
         create: {
+          organizationPlanId: orgPlan.id,
           organizationId,
-          organizationPlanId: '', // Will be set on first usage
           periodStart: startOfMonth,
-          [updateField]: amount,
+          periodEnd: endOfMonth,
+          callsUsed: type === 'calls' ? amount : 0,
+          generationsUsed: type === 'generations' ? amount : 0,
+          tasksUsed: type === 'tasks' ? amount : 0,
           callsLimit: 0,
           generationsLimit: 0,
           tasksLimit: 0,

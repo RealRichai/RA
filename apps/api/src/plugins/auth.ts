@@ -10,6 +10,7 @@ export interface AppUser {
   role: Role;
   permissions: Permission[];
   sessionId: string;
+  organizationId?: string;
 }
 
 // Use @fastify/jwt's type augmentation pattern
@@ -22,6 +23,7 @@ declare module '@fastify/jwt' {
       permissions: Permission[];
       sessionId: string;
       type: 'access' | 'refresh';
+      organizationId?: string;
     };
     user: AppUser;
   }
@@ -72,6 +74,7 @@ const authPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
           permissions: Permission[];
           sessionId: string;
           type: 'access' | 'refresh';
+          organizationId?: string;
         }>();
 
         if (decoded.type !== 'access') {
@@ -91,6 +94,7 @@ const authPluginCallback: FastifyPluginCallback = (fastify, _opts, done) => {
           role: decoded.role,
           permissions: decoded.permissions,
           sessionId: decoded.sessionId,
+          organizationId: decoded.organizationId,
         };
       } catch (error) {
         if (options?.optional) {

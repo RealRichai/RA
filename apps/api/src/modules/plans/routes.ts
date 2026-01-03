@@ -125,7 +125,9 @@ export async function planRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/current',
     {
-      preHandler: [fastify.authenticate],
+      preHandler: async (request, reply) => {
+        await fastify.authenticate(request, reply);
+      },
       schema: {
         description: 'Get current organization plan and usage',
         tags: ['Plans'],
@@ -244,7 +246,17 @@ export async function planRoutes(fastify: FastifyInstance) {
   }>(
     '/admin/organizations/:id/plan',
     {
-      preHandler: [fastify.authenticate, fastify.requireRole(['super_admin', 'admin'])],
+      preHandler: async (request, reply) => {
+        await fastify.authenticate(request, reply);
+        if (!request.user) return;
+        if (request.user.role !== 'super_admin' && request.user.role !== 'admin') {
+          reply.status(403).send({
+            success: false,
+            error: { code: 'FORBIDDEN', message: 'Requires admin access' },
+          });
+          return;
+        }
+      },
       schema: {
         description: 'Assign a plan to an organization (admin only)',
         tags: ['Plans', 'Admin'],
@@ -334,7 +346,7 @@ export async function planRoutes(fastify: FastifyInstance) {
       // Audit log
       await fastify.prisma.auditLog.create({
         data: {
-          userId: request.user!.id,
+          actorId: request.user!.id,
           action: 'plan_assigned',
           entityType: 'organization',
           entityId: organizationId,

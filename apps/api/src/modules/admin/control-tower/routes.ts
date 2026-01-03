@@ -6,7 +6,7 @@
  */
 
 import { getKillSwitchManager } from '@realriches/agent-governance';
-import type { KillSwitchScope } from '@realriches/agent-governance';
+import type { KillSwitchScope, AgentType, ResultErr } from '@realriches/agent-governance';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -49,15 +49,18 @@ const UpdateSpendCapsSchema = z.object({
 
 export async function controlTowerRoutes(fastify: FastifyInstance) {
   // Helper to require founder/super_admin role
-  const requireFounder = async (request: FastifyRequest, reply: FastifyReply) => {
+  const requireFounder = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     await fastify.authenticate(request, reply);
-    if (!request.user) return;
+    if (!request.user) {
+      return;
+    }
     // Check for super_admin role
     if (request.user.role !== 'super_admin' && request.user.role !== 'admin') {
-      return reply.status(403).send({
+      reply.status(403).send({
         success: false,
         error: { code: 'FORBIDDEN', message: 'Requires admin access' },
       });
+      return;
     }
   };
 
@@ -646,10 +649,10 @@ export async function controlTowerRoutes(fastify: FastifyInstance) {
       // Audit log
       await fastify.prisma.auditLog.create({
         data: {
-          userId: request.user!.id,
+          actorId: request.user!.id,
           action: 'spend_caps_updated',
           entityType: 'system',
-          entityId: 'spend_caps',
+          entityId: request.user!.id, // Use user ID as entity for system-level changes
           changes: body,
           ipAddress: request.ip,
           userAgent: request.headers['user-agent'] || null,
@@ -682,11 +685,11 @@ export async function controlTowerRoutes(fastify: FastifyInstance) {
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const killSwitch = getKillSwitchManager();
-      const switches = await killSwitch.listActive();
+      const switches = killSwitch.getActive();
 
       return reply.send({
         success: true,
-        data: switches.ok ? switches.data : [],
+        data: switches,
       });
     }
   );
@@ -724,30 +727,50 @@ export async function controlTowerRoutes(fastify: FastifyInstance) {
 
       const killSwitch = getKillSwitchManager();
 
+      // Determine scopeValue based on scope type
+      let scopeValue: string | undefined;
+      switch (body.scope) {
+        case 'tenant':
+          scopeValue = body.tenantId;
+          break;
+        case 'market':
+          scopeValue = body.market;
+          break;
+        case 'user':
+          scopeValue = body.userId;
+          break;
+        case 'agent_type':
+          scopeValue = body.affectedAgentTypes?.[0];
+          break;
+        case 'tool':
+          scopeValue = body.affectedTools?.[0];
+          break;
+        // 'global' scope doesn't need a scopeValue
+      }
+
       const result = await killSwitch.activate({
         scope: body.scope as KillSwitchScope,
+        scopeValue,
         reason: body.reason,
         activatedBy: request.user!.id,
         durationHours: body.durationHours,
-        affectedAgentTypes: body.affectedAgentTypes as AgentType[],
+        affectedAgentTypes: body.affectedAgentTypes as AgentType[] | undefined,
         affectedTools: body.affectedTools,
-        tenantId: body.tenantId,
-        market: body.market,
-        userId: body.userId,
         metadata: body.metadata,
       });
 
       if (!result.ok) {
+        const { error } = result as ResultErr;
         return reply.status(400).send({
           success: false,
-          error: { code: result.error.code, message: result.error.message },
+          error: { code: error.code, message: error.message },
         });
       }
 
       // Audit log
       await fastify.prisma.auditLog.create({
         data: {
-          userId: request.user!.id,
+          actorId: request.user!.id,
           action: 'kill_switch_activated',
           entityType: 'kill_switch',
           entityId: result.data.id,
@@ -793,16 +816,17 @@ export async function controlTowerRoutes(fastify: FastifyInstance) {
       const result = await killSwitch.deactivate(id, request.user!.id);
 
       if (!result.ok) {
+        const { error } = result as ResultErr;
         return reply.status(400).send({
           success: false,
-          error: { code: result.error.code, message: result.error.message },
+          error: { code: error.code, message: error.message },
         });
       }
 
       // Audit log
       await fastify.prisma.auditLog.create({
         data: {
-          userId: request.user!.id,
+          actorId: request.user!.id,
           action: 'kill_switch_deactivated',
           entityType: 'kill_switch',
           entityId: id,
@@ -845,7 +869,7 @@ export async function controlTowerRoutes(fastify: FastifyInstance) {
           entityType: 'kill_switch',
           entityId: id,
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { timestamp: 'desc' },
         take: 100,
       });
 
@@ -904,7 +928,7 @@ export async function controlTowerRoutes(fastify: FastifyInstance) {
 
       // Active kill switches
       const killSwitch = getKillSwitchManager();
-      const activeSwitches = await killSwitch.listActive();
+      const activeSwitches = killSwitch.getActive();
 
       // Get spend caps for alert calculation
       const caps = await fastify.redis.hgetall('spend:caps') || {};
@@ -937,11 +961,11 @@ export async function controlTowerRoutes(fastify: FastifyInstance) {
         });
       }
 
-      if (activeSwitches.ok && activeSwitches.data.length > 0) {
+      if (activeSwitches.length > 0) {
         alerts.push({
           type: 'kill_switch',
           severity: 'info',
-          message: `${activeSwitches.data.length} active kill switch(es)`,
+          message: `${activeSwitches.length} active kill switch(es)`,
         });
       }
 
@@ -953,11 +977,11 @@ export async function controlTowerRoutes(fastify: FastifyInstance) {
             recentFailures,
             runsToday,
             spendTodayCents: spentCents,
-            activeKillSwitches: activeSwitches.ok ? activeSwitches.data.length : 0,
+            activeKillSwitches: activeSwitches.length,
             budgetUtilization,
           },
           alerts,
-          killSwitches: activeSwitches.ok ? activeSwitches.data : [],
+          killSwitches: activeSwitches,
           timestamp: now,
         },
       });
