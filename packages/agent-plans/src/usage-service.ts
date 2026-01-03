@@ -92,8 +92,8 @@ export class PlanUsageService {
     // Try cache first
     const cached = await this.redis.get(cacheKey);
     if (cached) {
-      const { currentUsage, limit } = JSON.parse(cached);
-      return this.buildCheckResult(currentUsage, limit, amount);
+      const parsed = JSON.parse(cached) as { currentUsage: number; limit: number };
+      return this.buildCheckResult(parsed.currentUsage, parsed.limit, amount);
     }
 
     // Fetch from database
@@ -369,12 +369,14 @@ export class PlanUsageService {
     const now = new Date();
     const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    this.db.incrementUsage(organizationId, periodStart, type, amount).catch((err) => {
+    this.db.incrementUsage(organizationId, periodStart, type, amount).catch((err: unknown) => {
+      // eslint-disable-next-line no-console
       console.error(`Failed to persist usage for ${organizationId}:${type}:`, err);
     });
 
     if (isOverage) {
-      this.db.recordOverage(organizationId, periodStart, type, amount).catch((err) => {
+      this.db.recordOverage(organizationId, periodStart, type, amount).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
         console.error(`Failed to record overage for ${organizationId}:${type}:`, err);
       });
     }
