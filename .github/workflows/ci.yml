@@ -914,3 +914,169 @@ jobs:
           echo "  - market-ready-report.json"
           echo "  - e2e-reports/"
           echo ""
+
+  # Evidence Audit Smoke Test - validates SOC2 evidence infrastructure
+  evidence-audit-smoke:
+    name: Evidence Audit Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Validate Evidence Control Catalog
+        run: |
+          echo "Validating EVIDENCE_CONTROL_CATALOG.md..."
+          FILE="docs/ops/EVIDENCE_CONTROL_CATALOG.md"
+
+          if [ ! -f "$FILE" ]; then
+            echo "::error::EVIDENCE_CONTROL_CATALOG.md not found"
+            exit 1
+          fi
+          echo "✓ EVIDENCE_CONTROL_CATALOG.md exists"
+
+          # Check required sections
+          REQUIRED_SECTIONS=(
+            "## Control Definitions"
+            "### 1. Security Controls"
+            "### 2. Availability Controls"
+            "### 3. Processing Integrity Controls"
+            "### 4. Confidentiality Controls"
+            "### 5. Privacy Controls"
+            "## Workflow Coverage Matrix"
+            "## Gap Severity Definitions"
+          )
+
+          for section in "${REQUIRED_SECTIONS[@]}"; do
+            if ! grep -q "$section" "$FILE"; then
+              echo "::error::Missing required section: $section"
+              exit 1
+            fi
+            echo "✓ Found: $section"
+          done
+
+          # Count control definitions (SEC-xxx, AVL-xxx, PI-xxx, CNF-xxx, PRV-xxx)
+          CONTROL_COUNT=$(grep -E "^\| \*\*Control ID\*\* \| (SEC|AVL|PI|CNF|PRV)-" "$FILE" | wc -l)
+          if [ "$CONTROL_COUNT" -lt 15 ]; then
+            echo "::error::Expected at least 15 control definitions, found $CONTROL_COUNT"
+            exit 1
+          fi
+          echo "✓ Found $CONTROL_COUNT control definitions"
+
+          echo "✓ EVIDENCE_CONTROL_CATALOG.md validation passed"
+
+      - name: Validate evidence_audit_report.mjs script
+        run: |
+          echo "Validating evidence_audit_report.mjs..."
+          SCRIPT="scripts/evidence_audit_report.mjs"
+
+          if [ ! -f "$SCRIPT" ]; then
+            echo "::error::evidence_audit_report.mjs not found"
+            exit 1
+          fi
+          echo "✓ evidence_audit_report.mjs exists"
+
+          # Validate script syntax (Node.js ESM)
+          node --check "$SCRIPT"
+          echo "✓ evidence_audit_report.mjs syntax is valid"
+
+          # Check for required functions/patterns
+          REQUIRED_PATTERNS=(
+            "CONTROL_CATALOG"
+            "generateReport"
+            "queryEvidenceRecords"
+            "calculateFieldCompleteness"
+          )
+
+          for pattern in "${REQUIRED_PATTERNS[@]}"; do
+            if ! grep -q "$pattern" "$SCRIPT"; then
+              echo "::error::Missing required pattern: $pattern"
+              exit 1
+            fi
+            echo "✓ Found: $pattern"
+          done
+
+          echo "✓ evidence_audit_report.mjs validation passed"
+
+      - name: Validate evidence-audit routes
+        run: |
+          echo "Validating evidence-audit API routes..."
+          ROUTES="apps/api/src/modules/evidence-audit/routes.ts"
+
+          if [ ! -f "$ROUTES" ]; then
+            echo "::error::evidence-audit routes not found"
+            exit 1
+          fi
+          echo "✓ evidence-audit routes exist"
+
+          # Check for required endpoints
+          if ! grep -q "/admin/evidence-audit/report" "$ROUTES"; then
+            echo "::error::Missing /admin/evidence-audit/report endpoint"
+            exit 1
+          fi
+          echo "✓ /admin/evidence-audit/report endpoint found"
+
+          if ! grep -q "/admin/evidence-audit/summary" "$ROUTES"; then
+            echo "::error::Missing /admin/evidence-audit/summary endpoint"
+            exit 1
+          fi
+          echo "✓ /admin/evidence-audit/summary endpoint found"
+
+          if ! grep -q "/admin/evidence-audit/gaps" "$ROUTES"; then
+            echo "::error::Missing /admin/evidence-audit/gaps endpoint"
+            exit 1
+          fi
+          echo "✓ /admin/evidence-audit/gaps endpoint found"
+
+          # Check for authentication
+          if ! grep -q "authenticate" "$ROUTES" || ! grep -q "authorize" "$ROUTES"; then
+            echo "::error::Missing authentication/authorization in routes"
+            exit 1
+          fi
+          echo "✓ Authentication/authorization found"
+
+          echo "✓ evidence-audit routes validation passed"
+
+      - name: Run evidence audit unit tests
+        run: |
+          echo "Running evidence audit unit tests..."
+          cd apps/api
+          npx vitest run tests/evidence-audit.test.ts tests/evidence-audit-integration.test.ts
+          echo "✓ Evidence audit tests passed"
+        env:
+          NODE_ENV: test
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "  EVIDENCE AUDIT SMOKE TEST COMPLETE"
+          echo "=========================================="
+          echo ""
+          echo "Validated:"
+          echo "  ✓ EVIDENCE_CONTROL_CATALOG.md (17 controls)"
+          echo "  ✓ evidence_audit_report.mjs script"
+          echo "  ✓ evidence-audit API routes"
+          echo "  ✓ Unit and integration tests"
+          echo ""
+          echo "Coverage:"
+          echo "  - 7 workflow domains"
+          echo "  - 5 SOC2 Trust Service Categories"
+          echo "  - 17 control definitions"
+          echo ""

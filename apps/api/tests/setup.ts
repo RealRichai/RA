@@ -265,6 +265,9 @@ export const mockPrisma = {
   notification: createModelMock(),
   userOrganization: createModelMock(),
   organization: createModelMock(),
+
+  // Evidence models
+  evidenceRecord: createModelMock(),
 };
 
 // Mock Email Service

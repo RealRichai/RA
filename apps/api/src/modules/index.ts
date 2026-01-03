@@ -35,6 +35,7 @@ import { complianceRoutes } from './compliance/routes';
 import { demoRoutes } from './demo/routes';
 import { esignatureRoutes } from './documents/esignature';
 import { documentRoutes } from './documents/routes';
+import { evidenceAuditRoutes } from './evidence-audit/routes';
 import { evidenceRoutes } from './evidence/routes';
 import { guestRoutes } from './guests/routes';
 import { healthRoutes } from './health/routes';
@@ -178,6 +179,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(threeDGSControlAdminRoutes, { prefix: '/admin/3dgs' });
       await api.register(partnerRevenueRoutes);
       await api.register(evidenceRoutes);
+      await api.register(evidenceAuditRoutes, { prefix: '/admin/evidence-audit' });
     },
     { prefix }
   );
