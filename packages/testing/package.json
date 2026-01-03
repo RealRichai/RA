@@ -1,0 +1,43 @@
+{
+  "name": "@realriches/testing",
+  "version": "1.0.0",
+  "description": "Testing utilities including fault injection for chaos engineering",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "seedrandom": "^3.0.5"
+  },
+  "devDependencies": {
+    "@types/seedrandom": "^3.0.8",
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.9"
+  },
+  "peerDependencies": {
+    "@realriches/database": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@realriches/database": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "restricted"
+  }
+}

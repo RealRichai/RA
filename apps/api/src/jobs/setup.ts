@@ -18,6 +18,7 @@ import { PartnerHealthJob } from './partner-health';
 import { PaymentReminderJob } from './payment-reminder';
 import { PolicyExpirationJob } from './policy-expiration';
 import { JobScheduler } from './scheduler';
+import { ShadowDiscrepancyVerifierJob } from './shadow-discrepancy-verifier';
 import { SyndicationSyncJob } from './syndication-sync';
 import { WebhookRetryJob } from './webhook-retry';
 
@@ -63,6 +64,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   scheduler.register(ComplianceAuditJob.getDefinition());
   scheduler.register(DocumentExpirationJob.getDefinition());
   scheduler.register(SyndicationSyncJob.getDefinition());
+  scheduler.register(ShadowDiscrepancyVerifierJob.getDefinition());
 
   // Start the scheduler
   await scheduler.start();
