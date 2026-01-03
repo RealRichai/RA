@@ -1,0 +1,283 @@
+{
+  "common": {
+    "loading": "Chargement...",
+    "error": "Une erreur s'est produite",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "submit": "Soumettre",
+    "back": "Retour",
+    "next": "Suivant",
+    "search": "Rechercher",
+    "close": "Fermer",
+    "confirm": "Confirmer",
+    "yes": "Oui",
+    "no": "Non",
+    "all": "Tous",
+    "none": "Aucun",
+    "view": "Voir",
+    "viewAll": "Voir tout",
+    "more": "Plus",
+    "less": "Moins",
+    "showMore": "Afficher plus",
+    "showLess": "Afficher moins",
+    "required": "Requis",
+    "optional": "Facultatif"
+  },
+  "auth": {
+    "login": "Se connecter",
+    "logout": "Se deconnecter",
+    "register": "S'inscrire",
+    "signIn": "Connexion",
+    "signUp": "Inscription",
+    "signOut": "Deconnexion",
+    "email": "Email",
+    "password": "Mot de passe",
+    "confirmPassword": "Confirmer le mot de passe",
+    "forgotPassword": "Mot de passe oublie?",
+    "resetPassword": "Reinitialiser le mot de passe",
+    "rememberMe": "Se souvenir de moi",
+    "noAccount": "Vous n'avez pas de compte?",
+    "hasAccount": "Vous avez deja un compte?",
+    "createAccount": "Creer un compte",
+    "welcomeBack": "Bon retour",
+    "enterCredentials": "Entrez vos identifiants pour continuer"
+  },
+  "navigation": {
+    "home": "Accueil",
+    "dashboard": "Tableau de bord",
+    "portfolio": "Portefeuille",
+    "analytics": "Analytique",
+    "deals": "Transactions",
+    "listings": "Annonces",
+    "leads": "Prospects",
+    "leases": "Baux",
+    "settings": "Parametres",
+    "profile": "Profil",
+    "help": "Aide",
+    "support": "Support",
+    "properties": "Proprietes",
+    "maintenance": "Maintenance",
+    "payments": "Paiements",
+    "aiAssistant": "Assistant IA",
+    "compliance": "Conformite",
+    "team": "Equipe"
+  },
+  "dashboard": {
+    "title": "Tableau de bord",
+    "welcome": "Bienvenue sur votre tableau de bord",
+    "welcomeBack": "Bon retour, {name}",
+    "overview": "Apercu",
+    "recentActivity": "Activite recente",
+    "quickActions": "Actions rapides",
+    "portfolioStatus": "Voici l'etat de votre portefeuille aujourd'hui.",
+    "stats": {
+      "totalProperties": "Total des proprietes",
+      "activeListings": "Annonces actives",
+      "pendingDeals": "Transactions en attente",
+      "monthlyRevenue": "Revenus mensuels",
+      "totalUnits": "Total des unites",
+      "openWorkOrders": "Ordres de travail ouverts",
+      "occupied": "{rate}% occupe",
+      "collected": "{rate}% encaisse"
+    },
+    "complianceAlerts": "Alertes de conformite",
+    "stayCompliant": "Restez conforme aux reglementations locales",
+    "maintenanceQueue": "File d'attente de maintenance"
+  },
+  "listings": {
+    "title": "Annonces",
+    "create": "Creer une annonce",
+    "edit": "Modifier l'annonce",
+    "view": "Voir l'annonce",
+    "draft": "Brouillon",
+    "published": "Publie",
+    "archived": "Archive",
+    "pending": "En attente",
+    "active": "Actif",
+    "inactive": "Inactif",
+    "bedrooms": "{count, plural, one {# chambre} other {# chambres}}",
+    "bathrooms": "{count, plural, one {# salle de bain} other {# salles de bain}}",
+    "sqft": "{count} pieds carres",
+    "price": "Prix",
+    "rent": "Loyer",
+    "deposit": "Depot",
+    "availableDate": "Date de disponibilite",
+    "leaseTerm": "Duree du bail",
+    "address": "Adresse",
+    "description": "Description",
+    "amenities": "Equipements",
+    "photos": "Photos",
+    "noListings": "Aucune annonce trouvee",
+    "createFirst": "Creez votre premiere annonce",
+    "needsReview": "{count} annonces a revoir"
+  },
+  "properties": {
+    "title": "Proprietes",
+    "addProperty": "Ajouter une propriete",
+    "propertyType": "Type de propriete",
+    "types": {
+      "singleFamily": "Maison individuelle",
+      "multiFamily": "Multifamilial",
+      "condo": "Copropriete",
+      "townhouse": "Maison de ville",
+      "apartment": "Appartement",
+      "commercial": "Commercial",
+      "land": "Terrain"
+    },
+    "units": "{count, plural, one {# unite} other {# unites}}",
+    "occupancy": "Occupation",
+    "vacant": "Vacant",
+    "occupied": "Occupe"
+  },
+  "compliance": {
+    "title": "Conformite",
+    "fairHousingNotice": "Avis sur le logement equitable",
+    "disclosureRequired": "Divulgation requise",
+    "marketCompliance": "Conformite du marche",
+    "fareActCompliance": "Conformite FARE Act",
+    "goodCauseEviction": "Expulsion pour motif valable",
+    "allLeasesCompliant": "Tous les baux sont conformes",
+    "status": {
+      "compliant": "Conforme",
+      "nonCompliant": "Non conforme",
+      "pending": "En cours de revision",
+      "warning": "Avertissement"
+    },
+    "gdpr": {
+      "consent": "Consentement",
+      "dataRetention": "Conservation des donnees",
+      "rightToErasure": "Droit a l'effacement",
+      "dataPortability": "Portabilite des donnees",
+      "consentRequired": "Votre consentement est requis pour continuer",
+      "privacyPolicy": "Politique de confidentialite"
+    }
+  },
+  "disclosures": {
+    "fareAct": {
+      "title": "Avis FARE Act",
+      "content": "En vertu de la loi locale 32 de NYC (FARE Act), les locataires ne sont pas responsables des frais de courtage a moins qu'ils n'aient engage un courtier pour les representer. Ce bien est conforme a toutes les exigences de divulgation."
+    },
+    "leadPaint": {
+      "title": "Divulgation sur la peinture au plomb",
+      "content": "Les logements construits avant 1978 peuvent contenir de la peinture a base de plomb. L'exposition au plomb peut etre nocive, en particulier pour les jeunes enfants. Avant de louer, les proprietaires doivent divulguer les dangers connus lies a la peinture au plomb."
+    },
+    "bedbug": {
+      "title": "Historique des punaises de lit (NYC LL69)",
+      "content": "En vertu de la loi locale 69 de NYC, les proprietaires doivent divulguer l'historique d'infestation de punaises de lit du batiment au cours de l'annee precedente. Cette propriete n'a pas d'infestation connue de punaises de lit."
+    },
+    "fairHousing": {
+      "title": "Egalite des chances en matiere de logement",
+      "content": "Nous ne discriminons pas sur la base de la race, la couleur, la religion, le sexe, l'origine nationale, le handicap ou la situation familiale. Ce bien est disponible selon le principe de l'egalite des chances en matiere de logement."
+    },
+    "goodCauseEviction": {
+      "title": "Expulsion pour motif valable",
+      "content": "En vertu de la loi de l'Etat de New York, les locataires beneficient de certaines protections contre l'expulsion. Les proprietaires doivent avoir un motif valable pour mettre fin a un bail ou expulser un locataire."
+    }
+  },
+  "roles": {
+    "landlord": "Proprietaire",
+    "agent": "Agent immobilier",
+    "tenant": "Locataire",
+    "investor": "Investisseur"
+  },
+  "toasts": {
+    "loginSuccess": {
+      "title": "Bon retour!",
+      "description": "Vous etes connecte avec succes."
+    },
+    "loginFailed": {
+      "title": "Echec de connexion",
+      "description": "Veuillez verifier vos identifiants."
+    },
+    "registerSuccess": {
+      "title": "Compte cree!",
+      "description": "Bienvenue sur RealRiches."
+    },
+    "registerFailed": {
+      "title": "Echec de l'inscription",
+      "description": "Veuillez reessayer."
+    }
+  },
+  "forms": {
+    "firstName": "Prenom",
+    "lastName": "Nom",
+    "fullName": "Nom complet",
+    "email": "Adresse email",
+    "phone": "Numero de telephone",
+    "address": "Adresse",
+    "city": "Ville",
+    "state": "Etat/Region",
+    "postalCode": "Code postal",
+    "country": "Pays",
+    "notes": "Notes",
+    "selectOption": "Selectionnez une option",
+    "enterValue": "Entrez une valeur",
+    "validation": {
+      "required": "Ce champ est requis",
+      "invalidEmail": "Veuillez entrer une adresse email valide",
+      "invalidPhone": "Veuillez entrer un numero de telephone valide",
+      "minLength": "Doit contenir au moins {min} caracteres",
+      "maxLength": "Doit contenir au maximum {max} caracteres",
+      "passwordMismatch": "Les mots de passe ne correspondent pas"
+    }
+  },
+  "errors": {
+    "generic": "Une erreur s'est produite. Veuillez reessayer.",
+    "notFound": "Page non trouvee",
+    "unauthorized": "Vous n'etes pas autorise a acceder a cette page",
+    "serverError": "Erreur serveur. Veuillez reessayer plus tard.",
+    "networkError": "Erreur reseau. Veuillez verifier votre connexion.",
+    "sessionExpired": "Votre session a expire. Veuillez vous reconnecter."
+  },
+  "metadata": {
+    "siteTitle": "RealRiches",
+    "siteDescription": "Plateforme d'investissement immobilier propulsee par l'IA",
+    "homeTitle": "Accueil",
+    "dashboardTitle": "Tableau de bord"
+  },
+  "landing": {
+    "hero": {
+      "title": "Gestion Immobiliere",
+      "titleHighlight": "Propulsee par l'IA",
+      "subtitle": "Simplifiez la gestion immobiliere, automatisez la conformite et maximisez les rendements avec la plateforme immobiliere la plus avancee."
+    },
+    "features": {
+      "complianceAutopilot": {
+        "title": "Conformite Automatique",
+        "description": "Verification automatique de la conformite FARE Act, Good Cause et stabilisation des loyers."
+      },
+      "aiAssistant": {
+        "title": "Assistant Location IA",
+        "description": "Location assistee par IA 24/7 avec transfert de contexte haute fidelite."
+      },
+      "analytics": {
+        "title": "Analytique Intelligente",
+        "description": "Apercu du portefeuille en temps reel et intelligence de marche."
+      },
+      "propertyManagement": {
+        "title": "Gestion Immobiliere",
+        "description": "Tableau de bord God View avec triage de maintenance IA et gestion des fournisseurs."
+      }
+    },
+    "cta": {
+      "getStarted": "Commencer",
+      "requestDemo": "Demander une demo"
+    }
+  },
+  "activity": {
+    "newInquiry": "Nouvelle demande recue",
+    "rentPayment": "Paiement de loyer recu",
+    "workOrderCompleted": "Ordre de travail termine",
+    "hoursAgo": "il y a {hours} heures",
+    "daysAgo": "il y a {days} jours"
+  },
+  "maintenance": {
+    "priority": {
+      "high": "Haute",
+      "medium": "Moyenne",
+      "low": "Basse"
+    }
+  }
+}

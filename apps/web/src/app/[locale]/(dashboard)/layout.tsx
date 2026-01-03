@@ -14,27 +14,29 @@ import {
   Users,
   Shield,
 } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { usePathname } from 'next/navigation';
 import { useEffect } from 'react';
 
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
 
-const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: Home },
-  { name: 'Properties', href: '/dashboard/properties', icon: Building },
-  { name: 'Listings', href: '/dashboard/listings', icon: FileText },
-  { name: 'Leases', href: '/dashboard/leases', icon: FileText },
-  { name: 'Maintenance', href: '/dashboard/maintenance', icon: Wrench },
-  { name: 'Payments', href: '/dashboard/payments', icon: CreditCard },
-  { name: 'AI Assistant', href: '/dashboard/ai', icon: MessageSquare },
-  { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
-  { name: 'Compliance', href: '/dashboard/compliance', icon: Shield },
-  { name: 'Team', href: '/dashboard/team', icon: Users },
-  { name: 'Settings', href: '/dashboard/settings', icon: Settings },
+const navigationItems = [
+  { key: 'dashboard', href: '/dashboard', icon: Home },
+  { key: 'properties', href: '/dashboard/properties', icon: Building },
+  { key: 'listings', href: '/dashboard/listings', icon: FileText },
+  { key: 'leases', href: '/dashboard/leases', icon: FileText },
+  { key: 'maintenance', href: '/dashboard/maintenance', icon: Wrench },
+  { key: 'payments', href: '/dashboard/payments', icon: CreditCard },
+  { key: 'aiAssistant', href: '/dashboard/ai', icon: MessageSquare },
+  { key: 'analytics', href: '/dashboard/analytics', icon: BarChart3 },
+  { key: 'compliance', href: '/dashboard/compliance', icon: Shield },
+  { key: 'team', href: '/dashboard/team', icon: Users },
+  { key: 'settings', href: '/dashboard/settings', icon: Settings },
 ];
 
 export default function DashboardLayout({
@@ -45,6 +47,8 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { user, isAuthenticated, logout } = useAuthStore();
+  const t = useTranslations('navigation');
+  const tAuth = useTranslations('auth');
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -72,11 +76,11 @@ export default function DashboardLayout({
           </Link>
         </div>
         <nav className="flex-1 px-4 space-y-1">
-          {navigation.map((item) => {
+          {navigationItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
               <Link
-                key={item.name}
+                key={item.key}
                 href={item.href}
                 className={cn(
                   'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
@@ -86,12 +90,13 @@ export default function DashboardLayout({
                 )}
               >
                 <item.icon className="h-5 w-5" />
-                {item.name}
+                {t(item.key)}
               </Link>
             );
           })}
         </nav>
-        <div className="p-4 border-t">
+        <div className="p-4 border-t space-y-3">
+          <LanguageSwitcher className="w-full justify-start" />
           <div className="flex items-center gap-3 px-3 py-2">
             <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
               <span className="text-sm font-medium">
@@ -108,11 +113,11 @@ export default function DashboardLayout({
           </div>
           <Button
             variant="ghost"
-            className="w-full justify-start mt-2"
+            className="w-full justify-start"
             onClick={() => void handleLogout()}
           >
             <LogOut className="h-4 w-4 mr-2" />
-            Sign out
+            {tAuth('signOut')}
           </Button>
         </div>
       </aside>

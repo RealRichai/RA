@@ -56,20 +56,35 @@
     "settings": "Configuracion",
     "profile": "Perfil",
     "help": "Ayuda",
-    "support": "Soporte"
+    "support": "Soporte",
+    "properties": "Propiedades",
+    "maintenance": "Mantenimiento",
+    "payments": "Pagos",
+    "aiAssistant": "Asistente IA",
+    "compliance": "Cumplimiento",
+    "team": "Equipo"
   },
   "dashboard": {
     "title": "Panel de Control",
     "welcome": "Bienvenido a tu panel de control",
+    "welcomeBack": "Bienvenido de nuevo, {name}",
     "overview": "Resumen",
     "recentActivity": "Actividad Reciente",
     "quickActions": "Acciones Rapidas",
+    "portfolioStatus": "Esto es lo que esta pasando con tu portafolio hoy.",
     "stats": {
       "totalProperties": "Total de Propiedades",
       "activeListings": "Listados Activos",
       "pendingDeals": "Ofertas Pendientes",
-      "monthlyRevenue": "Ingresos Mensuales"
-    }
+      "monthlyRevenue": "Ingresos Mensuales",
+      "totalUnits": "Total de Unidades",
+      "openWorkOrders": "Ordenes de Trabajo Abiertas",
+      "occupied": "{rate}% ocupado",
+      "collected": "{rate}% cobrado"
+    },
+    "complianceAlerts": "Alertas de Cumplimiento",
+    "stayCompliant": "Mantente en cumplimiento con las regulaciones locales",
+    "maintenanceQueue": "Cola de Mantenimiento"
   },
   "listings": {
     "title": "Listados",
@@ -95,7 +110,8 @@
     "amenities": "Amenidades",
     "photos": "Fotos",
     "noListings": "No se encontraron listados",
-    "createFirst": "Crea tu primer listado"
+    "createFirst": "Crea tu primer listado",
+    "needsReview": "{count} listados necesitan revision"
   },
   "properties": {
     "title": "Propiedades",
@@ -120,6 +136,9 @@
     "fairHousingNotice": "Aviso de Vivienda Justa",
     "disclosureRequired": "Divulgacion Requerida",
     "marketCompliance": "Cumplimiento del Mercado",
+    "fareActCompliance": "Cumplimiento FARE Act",
+    "goodCauseEviction": "Desalojo por Causa Justa",
+    "allLeasesCompliant": "Todos los arrendamientos cumplen",
     "status": {
       "compliant": "Cumple",
       "nonCompliant": "No Cumple",
@@ -133,6 +152,52 @@
       "dataPortability": "Portabilidad de Datos",
       "consentRequired": "Se requiere tu consentimiento para continuar",
       "privacyPolicy": "Politica de Privacidad"
+    }
+  },
+  "disclosures": {
+    "fareAct": {
+      "title": "Aviso FARE Act",
+      "content": "Bajo la Ley Local 32 de NYC (FARE Act), los inquilinos no son responsables de las comisiones del corredor a menos que hayan contratado un corredor para representarlos. Esta propiedad cumple con todos los requisitos de divulgacion."
+    },
+    "leadPaint": {
+      "title": "Divulgacion de Pintura con Plomo",
+      "content": "Las viviendas construidas antes de 1978 pueden contener pintura a base de plomo. La exposicion al plomo puede ser danina, especialmente para los ninos pequenos. Antes de alquilar, los propietarios deben divulgar los peligros conocidos de pintura con plomo."
+    },
+    "bedbug": {
+      "title": "Historial de Chinches (NYC LL69)",
+      "content": "Bajo la Ley Local 69 de NYC, los propietarios deben divulgar el historial de infestacion de chinches del edificio dentro del ano pasado. Esta propiedad no tiene infestacion conocida de chinches."
+    },
+    "fairHousing": {
+      "title": "Igualdad de Oportunidades de Vivienda",
+      "content": "No discriminamos por raza, color, religion, sexo, origen nacional, discapacidad o estado familiar. Esta propiedad esta disponible bajo el principio de igualdad de oportunidades de vivienda."
+    },
+    "goodCauseEviction": {
+      "title": "Desalojo por Causa Justa",
+      "content": "Bajo la ley del Estado de Nueva York, los inquilinos tienen ciertas protecciones contra el desalojo. Los propietarios deben tener una causa justa para terminar un arrendamiento o desalojar a un inquilino."
+    }
+  },
+  "roles": {
+    "landlord": "Propietario / Dueno de Propiedad",
+    "agent": "Agente de Bienes Raices",
+    "tenant": "Inquilino / Arrendatario",
+    "investor": "Inversionista"
+  },
+  "toasts": {
+    "loginSuccess": {
+      "title": "Bienvenido de nuevo!",
+      "description": "Has iniciado sesion exitosamente."
+    },
+    "loginFailed": {
+      "title": "Error al iniciar sesion",
+      "description": "Por favor verifica tus credenciales."
+    },
+    "registerSuccess": {
+      "title": "Cuenta creada!",
+      "description": "Bienvenido a RealRiches."
+    },
+    "registerFailed": {
+      "title": "Error en el registro",
+      "description": "Por favor intenta de nuevo."
     }
   },
   "forms": {
@@ -154,7 +219,8 @@
       "invalidEmail": "Por favor ingresa un correo electronico valido",
       "invalidPhone": "Por favor ingresa un numero de telefono valido",
       "minLength": "Debe tener al menos {min} caracteres",
-      "maxLength": "Debe tener como maximo {max} caracteres"
+      "maxLength": "Debe tener como maximo {max} caracteres",
+      "passwordMismatch": "Las contrasenas no coinciden"
     }
   },
   "errors": {
@@ -170,5 +236,48 @@
     "siteDescription": "Plataforma de inversion inmobiliaria impulsada por IA",
     "homeTitle": "Inicio",
     "dashboardTitle": "Panel de Control"
+  },
+  "landing": {
+    "hero": {
+      "title": "Bienes Raices Impulsados por IA",
+      "titleHighlight": "Gestion",
+      "subtitle": "Simplifica la gestion de propiedades, automatiza el cumplimiento y maximiza los rendimientos con la plataforma inmobiliaria mas avanzada."
+    },
+    "features": {
+      "complianceAutopilot": {
+        "title": "Cumplimiento Automatico",
+        "description": "Verificacion automatica del cumplimiento de FARE Act, Causa Justa y estabilizacion de rentas."
+      },
+      "aiAssistant": {
+        "title": "Asistente de Arrendamiento IA",
+        "description": "Arrendamiento impulsado por IA 24/7 con transferencia de contexto de alta fidelidad."
+      },
+      "analytics": {
+        "title": "Analisis Inteligente",
+        "description": "Informacion del portafolio en tiempo real e inteligencia de mercado."
+      },
+      "propertyManagement": {
+        "title": "Gestion de Propiedades",
+        "description": "Panel God View con triaje de mantenimiento IA y gestion de proveedores."
+      }
+    },
+    "cta": {
+      "getStarted": "Comenzar",
+      "requestDemo": "Solicitar Demo"
+    }
+  },
+  "activity": {
+    "newInquiry": "Nueva consulta recibida",
+    "rentPayment": "Pago de renta recibido",
+    "workOrderCompleted": "Orden de trabajo completada",
+    "hoursAgo": "hace {hours} horas",
+    "daysAgo": "hace {days} dias"
+  },
+  "maintenance": {
+    "priority": {
+      "high": "Alta",
+      "medium": "Media",
+      "low": "Baja"
+    }
   }
 }

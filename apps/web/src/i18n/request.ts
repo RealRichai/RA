@@ -12,6 +12,8 @@ type Messages = Record<string, Record<string, unknown>>;
 
 async function loadMessages(locale: Locale): Promise<Messages> {
   switch (locale) {
+    case 'fr':
+      return (await import('../messages/fr.json')) as Messages;
     case 'es':
       return (await import('../messages/es.json')) as Messages;
     case 'en':

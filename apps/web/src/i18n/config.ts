@@ -4,7 +4,7 @@
  * Defines supported locales and default locale for the application.
  */
 
-export const locales = ['en', 'es'] as const;
+export const locales = ['en', 'es', 'fr'] as const;
 export type Locale = (typeof locales)[number];
 
 export const defaultLocale: Locale = 'en';
@@ -15,6 +15,16 @@ export const defaultLocale: Locale = 'en';
 export const localeNames: Record<Locale, string> = {
   en: 'English',
   es: 'Espanol',
+  fr: 'Francais',
+};
+
+/**
+ * Flag emojis for each locale
+ */
+export const localeFlags: Record<Locale, string> = {
+  en: '\ud83c\uddfa\ud83c\uddf8',
+  es: '\ud83c\uddea\ud83c\uddf8',
+  fr: '\ud83c\uddeb\ud83c\uddf7',
 };
 
 /**

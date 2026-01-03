@@ -56,20 +56,35 @@
     "settings": "Settings",
     "profile": "Profile",
     "help": "Help",
-    "support": "Support"
+    "support": "Support",
+    "properties": "Properties",
+    "maintenance": "Maintenance",
+    "payments": "Payments",
+    "aiAssistant": "AI Assistant",
+    "compliance": "Compliance",
+    "team": "Team"
   },
   "dashboard": {
     "title": "Dashboard",
     "welcome": "Welcome to your dashboard",
+    "welcomeBack": "Welcome back, {name}",
     "overview": "Overview",
     "recentActivity": "Recent Activity",
     "quickActions": "Quick Actions",
+    "portfolioStatus": "Here's what's happening with your portfolio today.",
     "stats": {
       "totalProperties": "Total Properties",
       "activeListings": "Active Listings",
       "pendingDeals": "Pending Deals",
-      "monthlyRevenue": "Monthly Revenue"
-    }
+      "monthlyRevenue": "Monthly Revenue",
+      "totalUnits": "Total Units",
+      "openWorkOrders": "Open Work Orders",
+      "occupied": "{rate}% occupied",
+      "collected": "{rate}% collected"
+    },
+    "complianceAlerts": "Compliance Alerts",
+    "stayCompliant": "Stay compliant with local regulations",
+    "maintenanceQueue": "Maintenance Queue"
   },
   "listings": {
     "title": "Listings",
@@ -95,7 +110,8 @@
     "amenities": "Amenities",
     "photos": "Photos",
     "noListings": "No listings found",
-    "createFirst": "Create your first listing"
+    "createFirst": "Create your first listing",
+    "needsReview": "{count} listings need review"
   },
   "properties": {
     "title": "Properties",
@@ -120,6 +136,9 @@
     "fairHousingNotice": "Fair Housing Notice",
     "disclosureRequired": "Disclosure Required",
     "marketCompliance": "Market Compliance",
+    "fareActCompliance": "FARE Act Compliance",
+    "goodCauseEviction": "Good Cause Eviction",
+    "allLeasesCompliant": "All leases compliant",
     "status": {
       "compliant": "Compliant",
       "nonCompliant": "Non-Compliant",
@@ -133,6 +152,52 @@
       "dataPortability": "Data Portability",
       "consentRequired": "Your consent is required to proceed",
       "privacyPolicy": "Privacy Policy"
+    }
+  },
+  "disclosures": {
+    "fareAct": {
+      "title": "FARE Act Notice",
+      "content": "Under NYC Local Law 32 (FARE Act), tenants are not responsible for broker fees unless they engaged a broker to represent them. This property complies with all disclosure requirements."
+    },
+    "leadPaint": {
+      "title": "Lead Paint Disclosure",
+      "content": "Housing built before 1978 may contain lead-based paint. Lead exposure can be harmful, especially to young children. Before renting, landlords must disclose known lead-based paint hazards."
+    },
+    "bedbug": {
+      "title": "Bedbug History (NYC LL69)",
+      "content": "Under NYC Local Law 69, landlords must disclose the building's bedbug infestation history within the past year. This property has no known bedbug infestation."
+    },
+    "fairHousing": {
+      "title": "Equal Housing Opportunity",
+      "content": "We do not discriminate based on race, color, religion, sex, national origin, disability, or familial status. This property is available on an equal housing opportunity basis."
+    },
+    "goodCauseEviction": {
+      "title": "Good Cause Eviction",
+      "content": "Under New York State law, tenants have certain protections against eviction. Landlords must have good cause to terminate a lease or evict a tenant."
+    }
+  },
+  "roles": {
+    "landlord": "Landlord / Property Owner",
+    "agent": "Real Estate Agent",
+    "tenant": "Tenant / Renter",
+    "investor": "Investor"
+  },
+  "toasts": {
+    "loginSuccess": {
+      "title": "Welcome back!",
+      "description": "You have been logged in successfully."
+    },
+    "loginFailed": {
+      "title": "Login failed",
+      "description": "Please check your credentials."
+    },
+    "registerSuccess": {
+      "title": "Account created!",
+      "description": "Welcome to RealRiches."
+    },
+    "registerFailed": {
+      "title": "Registration failed",
+      "description": "Please try again."
     }
   },
   "forms": {
@@ -154,7 +219,8 @@
       "invalidEmail": "Please enter a valid email address",
       "invalidPhone": "Please enter a valid phone number",
       "minLength": "Must be at least {min} characters",
-      "maxLength": "Must be no more than {max} characters"
+      "maxLength": "Must be no more than {max} characters",
+      "passwordMismatch": "Passwords don't match"
     }
   },
   "errors": {
@@ -170,5 +236,48 @@
     "siteDescription": "AI-powered real estate investment platform",
     "homeTitle": "Home",
     "dashboardTitle": "Dashboard"
+  },
+  "landing": {
+    "hero": {
+      "title": "AI-Powered Real Estate",
+      "titleHighlight": "Management",
+      "subtitle": "Streamline property management, automate compliance, and maximize returns with the most advanced real estate platform."
+    },
+    "features": {
+      "complianceAutopilot": {
+        "title": "Compliance Autopilot",
+        "description": "Automatic FARE Act, Good Cause, and rent stabilization compliance checking."
+      },
+      "aiAssistant": {
+        "title": "AI Leasing Assistant",
+        "description": "24/7 AI-powered leasing with high-fidelity context transfer."
+      },
+      "analytics": {
+        "title": "Smart Analytics",
+        "description": "Real-time portfolio insights and market intelligence."
+      },
+      "propertyManagement": {
+        "title": "Property Management",
+        "description": "God View dashboard with AI maintenance triage and vendor management."
+      }
+    },
+    "cta": {
+      "getStarted": "Get Started",
+      "requestDemo": "Request Demo"
+    }
+  },
+  "activity": {
+    "newInquiry": "New inquiry received",
+    "rentPayment": "Rent payment received",
+    "workOrderCompleted": "Work order completed",
+    "hoursAgo": "{hours} hours ago",
+    "daysAgo": "{days} days ago"
+  },
+  "maintenance": {
+    "priority": {
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    }
   }
 }
