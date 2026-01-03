@@ -1,0 +1,58 @@
+{
+  "$schema": "./baselines.schema.json",
+  "version": "1.0.0",
+  "updated": "2026-01-03",
+  "approvedBy": "platform-team",
+  "note": "Baseline thresholds for performance regression detection. Update requires approval.",
+  "thresholds": {
+    "listing_search": {
+      "p95": 200,
+      "p99": 350,
+      "maxFailRate": 0.01,
+      "description": "Listing search endpoint - filters and pagination"
+    },
+    "listing_publish": {
+      "p95": 500,
+      "p99": 800,
+      "maxFailRate": 0.01,
+      "description": "Listing publish with compliance gate validation"
+    },
+    "application_submit": {
+      "p95": 300,
+      "p99": 500,
+      "maxFailRate": 0.01,
+      "description": "Application submission and initial FCHA transition"
+    },
+    "fcha_transition": {
+      "p95": 150,
+      "p99": 250,
+      "maxFailRate": 0.01,
+      "description": "FCHA state machine transitions"
+    },
+    "signed_url_vault": {
+      "p95": 100,
+      "p99": 200,
+      "maxFailRate": 0.01,
+      "description": "Vault signed URL generation for documents"
+    },
+    "signed_url_tour": {
+      "p95": 100,
+      "p99": 200,
+      "maxFailRate": 0.01,
+      "description": "Tour delivery signed URL generation"
+    }
+  },
+  "regressionThreshold": 0.20,
+  "smokeConfig": {
+    "vus": 5,
+    "duration": "30s",
+    "iterations": 100
+  },
+  "loadConfig": {
+    "stages": [
+      { "duration": "1m", "target": 20 },
+      { "duration": "3m", "target": 20 },
+      { "duration": "1m", "target": 0 }
+    ]
+  }
+}

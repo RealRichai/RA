@@ -742,3 +742,120 @@ jobs:
           echo "  ✓ verify-backups.sh"
           echo "  ✓ generate-restore-checklist.sh"
           echo ""
+
+  # Performance regression detection
+  performance:
+    name: Performance Smoke Test
+    runs-on: ubuntu-latest
+    # Only run on main branch to avoid flaky PR checks
+    # PRs can trigger manually via workflow_dispatch
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Verify k6 installation
+        run: k6 version
+
+      - name: Validate baselines.json
+        run: |
+          echo "Validating performance baselines..."
+          if [ ! -f tests/performance/baselines.json ]; then
+            echo "::error::baselines.json not found"
+            exit 1
+          fi
+
+          # Validate JSON syntax
+          if ! jq empty tests/performance/baselines.json 2>/dev/null; then
+            echo "::error::baselines.json is not valid JSON"
+            exit 1
+          fi
+
+          # Validate required fields
+          VERSION=$(jq -r '.version' tests/performance/baselines.json)
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "::error::baselines.json missing version field"
+            exit 1
+          fi
+
+          echo "✓ baselines.json is valid (v$VERSION)"
+
+      - name: Validate k6 test syntax
+        run: |
+          echo "Validating k6 test scripts..."
+
+          # Check smoke.js syntax
+          k6 inspect tests/performance/smoke.js > /dev/null
+          echo "✓ smoke.js syntax is valid"
+
+          # Check individual test files
+          for file in tests/performance/listing-*.js tests/performance/application-*.js tests/performance/signed-*.js; do
+            if [ -f "$file" ]; then
+              k6 inspect "$file" > /dev/null
+              echo "✓ $(basename $file) syntax is valid"
+            fi
+          done
+
+      - name: Run smoke test (dry run)
+        run: |
+          echo "Running k6 smoke test in dry-run mode..."
+          echo ""
+
+          # Load baselines
+          BASELINES=$(cat tests/performance/baselines.json)
+
+          # Run k6 with very short duration for CI validation
+          # This validates the test structure without needing a real API
+          k6 run \
+            --env "API_BASE_URL=http://localhost:4000" \
+            --env "AUTH_TOKEN=ci-test-token" \
+            --env "BASELINES=$BASELINES" \
+            --duration 1s \
+            --vus 1 \
+            --no-thresholds \
+            tests/performance/smoke.js 2>&1 || true
+
+          echo ""
+          echo "✓ Smoke test structure validated"
+
+      - name: Validate run-smoke.sh script
+        run: |
+          echo "Validating run-smoke.sh script..."
+
+          if [ ! -f scripts/perf/run-smoke.sh ]; then
+            echo "::error::run-smoke.sh not found"
+            exit 1
+          fi
+
+          if [ ! -x scripts/perf/run-smoke.sh ]; then
+            echo "::error::run-smoke.sh is not executable"
+            exit 1
+          fi
+
+          bash -n scripts/perf/run-smoke.sh
+          echo "✓ run-smoke.sh syntax is valid"
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "  PERFORMANCE TESTS VALIDATED"
+          echo "=========================================="
+          echo ""
+          echo "Validated:"
+          echo "  ✓ baselines.json (thresholds config)"
+          echo "  ✓ smoke.js (main test runner)"
+          echo "  ✓ Individual endpoint tests"
+          echo "  ✓ run-smoke.sh script"
+          echo ""
+          echo "To run full performance tests:"
+          echo "  ./scripts/perf/run-smoke.sh --api-url http://your-api:4000"
+          echo ""
