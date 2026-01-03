@@ -1089,6 +1089,13 @@ jobs:
           cd packages/testing
           NODE_ENV=test npx vitest run --reporter=verbose
 
+      - name: Build packages for shadow-write tests
+        run: |
+          # Build shared packages that shadow-write tests depend on
+          pnpm --filter @realriches/config build
+          pnpm --filter @realriches/database build
+          pnpm --filter @realriches/utils build
+
       - name: Run shadow-write tests with chaos disabled
         run: |
           cd apps/api
