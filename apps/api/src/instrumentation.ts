@@ -12,15 +12,15 @@
  * - OTEL_LOG_LEVEL: SDK log level (default: info)
  */
 
-import { NodeSDK } from '@opentelemetry/sdk-node';
+import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
+import { NodeSDK } from '@opentelemetry/sdk-node';
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
   SEMRESATTRS_DEPLOYMENT_ENVIRONMENT,
 } from '@opentelemetry/semantic-conventions';
-import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
 
 // =============================================================================
 // Configuration
