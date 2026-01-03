@@ -1,7 +1,7 @@
 # Master Implementation Ledger
 
 > **Version:** 1.0.0
-> **Last Updated:** 2026-01-01
+> **Last Updated:** 2026-01-03
 > **Audit Commit:** 0e8e8637b2138317c4793fb8a7b641d202f8847b
 > **Branch:** main
 
@@ -409,6 +409,20 @@ This document serves as the single source of truth for feature implementation st
 | DLQ Alerts | Email delivery failure alerts | Global | `@realriches/email-service` | **Implemented** | `packages/email-service/src/queue/dlq-handler.ts` | `packages/email-service/src/__tests__/queue.test.ts` |
 | External Alerting | PagerDuty/Slack integration | Global | N/A | **Partial** | Slack in deploy workflow | N/A |
 
+### 11.4 OpenTelemetry Distributed Tracing
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| OTEL SDK Initialization | Pre-module SDK setup with auto-initialize | Global | `@realriches/api` | **Implemented** | `apps/api/src/instrumentation.ts` | `apps/api/tests/otel.test.ts` |
+| OTLP Trace Exporter | HTTP export to OTLP collector (Jaeger, Tempo, etc.) | Global | `@realriches/api` | **Implemented** | `apps/api/src/instrumentation.ts:112-123` | `apps/api/tests/otel.test.ts` |
+| Resource Attributes | service.name, service.version, deployment.environment | Global | `@realriches/api` | **Implemented** | `apps/api/src/instrumentation.ts:106-110` | `apps/api/tests/otel.test.ts` |
+| HTTP Span Plugin | Automatic span creation for HTTP requests | Global | `@realriches/api` | **Implemented** | `apps/api/src/plugins/otel.ts` | `apps/api/tests/otel.test.ts` |
+| Request-ID Correlation | Trace/span IDs linked to Pino request logs | Global | `@realriches/api` | **Implemented** | `apps/api/src/plugins/otel.ts:73-78` | `apps/api/tests/otel.test.ts` |
+| Graceful Shutdown | Span flushing on application shutdown | Global | `@realriches/api` | **Implemented** | `apps/api/src/lib/shutdown.ts`, `apps/api/src/instrumentation.ts:146-155` | `apps/api/tests/otel.test.ts` |
+| Environment Config | OTEL_ENABLED, OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT | Global | `@realriches/api` | **Implemented** | `apps/api/src/instrumentation.ts:39-73` | `apps/api/tests/otel.test.ts` |
+| Tree-Shakable | Zero overhead when OTEL disabled | Global | `@realriches/api` | **Implemented** | `apps/api/src/instrumentation.ts:93-100` | `apps/api/tests/otel.test.ts` |
+| Ignored Paths | /health, /metrics, /favicon.ico excluded from tracing | Global | `@realriches/api` | **Implemented** | `apps/api/src/plugins/index.ts:38-41` | N/A |
+
 ---
 
 ## 12. Workflows
@@ -526,12 +540,12 @@ This document serves as the single source of truth for feature implementation st
 | Mobile | 2 | 0 | 3 | 5 |
 | Security/SOC2 | 12 | 0 | 0 | 12 |
 | Multi-Market/i18n | 6 | 0 | 1 | 7 |
-| Observability | 6 | 1 | 2 | 9 |
+| Observability | 15 | 1 | 0 | 16 |
 | Workflows | 7 | 0 | 0 | 7 |
 | Email Service | 11 | 0 | 0 | 11 |
 | Partner Contracts | 9 | 0 | 0 | 9 |
 | Feature Flags | 4 | 0 | 0 | 4 |
-| **TOTAL** | **162** | **1** | **6** | **169** |
+| **TOTAL** | **171** | **1** | **4** | **176** |
 
 ---
 
