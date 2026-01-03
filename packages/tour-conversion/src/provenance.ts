@@ -7,8 +7,9 @@
  * SOC2 Control: PI1.2 - Processing integrity and completeness
  */
 
-import { computeFileChecksum, computeFileMetadata, verifyChecksum } from './checksum';
 import { logger } from '@realriches/utils';
+
+import { computeFileChecksum, computeFileMetadata, verifyChecksum } from './checksum';
 
 // =============================================================================
 // Types

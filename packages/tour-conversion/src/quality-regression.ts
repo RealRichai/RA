@@ -7,8 +7,7 @@
  * Used in CI to fail builds if conversion quality drops.
  */
 
-import { computePHash, pHashDistance, runQA, meetsQualityThreshold } from './qa';
-import { computeFileChecksum } from './checksum';
+import { pHashDistance, runQA, meetsQualityThreshold } from './qa';
 import type { QAReport } from './types';
 
 // =============================================================================

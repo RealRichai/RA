@@ -69,7 +69,13 @@ export class PlyRetentionGuard {
     this.config = {
       overrideEnvVar: config.overrideEnvVar ?? 'PLY_DELETE_OVERRIDE',
       emitEvidence: config.emitEvidence ?? true,
-      evidenceEmitter: config.evidenceEmitter ?? this.defaultEvidenceEmitter,
+      evidenceEmitter: config.evidenceEmitter ?? ((event: RetentionEvidenceEvent) => {
+        // Default evidence emitter logs to structured log
+        logger.info({
+          msg: 'ply_retention_evidence',
+          ...event,
+        });
+      }),
     };
   }
 
@@ -171,17 +177,6 @@ export class PlyRetentionGuard {
         error: err instanceof Error ? err.message : 'Unknown error',
       });
     }
-  }
-
-  /**
-   * Default evidence emitter (logs to structured log)
-   * In production, this should be replaced with the actual EvidenceService
-   */
-  private defaultEvidenceEmitter(event: RetentionEvidenceEvent): void {
-    logger.info({
-      msg: 'ply_retention_evidence',
-      ...event,
-    });
   }
 }
 
