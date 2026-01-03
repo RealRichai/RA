@@ -1057,9 +1057,9 @@ jobs:
         run: |
           echo "Running evidence audit unit tests..."
           cd apps/api
-          # Only run unit tests here (no database needed)
+          # Use dedicated config that doesn't load setup.ts (which triggers DB init)
           # Integration tests run in the Unit Tests job which has database services
-          NODE_ENV=test npx vitest run tests/evidence-audit.test.ts --reporter=verbose
+          NODE_ENV=test npx vitest run --config vitest.evidence-audit.config.ts --reporter=verbose
           echo "✓ Evidence audit tests passed"
 
       - name: Summary
