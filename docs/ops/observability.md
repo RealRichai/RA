@@ -312,4 +312,196 @@ Structured JSON logging via Pino. See `packages/utils/src/logger.ts`.
 
 ## Tracing
 
-Distributed tracing via the tracing plugin. See `apps/api/src/plugins/tracing.ts`.
+The API supports distributed tracing using OpenTelemetry (OTEL) with OTLP export.
+
+### Enabling OpenTelemetry
+
+Tracing is controlled via environment variables:
+
+```bash
+# Required to enable tracing
+OTEL_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+
+# Optional configuration
+OTEL_SERVICE_NAME=realriches-api          # Default: realriches-api
+OTEL_TRACES_EXPORTER=otlp                  # Default: otlp (options: otlp, console, none)
+OTEL_LOG_LEVEL=info                        # Default: info (options: none, error, warn, info, debug, verbose)
+```
+
+In production, tracing auto-enables when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+
+### Resource Attributes
+
+The following attributes are added to all spans:
+
+| Attribute | Value | Description |
+|-----------|-------|-------------|
+| `service.name` | `OTEL_SERVICE_NAME` or `realriches-api` | Service identifier |
+| `service.version` | `package.json version` | API version |
+| `deployment.environment` | `NODE_ENV` | Environment (production, staging, development) |
+
+### HTTP Span Attributes
+
+Each HTTP request span includes:
+
+| Attribute | Example | Description |
+|-----------|---------|-------------|
+| `http.method` | `GET` | HTTP method |
+| `http.url` | `/api/properties/123` | Full request URL |
+| `http.route` | `/api/properties/:id` | Route pattern |
+| `http.host` | `api.realriches.com` | Request host |
+| `http.user_agent` | `Mozilla/5.0...` | User agent string |
+| `http.status_code` | `200` | Response status code |
+| `http.response_time_ms` | `45.2` | Response time in milliseconds |
+| `http.request_id` | `req-abc123` | Fastify request ID |
+| `request.id` | `req-abc123` | Correlation ID for logs |
+
+### Request-ID Correlation
+
+Trace IDs are correlated with request IDs in logs for easy debugging:
+
+```json
+{
+  "level": "info",
+  "requestId": "req-abc123",
+  "trace.id": "a1b2c3d4e5f6789012345678901234567",
+  "span.id": "abcd1234efgh5678",
+  "service.name": "realriches-api",
+  "msg": "Request processed"
+}
+```
+
+### OTLP Collector Configuration
+
+#### Jaeger
+
+```yaml
+# docker-compose.yml
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    ports:
+      - "16686:16686"  # UI
+      - "4318:4318"    # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+```
+
+```bash
+# API environment
+OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+```
+
+#### Grafana Tempo
+
+```yaml
+# docker-compose.yml
+services:
+  tempo:
+    image: grafana/tempo:2.3.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    ports:
+      - "4318:4318"
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+```
+
+```yaml
+# tempo.yaml
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /tmp/tempo/blocks
+```
+
+#### AWS X-Ray (via ADOT Collector)
+
+```yaml
+# docker-compose.yml
+services:
+  adot-collector:
+    image: amazon/aws-otel-collector:latest
+    command: ["--config=/etc/otel-config.yaml"]
+    environment:
+      - AWS_REGION=us-east-1
+    ports:
+      - "4318:4318"
+```
+
+### Ignored Paths
+
+The following paths are excluded from tracing to reduce noise:
+
+- `/health`
+- `/health/live`
+- `/health/ready`
+- `/metrics`
+- `/favicon.ico`
+
+### Custom Spans
+
+Create custom spans for application-level instrumentation:
+
+```typescript
+// In route handler
+app.get('/api/complex-operation', async (request, reply) => {
+  // Create a child span
+  const span = app.otel.createSpan('database-query');
+
+  try {
+    // Your code here
+    span.setAttributes({ 'db.statement': 'SELECT...' });
+  } finally {
+    span.end();
+  }
+});
+```
+
+### Legacy Tracing Headers
+
+For backwards compatibility, the API also supports custom trace headers via the tracing plugin:
+
+| Header | Description |
+|--------|-------------|
+| `X-Trace-ID` | Trace identifier |
+| `X-Span-ID` | Span identifier |
+| `X-Parent-Span-ID` | Parent span for distributed traces |
+
+See `apps/api/src/plugins/tracing.ts` for the legacy implementation.
+
+### Testing
+
+Run OTEL smoke tests:
+
+```bash
+cd apps/api
+NODE_ENV=test npx vitest run --config vitest.otel.config.ts
+```
+
+### Troubleshooting
+
+**Tracing not working?**
+1. Check `OTEL_ENABLED=true` is set
+2. Verify `OTEL_EXPORTER_OTLP_ENDPOINT` points to a valid collector
+3. Set `OTEL_LOG_LEVEL=debug` for detailed initialization logs
+
+**High cardinality warnings?**
+- Routes are normalized (`:id` placeholders) to prevent cardinality explosion
+- Query strings are stripped from URLs
+- Consider increasing `ignorePaths` in plugin config
+
+**Performance impact?**
+- Minimal overhead (~1-2ms per request)
+- Spans are batched before export
+- Use sampling for high-traffic production environments

@@ -1,3 +1,7 @@
+// IMPORTANT: Instrumentation must be imported FIRST before any other modules
+// This ensures OpenTelemetry can instrument all packages correctly
+import './instrumentation';
+
 import { getConfig } from '@realriches/config';
 import { prisma, checkConnection } from '@realriches/database';
 import { logger } from '@realriches/utils';

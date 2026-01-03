@@ -11,6 +11,7 @@ export default defineConfig({
       'tests/transactions.test.ts',
       'tests/transactions-integration.test.ts',
       'tests/metrics.test.ts',
+      'tests/otel.test.ts',
     ],
     coverage: {
       provider: 'v8',

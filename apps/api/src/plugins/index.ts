@@ -20,6 +20,7 @@ import { jobsPlugin } from './jobs';
 import { metricsPlugin } from './metrics';
 import { planEnforcementPlugin } from './plan-enforcement';
 import { prismaPlugin } from './prisma';
+import { otelPlugin } from './otel';
 import { rateLimitPlugin } from './rate-limit';
 import rawBodyPlugin from './raw-body';
 import { redisPlugin } from './redis';
@@ -32,7 +33,14 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
   // Must be registered before other content type parsers
   await app.register(rawBodyPlugin);
 
-  // Request tracing (early registration for trace context availability)
+  // OpenTelemetry (must be registered early to capture all requests)
+  // Enabled via OTEL_ENABLED=true and OTEL_EXPORTER_OTLP_ENDPOINT env vars
+  await app.register(otelPlugin, {
+    ignorePaths: ['/health', '/health/live', '/health/ready', '/metrics', '/favicon.ico'],
+    includeHeaders: false, // Set to true to include headers in spans (adds overhead)
+  });
+
+  // Request tracing (legacy/custom tracing for X-Trace-ID headers)
   await app.register(tracingPlugin, {
     enabled: true,
     serviceName: 'realriches-api',

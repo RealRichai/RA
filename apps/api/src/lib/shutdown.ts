@@ -2,6 +2,8 @@ import { prisma } from '@realriches/database';
 import { logger } from '@realriches/utils';
 import type { FastifyInstance } from 'fastify';
 
+import { shutdownOtel } from '../instrumentation';
+
 export function setupGracefulShutdown(app: FastifyInstance): void {
   const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGQUIT'];
 
@@ -32,6 +34,11 @@ export function setupGracefulShutdown(app: FastifyInstance): void {
       logger.info('Closing database connection...');
       await prisma.$disconnect();
       logger.info('Database connection closed');
+
+      // Shutdown OpenTelemetry (flush pending spans)
+      logger.info('Shutting down OpenTelemetry...');
+      await shutdownOtel();
+      logger.info('OpenTelemetry shutdown complete');
 
       clearTimeout(forceShutdownTimeout);
       logger.info('Graceful shutdown completed');

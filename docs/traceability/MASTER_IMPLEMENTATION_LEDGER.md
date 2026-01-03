@@ -399,7 +399,7 @@ This document serves as the single source of truth for feature implementation st
 | Agent Dashboard | AI agent metrics | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/control-tower/dashboard.ts` | N/A |
 | Tour Metering | 3D tour usage analytics | Global | `@realriches/tour-delivery` | **Implemented** | `packages/tour-delivery/src/metering.ts` | `packages/tour-delivery/src/__tests__/service.test.ts` |
 | Prometheus Metrics | /metrics endpoint with auth (ADMIN/token), HTTP+process metrics | Global | `apps/api/src/plugins/metrics.ts` | **Implemented** | `apps/api/src/plugins/metrics.ts`, `docs/ops/observability.md` | `apps/api/tests/metrics.test.ts` |
-| Distributed Tracing | OpenTelemetry integration | Global | N/A | **Missing** | N/A | N/A |
+| Distributed Tracing | OpenTelemetry with OTLP export | Global | `@realriches/api` | **Implemented** | `apps/api/src/instrumentation.ts`, `apps/api/src/plugins/otel.ts` | `apps/api/tests/otel.test.ts` |
 
 ### 11.3 Alerting
 
