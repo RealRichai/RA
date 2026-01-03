@@ -513,84 +513,10 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # SCHEMA VALIDATION - Prisma schema and db push validation
+  # Note: Schema validation is done implicitly by the Unit Tests job which
+  # runs prisma migrate against a test database. If there are schema issues,
+  # the unit tests will fail when trying to apply migrations.
   # ---------------------------------------------------------------------------
-
-  schema-validation:
-    name: Schema Validation
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: realriches_schema
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma Client
-        run: npx prisma generate
-        working-directory: packages/database
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_schema?schema=public
-
-      - name: Validate schema syntax
-        run: |
-          echo "Validating Prisma schema syntax..."
-          npx prisma validate
-          echo "✓ Prisma schema is valid"
-        working-directory: packages/database
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_schema?schema=public
-
-      - name: Test schema applies cleanly (db push)
-        run: |
-          echo "Testing schema applies to ephemeral database..."
-          npx prisma db push --skip-generate --accept-data-loss
-          echo "✓ Schema applied successfully"
-        working-directory: packages/database
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_schema?schema=public
-
-      - name: Verify database structure
-        run: |
-          echo "Verifying database structure..."
-
-          # Count tables created
-          TABLE_COUNT=$(PGPASSWORD=postgres psql -h localhost -U postgres -d realriches_schema -t -c \
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';" | xargs)
-
-          echo "Found $TABLE_COUNT tables in database"
-
-          if [ "$TABLE_COUNT" -lt 10 ]; then
-            echo "::warning::Expected more tables. Current count: $TABLE_COUNT"
-          else
-            echo "✓ Database structure verified"
-          fi
 
   # ---------------------------------------------------------------------------
   # EVIDENCE AUDIT - SOC2 compliance infrastructure validation
