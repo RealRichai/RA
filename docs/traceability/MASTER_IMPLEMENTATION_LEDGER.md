@@ -301,6 +301,8 @@ This document serves as the single source of truth for feature implementation st
 | Feature Detection | WebGPU/WebGL2 capability check | `TOUR_WEBGPU_VIEWER` | `@realriches/web` | **Implemented** | `apps/web/src/components/tour/SplatViewer.tsx` | N/A |
 | FPS Tracking | Performance monitoring | `TOUR_WEBGPU_VIEWER` | `@realriches/web` | **Implemented** | `apps/web/src/components/tour/SplatViewer.tsx` | N/A |
 | Mobile Touch Controls | Touch gesture support | `TOUR_WEBGPU_VIEWER` | `@realriches/web` | **Implemented** | `apps/web/src/components/tour/SplatViewer.tsx` | N/A |
+| Local Demo Assets | Bundled PLY demo files with graceful fallback | `TOUR_WEBGPU_VIEWER` | `@realriches/web` | **Implemented** | `apps/web/public/demo/sog/`, `apps/web/src/app/[locale]/debug/tour-demo/page.tsx` | `apps/web/src/__tests__/tour-demo.test.ts` |
+| Demo Asset Generator | Script to regenerate demo SOG assets | `TOUR_WEBGPU_VIEWER` | Root | **Implemented** | `scripts/generate_demo_assets.ts` | `apps/web/src/__tests__/tour-demo.test.ts` |
 
 ---
 
@@ -378,7 +380,11 @@ This document serves as the single source of truth for feature implementation st
 | Currency Formatting | Intl.NumberFormat | Global | `@realriches/utils` | **Implemented** | `packages/utils/src/money.ts` | N/A |
 | Date Formatting | Locale-aware dates | Global | `@realriches/utils` | **Implemented** | `packages/utils/src/date.ts` | N/A |
 | UK Market (GDPR) | UK-specific compliance | `UK_GDPR` | `@realriches/compliance-engine` | **Implemented** | `packages/compliance-engine/src/market-packs.ts:230-317` | `packages/compliance-engine/src/__tests__/rules.test.ts` |
-| Full i18n System | Translation files, locale switching | Global | N/A | **Missing** | N/A | N/A |
+| next-intl Integration | App Router i18n with [locale] routing | Global | `@realriches/web` | **Implemented** | `apps/web/src/i18n/`, `apps/web/src/middleware.ts` | `apps/web/src/__tests__/i18n.test.ts` |
+| Language Switcher | Locale dropdown with flag icons | Global | `@realriches/web` | **Implemented** | `apps/web/src/components/LanguageSwitcher.tsx` | `apps/web/src/__tests__/i18n.test.ts` |
+| Message Files (en/es/fr) | Full UI translations for 3 locales | Global | `@realriches/web` | **Implemented** | `apps/web/src/messages/en.json`, `es.json`, `fr.json` | `apps/web/src/__tests__/i18n.test.ts` |
+| Locale-Aware Formatters | formatCurrency, formatDate, formatNumber, formatPercent | Global | `@realriches/web` | **Implemented** | `apps/web/src/lib/formatting.ts`, `apps/web/src/hooks/useFormatters.ts` | `apps/web/src/__tests__/formatting.test.ts` |
+| Compliance Disclosures i18n | FARE Act, Lead Paint, Fair Housing translations | Global | `@realriches/web` | **Implemented** | `apps/web/src/messages/*.json` (disclosures namespace) | `apps/web/src/__tests__/i18n.test.ts` |
 
 ---
 
@@ -573,17 +579,17 @@ This document serves as the single source of truth for feature implementation st
 | AI Agents | 16 | 0 | 0 | 16 |
 | Agent Governance | 11 | 0 | 0 | 11 |
 | Media Generation | 9 | 0 | 0 | 9 |
-| 3D Tours | 14 | 0 | 0 | 14 |
+| 3D Tours | 16 | 0 | 0 | 16 |
 | Mobile | 2 | 0 | 3 | 5 |
 | Security/SOC2 | 12 | 0 | 0 | 12 |
-| Multi-Market/i18n | 6 | 0 | 1 | 7 |
+| Multi-Market/i18n | 11 | 0 | 0 | 11 |
 | Observability | 15 | 1 | 0 | 16 |
 | Workflows | 7 | 0 | 0 | 7 |
 | Email Service | 11 | 0 | 0 | 11 |
 | Partner Contracts | 9 | 0 | 0 | 9 |
 | Feature Flags | 4 | 0 | 0 | 4 |
 | Testing Infrastructure | 18 | 0 | 0 | 18 |
-| **TOTAL** | **189** | **1** | **4** | **194** |
+| **TOTAL** | **196** | **1** | **3** | **200** |
 
 ---
 
