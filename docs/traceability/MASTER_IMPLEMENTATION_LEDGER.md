@@ -203,17 +203,17 @@ This document serves as the single source of truth for feature implementation st
 | Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
 |---------|-------------|-------------|---------|--------|----------|-------|
 | Kill Switch Manager | Emergency control system (6 scopes) | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/control-tower/kill-switch.ts` | `packages/agent-governance/tests/kill-switch.test.ts` |
-| Dashboard Service | Agent metrics, cost breakdown, alerts | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/control-tower/dashboard.ts` | N/A |
-| Replay System | Agent run replay capability | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/control-tower/replay.ts` | N/A |
+| Dashboard Service | Agent metrics, cost breakdown, alerts | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/control-tower/dashboard.ts` | `packages/agent-governance/tests/agent-run.test.ts` (integration) |
+| Replay System | Agent run replay capability | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/control-tower/replay.ts` | `packages/agent-governance/tests/agent-run.test.ts` (integration) |
 
 ### 5.2 Voice & Consent
 
 | Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
 |---------|-------------|-------------|---------|--------|----------|-------|
-| Consent Manager | Recording/transcription/AI consent tracking | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/voice/consent.ts` | N/A |
-| Two-Party Consent | State-based consent enforcement | Various | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/voice/consent.ts` | N/A |
-| Recording Pipeline | Storage providers (S3, GCS, Azure) | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/voice/recording.ts` | N/A |
-| Call Grading | Rubric-based evaluation + FCHA compliance | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/voice/grading.ts` | N/A |
+| Consent Manager | Recording/transcription/AI consent tracking | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/voice/consent.ts` | `packages/agent-governance/tests/policy-gate.test.ts` (integration) |
+| Two-Party Consent | State-based consent enforcement | Various | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/voice/consent.ts` | `packages/agent-governance/tests/policy-gate.test.ts` (integration) |
+| Recording Pipeline | Storage providers (S3, GCS, Azure) | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/voice/recording.ts` | N/A (E2E) |
+| Call Grading | Rubric-based evaluation + FCHA compliance | Global | `@realriches/agent-governance` | **Implemented** | `packages/agent-governance/src/voice/grading.ts` | N/A (E2E) |
 
 ### 5.3 Policy Rules
 
@@ -243,7 +243,7 @@ This document serves as the single source of truth for feature implementation st
 | NYC Lead Paint Disclosure | Dedicated page block | `NYC_STRICT` | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/compliance-blocks.ts` | `packages/media-generator/src/compliance-blocks.test.ts` |
 | NYC Bedbug Disclosure | Inline block (brochures) | `NYC_STRICT` | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/compliance-blocks.ts` | `packages/media-generator/src/compliance-blocks.test.ts` |
 | Fair Housing Notice | Footer block (all markets) | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/compliance-blocks.ts` | `packages/media-generator/src/compliance-blocks.test.ts` |
-| Block Injector | Position-aware block insertion | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/renderers/block-injector.ts` | N/A |
+| Block Injector | Position-aware block insertion | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/renderers/block-injector.ts` | `packages/media-generator/src/__tests__/compliance-enforcer.test.ts` |
 
 ### 6.3 Template Validation
 
@@ -256,7 +256,7 @@ This document serves as the single source of truth for feature implementation st
 
 | Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
 |---------|-------------|-------------|---------|--------|----------|-------|
-| Generation Evidence | SOC2 CC-6.1 audit trail | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/evidence/generation-evidence.ts` | N/A |
+| Generation Evidence | SOC2 CC-6.1 audit trail | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/evidence/generation-evidence.ts` | `packages/media-generator/src/__tests__/deterministic.test.ts` (integration) |
 
 ---
 
@@ -329,23 +329,23 @@ This document serves as the single source of truth for feature implementation st
 |---------|-------------|-------------|---------|--------|----------|-------|
 | Route Authorization | preHandler auth checks | Global | `@realriches/api` | **Implemented** | `apps/api/src/plugins/auth.ts` | `scripts/check-auth-middleware.sh` |
 | Role-Based Access | 10-role permission matrix | Global | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/acl.ts` | `packages/document-storage/src/__tests__/acl.test.ts` |
-| Admin Impersonation | Secure user impersonation | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/admin/impersonation.ts` | N/A |
+| Admin Impersonation | Secure user impersonation | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/admin/impersonation.ts` | `apps/api/tests/admin-features.test.ts` (integration) |
 
 ### 9.3 Audit & Evidence
 
 | Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
 |---------|-------------|-------------|---------|--------|----------|-------|
-| Audit Logging | System audit trail | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/admin/audit-logs.ts` | N/A |
-| Evidence Records | SOC2 control evidence | Global | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` (EvidenceRecord) | N/A |
-| Activity Tracking | User activity logging | Global | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` (Activity) | N/A |
+| Audit Logging | System audit trail | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/admin/audit-logs.ts` | `apps/api/tests/audit-logs.test.ts` |
+| Evidence Records | SOC2 control evidence | Global | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` (EvidenceRecord) | N/A (schema) |
+| Activity Tracking | User activity logging | Global | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` (Activity) | N/A (schema) |
 
 ### 9.4 Data Protection
 
 | Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
 |---------|-------------|-------------|---------|--------|----------|-------|
 | PII Redaction | AI input/output redaction | Global | `@realriches/ai-sdk` | **Implemented** | `packages/ai-sdk/src/redaction/` | `packages/ai-sdk/src/__tests__/redaction.test.ts` |
-| Document Encryption | At-rest encryption for sensitive docs | Global | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/acl.ts:244-287` | N/A |
-| Secrets Guard | CI secrets detection | Global | `.github/workflows/ci.yml` | **Implemented** | `.github/workflows/ci.yml` (secrets-guard job) | N/A |
+| Document Encryption | At-rest encryption for sensitive docs | Global | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/acl.ts:244-287` | `apps/api/tests/security/encryption.test.ts` |
+| Secrets Guard | CI secrets detection | Global | `.github/workflows/ci.yml` | **Implemented** | `.github/workflows/ci.yml` (secrets-guard job) | N/A (CI) |
 
 ---
 

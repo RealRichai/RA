@@ -28,7 +28,8 @@
     "prepare": "husky install",
     "changeset": "changeset",
     "release": "turbo build && changeset publish",
-    "policy:no-human-todos": "grep -rn \"HUMAN_IMPLEMENTATION_REQUIRED\" apps packages prisma docs --include=\"*.ts\" --include=\"*.tsx\" --include=\"*.js\" --exclude-dir=coverage --exclude-dir=.next --exclude-dir=dist --exclude-dir=.turbo && exit 1 || exit 0"
+    "policy:no-human-todos": "grep -rn \"HUMAN_IMPLEMENTATION_REQUIRED\" apps packages prisma docs --include=\"*.ts\" --include=\"*.tsx\" --include=\"*.js\" --exclude-dir=coverage --exclude-dir=.next --exclude-dir=dist --exclude-dir=.turbo && exit 1 || exit 0",
+    "traceability:check": "node scripts/traceability_check.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.1",
