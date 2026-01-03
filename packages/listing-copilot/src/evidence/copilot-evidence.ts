@@ -123,23 +123,25 @@ export class CopilotEvidenceEmitter {
     const sanitizedDetails = this.sanitizeForAudit(record);
 
     return new Promise((resolve) => {
-      setImmediate(async () => {
-        try {
-          const result = await this.deps.evidenceService!.emit({
-            controlId: this.config.controlId,
-            action: 'copilot_workflow_execution',
-            entityType: 'copilot_run',
-            entityId: record.runId,
-            details: sanitizedDetails,
-            timestamp: record.timestamp,
-          });
-          resolve(result.evidenceId);
-        } catch (error) {
-          // Log but don't fail - evidence is non-blocking
-          // eslint-disable-next-line no-console
-          console.error('[CopilotEvidence] Failed to emit:', error);
-          resolve(undefined);
-        }
+      setImmediate(() => {
+        void (async () => {
+          try {
+            const result = await this.deps.evidenceService!.emit({
+              controlId: this.config.controlId,
+              action: 'copilot_workflow_execution',
+              entityType: 'copilot_run',
+              entityId: record.runId,
+              details: sanitizedDetails,
+              timestamp: record.timestamp,
+            });
+            resolve(result.evidenceId);
+          } catch (error) {
+            // Log but don't fail - evidence is non-blocking
+            // eslint-disable-next-line no-console
+            console.error('[CopilotEvidence] Failed to emit:', error);
+            resolve(undefined);
+          }
+        })();
       });
     });
   }

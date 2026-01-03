@@ -5,11 +5,11 @@
  */
 
 import { createHash } from 'crypto';
+
 import type {
   ListingDraft,
   PropertyFacts,
   OptimizedListingCopy,
-  CopyGenerationError as CopyGenError,
 } from '../types';
 import { CopyGenerationError } from '../types';
 

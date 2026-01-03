@@ -4,7 +4,7 @@
  * Validates and sanitizes user-uploaded templates for security.
  */
 
-import { TemplateValidationError } from '../types';
+// Template sanitization utilities
 
 // ============================================================================
 // Types
@@ -47,13 +47,6 @@ const DANGEROUS_PATTERNS = [
   // Form actions
   /<form[\s\S]*?action/gi,
 ];
-
-const HANDLEBARS_PATTERNS = {
-  // Valid Handlebars expressions
-  variable: /\{\{[^{}]+\}\}/g,
-  block: /\{\{#[^{}]+\}\}[\s\S]*?\{\{\/[^{}]+\}\}/g,
-  helper: /\{\{[a-zA-Z_][a-zA-Z0-9_]*\s+[^{}]+\}\}/g,
-};
 
 // ============================================================================
 // Template Sanitizer Class

@@ -196,10 +196,10 @@ export class ChannelSimulator {
    * Simulate posting to channels (dry-run mode).
    * Returns what would be posted without actually posting.
    */
-  async simulate(
+  simulate(
     listing: ListingWithArtifacts,
     channels: ChannelTarget[]
-  ): Promise<ChannelSimulationResult[]> {
+  ): ChannelSimulationResult[] {
     const results: ChannelSimulationResult[] = [];
     const timestamp = new Date();
 

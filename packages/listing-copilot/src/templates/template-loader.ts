@@ -213,7 +213,7 @@ export class DefaultTemplateLoader implements TemplateLoader {
   /**
    * Load default template for a type.
    */
-  async loadDefault(type: TemplateType): Promise<LoadedTemplate> {
+  loadDefault(type: TemplateType): LoadedTemplate {
     let content: string;
 
     switch (type) {
@@ -227,7 +227,7 @@ export class DefaultTemplateLoader implements TemplateLoader {
         content = JSON.stringify(DEFAULT_DECK_CONFIG);
         break;
       default:
-        throw new TemplateValidationError(`Unknown template type: ${type}`);
+        throw new TemplateValidationError(`Unknown template type: ${type as string}`);
     }
 
     return {

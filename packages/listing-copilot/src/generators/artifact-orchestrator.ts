@@ -6,13 +6,13 @@
  */
 
 import { createHash, randomUUID } from 'crypto';
+
 import type {
   ListingDraft,
   PropertyFacts,
   OptimizedListingCopy,
   ArtifactRef,
   GeneratedArtifacts,
-  TemplateType,
 } from '../types';
 import { ArtifactGenerationError } from '../types';
 

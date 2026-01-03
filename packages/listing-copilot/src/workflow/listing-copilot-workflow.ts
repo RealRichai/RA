@@ -12,6 +12,13 @@
 
 import { randomUUID } from 'crypto';
 import { createHash } from 'crypto';
+
+import type { ChannelSimulator, ListingWithArtifacts } from '../channels/channel-simulator';
+import type { CopilotComplianceGate } from '../compliance/copilot-compliance-gate';
+import type { CopilotEvidenceEmitter } from '../evidence/copilot-evidence';
+import type { ArtifactOrchestrator } from '../generators/artifact-orchestrator';
+import type { CopyGenerator } from '../generators/copy-generator';
+import type { TemplateLoader } from '../templates/template-loader';
 import type {
   CopilotInput,
   CopilotResult,
@@ -21,19 +28,12 @@ import type {
   ComplianceGateResult,
   ChannelSimulationResult,
   ChannelPostResult,
-  CopilotEvidenceRecord,
 } from '../types';
 import {
   KillSwitchActiveError,
   BudgetExceededError,
   ComplianceBlockedError,
 } from '../types';
-import type { CopyGenerator } from '../generators/copy-generator';
-import type { ArtifactOrchestrator } from '../generators/artifact-orchestrator';
-import type { CopilotComplianceGate } from '../compliance/copilot-compliance-gate';
-import type { ChannelSimulator, ListingWithArtifacts } from '../channels/channel-simulator';
-import type { TemplateLoader } from '../templates/template-loader';
-import type { CopilotEvidenceEmitter } from '../evidence/copilot-evidence';
 
 // ============================================================================
 // Types
@@ -332,7 +332,7 @@ export class ListingCopilotWorkflow {
 
         const channelStartTime = Date.now();
         if (dryRun) {
-          channelResults = await this.deps.channelSimulator.simulate(
+          channelResults = this.deps.channelSimulator.simulate(
             listingWithArtifacts,
             channels
           );
