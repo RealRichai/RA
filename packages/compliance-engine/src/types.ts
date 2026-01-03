@@ -141,6 +141,8 @@ export const MarketPackIdSchema = z.enum([
   'AZ_STANDARD',
   'NV_STANDARD',
   'UK_GDPR',
+  'EU_GDPR',
+  'LATAM_STANDARD',
 ]);
 
 export type MarketPackId = z.infer<typeof MarketPackIdSchema>;
@@ -696,6 +698,10 @@ export const MarketPackSchema = z.object({
   description: z.string(),
   jurisdiction: z.string(),
   rules: MarketPackRulesSchema,
+  // i18n and GDPR properties
+  gdprMode: z.boolean().default(false),
+  defaultLocale: z.string().default('en'),
+  supportedLocales: z.array(z.string()).default(['en']),
   metadata: z.record(z.unknown()).optional(),
 });
 

@@ -69,6 +69,8 @@ model User {
   lastLoginAt       DateTime?  @map("last_login_at")
   passwordChangedAt DateTime?  @map("password_changed_at")
   metadata          Json?
+  locale            String     @default("en")
+  timezone          String     @default("America/New_York")
   createdAt         DateTime   @default(now()) @map("created_at")
   updatedAt         DateTime   @updatedAt @map("updated_at")
 
@@ -1442,7 +1444,8 @@ model Disclosure {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  records DisclosureRecord[]
+  records      DisclosureRecord[]
+  translations DisclosureTranslation[]
 
   @@index([marketId])
   @@index([type])
@@ -8818,4 +8821,43 @@ model ListingAgentModification {
   @@index([agentRunId])
   @@index([createdAt])
   @@map("listing_agent_modifications")
+}
+
+// =============================================================================
+// Internationalization (i18n) Models
+// =============================================================================
+
+model DisclosureTranslation {
+  id           String   @id @default(uuid()) @db.Uuid
+  disclosureId String   @map("disclosure_id") @db.Uuid
+  locale       String
+  name         String
+  description  String?
+  content      String
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  disclosure Disclosure @relation(fields: [disclosureId], references: [id], onDelete: Cascade)
+
+  @@unique([disclosureId, locale])
+  @@index([disclosureId])
+  @@index([locale])
+  @@map("disclosure_translations")
+}
+
+model NotificationTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  category  String
+  locale    String
+  title     String
+  body      String
+  metadata  Json?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([category, locale])
+  @@index([category])
+  @@index([locale])
+  @@map("notification_templates")
 }

@@ -883,3 +883,177 @@ export async function gateListingUpdate(input: ListingUpdateInput): Promise<Gate
       : `Listing update blocked: ${criticalViolations.map((v) => v.message).join('; ')}`,
   };
 }
+
+// ============================================================================
+// Gate: GDPR Data Operation
+// ============================================================================
+
+export type GdprDataOperation = 'collect' | 'process' | 'share' | 'delete' | 'export';
+
+export interface GdprDataOperationInput {
+  operation: GdprDataOperation;
+  marketId: string;
+  hasConsent: boolean;
+  dataSubjectId: string;
+  dataTypes: string[];
+  lawfulBasis?: string;
+  retentionDays?: number;
+}
+
+export async function gateGdprDataOperation(
+  input: GdprDataOperationInput
+): Promise<GateResult> {
+  const marketPackId = getMarketPackIdFromMarket(input.marketId);
+  const pack = getMarketPack(marketPackId);
+  const violations: Violation[] = [];
+  const fixes: RecommendedFix[] = [];
+  const checksPerformed: string[] = ['gdpr_data_operation'];
+  const timestamp = new Date().toISOString();
+
+  // If GDPR is not enabled for this market, allow all operations
+  if (!pack.rules.gdpr?.enabled) {
+    const decision: ComplianceDecision = {
+      passed: true,
+      violations: [],
+      recommendedFixes: [],
+      policyVersion: POLICY_VERSION,
+      marketPack: pack.id,
+      marketPackVersion: getMarketPackVersion(pack),
+      checkedAt: timestamp,
+      checksPerformed,
+      metadata: {
+        operation: input.operation,
+        gdprEnabled: false,
+        action: 'gdpr_data_operation',
+      },
+    };
+
+    return {
+      allowed: true,
+      decision,
+    };
+  }
+
+  // GDPR is enabled - check compliance
+
+  // Check consent for data collection and processing
+  if (['collect', 'process', 'share'].includes(input.operation)) {
+    if (pack.rules.gdpr.consentRequired && !input.hasConsent) {
+      violations.push({
+        code: 'GDPR_CONSENT_MISSING',
+        message: `GDPR requires explicit consent for ${input.operation} operations`,
+        severity: 'critical',
+        evidence: {
+          operation: input.operation,
+          dataTypes: input.dataTypes,
+        },
+      });
+      fixes.push({
+        action: 'obtain_consent',
+        description: 'Obtain explicit consent from the data subject before proceeding',
+        autoFixAvailable: false,
+        priority: 'critical',
+      });
+    }
+
+    // Check lawful basis
+    if (pack.rules.gdpr.lawfulBases && input.lawfulBasis) {
+      const validBases = pack.rules.gdpr.lawfulBases;
+      if (!validBases.includes(input.lawfulBasis as typeof validBases[number])) {
+        violations.push({
+          code: 'GDPR_LAWFUL_BASIS_MISSING',
+          message: `Invalid lawful basis: ${input.lawfulBasis}. Valid bases: ${validBases.join(', ')}`,
+          severity: 'critical',
+          evidence: {
+            providedBasis: input.lawfulBasis,
+            validBases,
+          },
+        });
+      }
+    }
+  }
+
+  // Check data retention limits
+  if (input.retentionDays && pack.rules.gdpr.dataRetentionDays) {
+    if (input.retentionDays > pack.rules.gdpr.dataRetentionDays) {
+      violations.push({
+        code: 'GDPR_DATA_RETENTION_EXCEEDED',
+        message: `Requested retention (${input.retentionDays} days) exceeds GDPR limit (${pack.rules.gdpr.dataRetentionDays} days)`,
+        severity: 'warning',
+        evidence: {
+          requestedDays: input.retentionDays,
+          maxDays: pack.rules.gdpr.dataRetentionDays,
+        },
+      });
+      fixes.push({
+        action: 'reduce_retention',
+        description: `Reduce data retention to ${pack.rules.gdpr.dataRetentionDays} days or less`,
+        autoFixAvailable: true,
+        autoFixAction: `SET retention_days = ${pack.rules.gdpr.dataRetentionDays}`,
+        priority: 'medium',
+      });
+    }
+  }
+
+  // Delete and export operations are generally allowed (data subject rights)
+  if (input.operation === 'delete' || input.operation === 'export') {
+    // These are data subject rights and should be facilitated
+    // Log for audit purposes
+    checksPerformed.push('gdpr_data_subject_rights');
+  }
+
+  const criticalViolations = violations.filter((v) => v.severity === 'critical');
+  const passed = criticalViolations.length === 0;
+
+  const decision: ComplianceDecision = {
+    passed,
+    violations,
+    recommendedFixes: fixes,
+    policyVersion: POLICY_VERSION,
+    marketPack: pack.id,
+    marketPackVersion: getMarketPackVersion(pack),
+    checkedAt: timestamp,
+    checksPerformed,
+    metadata: {
+      operation: input.operation,
+      dataSubjectId: input.dataSubjectId,
+      gdprEnabled: true,
+      action: 'gdpr_data_operation',
+    },
+  };
+
+  return {
+    allowed: passed,
+    decision,
+    blockedReason: passed
+      ? undefined
+      : `GDPR compliance blocked: ${criticalViolations.map((v) => v.message).join('; ')}`,
+  };
+}
+
+/**
+ * Check if a market requires GDPR compliance
+ */
+export function isGdprMarket(marketId: string): boolean {
+  const marketPackId = getMarketPackIdFromMarket(marketId);
+  const pack = getMarketPack(marketPackId);
+  return pack.rules.gdpr?.enabled ?? false;
+}
+
+/**
+ * Get the default locale for a market
+ */
+export function getMarketDefaultLocale(marketId: string): string {
+  const marketPackId = getMarketPackIdFromMarket(marketId);
+  const pack = getMarketPack(marketPackId);
+  return pack.defaultLocale ?? 'en';
+}
+
+/**
+ * Get supported locales for a market
+ */
+export function getMarketSupportedLocales(marketId: string): string[] {
+  const marketPackId = getMarketPackIdFromMarket(marketId);
+  const pack = getMarketPack(marketPackId);
+  return pack.supportedLocales ?? ['en'];
+}

@@ -18,6 +18,9 @@ export const NYC_STRICT_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Comprehensive NYC compliance including FARE Act, FCHA, Good Cause Eviction, and Rent Stabilization',
   jurisdiction: 'New York City, NY',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: true,
@@ -185,6 +188,9 @@ export const US_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Baseline federal compliance requirements applicable across all US markets',
   jurisdiction: 'United States',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false, // No federal restrictions
@@ -234,6 +240,9 @@ export const UK_GDPR_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'UK GDPR compliance with privacy defaults and redaction policies for rental operations',
   jurisdiction: 'United Kingdom',
+  gdprMode: true,
+  defaultLocale: 'en',
+  supportedLocales: ['en'],
   rules: {
     brokerFee: {
       enabled: false, // UK allows letting agent fees with tenant fee ban caveats
@@ -317,6 +326,138 @@ export const UK_GDPR_V1: MarketPack = {
 };
 
 // ============================================================================
+// EU_GDPR v1.0.0 - European Union GDPR Compliance Pack
+// ============================================================================
+
+export const EU_GDPR_V1: MarketPack = {
+  id: 'EU_GDPR',
+  name: 'European Union (GDPR)',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'European Union GDPR compliance with full data protection requirements',
+  jurisdiction: 'European Union',
+  gdprMode: true,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es', 'fr', 'de', 'it', 'pt'],
+  rules: {
+    brokerFee: {
+      enabled: false,
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 3, // Varies by member state, using common limit
+      interestRequired: false,
+      separateAccountRequired: false,
+    },
+    rentIncrease: {
+      enabled: true,
+      noticeRequired: true,
+      noticeDays: 30,
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'privacy_notice',
+        requiredBefore: 'application',
+        signatureRequired: false,
+      },
+      {
+        type: 'data_processing_agreement',
+        requiredBefore: 'application',
+        signatureRequired: true,
+      },
+      {
+        type: 'gdpr_rights_notice',
+        requiredBefore: 'application',
+        signatureRequired: false,
+      },
+    ],
+    gdpr: {
+      enabled: true,
+      dataRetentionDays: 365, // 1 year default, configurable per use case
+      consentRequired: true,
+      lawfulBases: ['consent', 'contract', 'legal_obligation', 'legitimate_interests'],
+      dataSubjectRequestDays: 30,
+      privacyNoticeRequired: true,
+      redactionPolicies: {
+        enabled: true,
+        autoRedactAfterDays: 730, // 2 years
+        fieldsToRedact: [
+          'nationalId',
+          'bankAccountDetails',
+          'passportNumber',
+          'dateOfBirth',
+          'taxIdentificationNumber',
+        ],
+      },
+    },
+  },
+  metadata: {
+    gdprEffectiveDate: '2018-05-25',
+    memberStates: ['AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'],
+    legislativeReferences: [
+      'GDPR (EU) 2016/679',
+      'ePrivacy Directive 2002/58/EC',
+    ],
+  },
+};
+
+// ============================================================================
+// LATAM_STANDARD v1.0.0 - Latin America Standard Compliance Pack
+// ============================================================================
+
+export const LATAM_STANDARD_V1: MarketPack = {
+  id: 'LATAM_STANDARD',
+  name: 'Latin America Standard',
+  version: { major: 1, minor: 0, patch: 0 },
+  effectiveDate: '2024-01-01T00:00:00Z',
+  description: 'Latin America standard compliance for Mexico, Colombia, Argentina, and Chile',
+  jurisdiction: 'Latin America',
+  gdprMode: false,
+  defaultLocale: 'es',
+  supportedLocales: ['es', 'en', 'pt'],
+  rules: {
+    brokerFee: {
+      enabled: false, // Varies by country
+      paidBy: 'either',
+    },
+    securityDeposit: {
+      enabled: true,
+      maxMonths: 2, // Common practice
+      interestRequired: false,
+      separateAccountRequired: false,
+    },
+    rentIncrease: {
+      enabled: true,
+      noticeRequired: true,
+      noticeDays: 30,
+      goodCauseRequired: false,
+    },
+    disclosures: [
+      {
+        type: 'rental_terms_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+      {
+        type: 'property_condition_disclosure',
+        requiredBefore: 'lease_signing',
+        signatureRequired: true,
+      },
+    ],
+  },
+  metadata: {
+    countries: ['MX', 'CO', 'AR', 'CL', 'PE', 'EC', 'UY'],
+    notes: [
+      'Regulations vary significantly by country',
+      'Local legal review recommended',
+      'Currency must be displayed in local format',
+    ],
+  },
+};
+
+// ============================================================================
 // CA_STANDARD v1.0.0 - California Compliance Pack
 // ============================================================================
 
@@ -327,6 +468,9 @@ export const CA_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'California compliance including AB 1482 rent caps, just cause eviction, and state-specific disclosures',
   jurisdiction: 'California',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false, // No statewide restrictions
@@ -455,6 +599,9 @@ export const TX_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Texas compliance with Property Code requirements, no rent control, and required disclosures',
   jurisdiction: 'Texas',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false, // No restrictions
@@ -567,6 +714,9 @@ export const FL_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Florida compliance with Landlord Tenant Act, radon disclosure, and security deposit rules',
   jurisdiction: 'Florida',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false,
@@ -641,6 +791,9 @@ export const IL_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Illinois compliance with RLTO (Chicago), security deposit interest, and state disclosures',
   jurisdiction: 'Illinois',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false,
@@ -733,6 +886,9 @@ export const WA_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Washington compliance with Residential Landlord-Tenant Act, just cause eviction, and tenant protections',
   jurisdiction: 'Washington',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false,
@@ -847,6 +1003,9 @@ export const CO_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Colorado compliance with security deposit limits, warranty of habitability, and required disclosures',
   jurisdiction: 'Colorado',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false,
@@ -944,6 +1103,9 @@ export const MA_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Massachusetts compliance with security deposit interest, last month rent rules, and tenant protections',
   jurisdiction: 'Massachusetts',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false,
@@ -1032,6 +1194,9 @@ export const NJ_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'New Jersey compliance with security deposit limits, interest requirements, and Truth in Renting Act',
   jurisdiction: 'New Jersey',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false,
@@ -1115,6 +1280,9 @@ export const PA_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Pennsylvania compliance with Landlord Tenant Act, security deposit limits, and escrow requirements',
   jurisdiction: 'Pennsylvania',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false,
@@ -1192,6 +1360,9 @@ export const GA_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Georgia compliance with Landlord Tenant Act, security deposit handling, and disclosure requirements',
   jurisdiction: 'Georgia',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false,
@@ -1281,6 +1452,9 @@ export const AZ_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Arizona compliance with Residential Landlord Tenant Act, security deposit limits, and disclosure requirements',
   jurisdiction: 'Arizona',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false,
@@ -1381,6 +1555,9 @@ export const NV_STANDARD_V1: MarketPack = {
   effectiveDate: '2024-01-01T00:00:00Z',
   description: 'Nevada compliance with landlord tenant laws, security deposit limits, and disclosure requirements',
   jurisdiction: 'Nevada',
+  gdprMode: false,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'es'],
   rules: {
     brokerFee: {
       enabled: false,
@@ -1488,6 +1665,8 @@ export const MARKET_PACKS: Record<MarketPackId, MarketPack> = {
   AZ_STANDARD: AZ_STANDARD_V1,
   NV_STANDARD: NV_STANDARD_V1,
   UK_GDPR: UK_GDPR_V1,
+  EU_GDPR: EU_GDPR_V1,
+  LATAM_STANDARD: LATAM_STANDARD_V1,
 };
 
 /**
@@ -1728,6 +1907,51 @@ export function getMarketPackIdFromMarket(marketId: string): MarketPackId {
     'england': 'UK_GDPR',
     'scotland': 'UK_GDPR',
     'wales': 'UK_GDPR',
+    // EU markets
+    'eu': 'EU_GDPR',
+    'europe': 'EU_GDPR',
+    'european_union': 'EU_GDPR',
+    'france': 'EU_GDPR',
+    'paris': 'EU_GDPR',
+    'germany': 'EU_GDPR',
+    'berlin': 'EU_GDPR',
+    'munich': 'EU_GDPR',
+    'spain': 'EU_GDPR',
+    'madrid': 'EU_GDPR',
+    'barcelona': 'EU_GDPR',
+    'italy': 'EU_GDPR',
+    'rome': 'EU_GDPR',
+    'milan': 'EU_GDPR',
+    'portugal': 'EU_GDPR',
+    'lisbon': 'EU_GDPR',
+    'netherlands': 'EU_GDPR',
+    'amsterdam': 'EU_GDPR',
+    'belgium': 'EU_GDPR',
+    'brussels': 'EU_GDPR',
+    'ireland': 'EU_GDPR',
+    'dublin': 'EU_GDPR',
+    'austria': 'EU_GDPR',
+    'vienna': 'EU_GDPR',
+    // Latin America markets
+    'latam': 'LATAM_STANDARD',
+    'latin_america': 'LATAM_STANDARD',
+    'mexico': 'LATAM_STANDARD',
+    'mexico_city': 'LATAM_STANDARD',
+    'guadalajara': 'LATAM_STANDARD',
+    'monterrey': 'LATAM_STANDARD',
+    'colombia': 'LATAM_STANDARD',
+    'bogota': 'LATAM_STANDARD',
+    'medellin': 'LATAM_STANDARD',
+    'argentina': 'LATAM_STANDARD',
+    'buenos_aires': 'LATAM_STANDARD',
+    'chile': 'LATAM_STANDARD',
+    'santiago': 'LATAM_STANDARD',
+    'peru': 'LATAM_STANDARD',
+    'lima': 'LATAM_STANDARD',
+    'ecuador': 'LATAM_STANDARD',
+    'quito': 'LATAM_STANDARD',
+    'uruguay': 'LATAM_STANDARD',
+    'montevideo': 'LATAM_STANDARD',
   };
 
   const normalizedMarketId = marketId.toLowerCase().replace(/[^a-z]/g, '_');
