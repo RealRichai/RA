@@ -7,6 +7,7 @@
 
 import type { Prisma, PrismaClient, AgentRun as DbAgentRun, AgentRunStatus as DbAgentRunStatus } from '@realriches/database';
 
+import type { AgentRunStore } from '../runtime/agent-run';
 import type {
   AgentRun,
   AgentRunStatus,
@@ -14,7 +15,6 @@ import type {
   Result,
 } from '../types';
 import { Ok, Err } from '../types';
-import type { AgentRunStore } from '../runtime/agent-run';
 import type { UsageDatabaseAdapter } from '../usage/agent-usage.service';
 import type {
   AgentBudgetConfig,
@@ -83,6 +83,7 @@ function fromDbAgentRun(dbRun: DbAgentRun): AgentRun {
 
   try {
     if (dbRun.promptRedacted) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       prompts = JSON.parse(dbRun.promptRedacted);
     }
   } catch {
@@ -91,6 +92,7 @@ function fromDbAgentRun(dbRun: DbAgentRun): AgentRun {
 
   try {
     if (dbRun.outputRedacted) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       outcome = JSON.parse(dbRun.outputRedacted);
     }
   } catch {
@@ -172,9 +174,8 @@ export class PrismaAgentRunStore implements AgentRunStore, UsageDatabaseAdapter 
 
       return Ok(run);
     } catch (error) {
-      if (this.config.debug) {
-        console.error('[PrismaAgentRunStore] Save error:', error);
-      }
+      // Debug logging handled by caller
+      void this.config.debug;
       return Err('SAVE_ERROR', `Failed to save agent run: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -208,12 +209,12 @@ export class PrismaAgentRunStore implements AgentRunStore, UsageDatabaseAdapter 
     }
   }
 
-  async getByInputsHash(inputsHash: string, tenantId: string): Promise<Result<AgentRun | null>> {
+  getByInputsHash(inputsHash: string, tenantId: string): Promise<Result<AgentRun | null>> {
     // Note: inputsHash is not stored in the DB schema, so we can't query by it
     // This would require schema changes to support idempotency
     void inputsHash;
     void tenantId;
-    return Ok(null);
+    return Promise.resolve(Ok(null));
   }
 
   async list(options: {
@@ -302,7 +303,7 @@ export class PrismaAgentRunStore implements AgentRunStore, UsageDatabaseAdapter 
 
   async getBudget(organizationId: string): Promise<AgentBudgetConfig | null> {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
       const budget = await (this.prisma as any).agentBudget.findUnique({
         where: { organizationId },
       });
@@ -312,22 +313,21 @@ export class PrismaAgentRunStore implements AgentRunStore, UsageDatabaseAdapter 
       }
 
       return {
-        organizationId: budget.organizationId,
-        dailyLimitCents: budget.dailyLimitCents,
-        monthlyLimitCents: budget.monthlyLimitCents,
+        organizationId: budget.organizationId as string,
+        dailyLimitCents: budget.dailyLimitCents as number,
+        monthlyLimitCents: budget.monthlyLimitCents as number,
         alertThresholds: budget.alertThresholds as number[],
-        isEnabled: budget.isEnabled,
+        isEnabled: budget.isEnabled as boolean,
       };
-    } catch (error) {
-      if (this.config.debug) {
-        console.error('[PrismaAgentRunStore] getBudget error:', error);
-      }
+      /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    } catch {
+      // Budget not found or error - return null
       return null;
     }
   }
 
   async upsertBudget(config: AgentBudgetConfig): Promise<AgentBudgetConfig> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     const budget = await (this.prisma as any).agentBudget.upsert({
       where: { organizationId: config.organizationId },
       create: {
@@ -346,12 +346,13 @@ export class PrismaAgentRunStore implements AgentRunStore, UsageDatabaseAdapter 
     });
 
     return {
-      organizationId: budget.organizationId,
-      dailyLimitCents: budget.dailyLimitCents,
-      monthlyLimitCents: budget.monthlyLimitCents,
+      organizationId: budget.organizationId as string,
+      dailyLimitCents: budget.dailyLimitCents as number,
+      monthlyLimitCents: budget.monthlyLimitCents as number,
       alertThresholds: budget.alertThresholds as number[],
-      isEnabled: budget.isEnabled,
+      isEnabled: budget.isEnabled as boolean,
     };
+    /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   async getCostSummary(
