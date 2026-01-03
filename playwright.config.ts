@@ -38,6 +38,14 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
+      name: 'browser',
+      testMatch: /.*\.browser\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: process.env.E2E_BASE_URL || 'http://localhost:3000',
+      },
+    },
+    {
       name: 'api',
       testMatch: /.*\.api\.spec\.ts/,
       use: {

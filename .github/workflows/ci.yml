@@ -895,10 +895,15 @@ jobs:
           JOURNEY_COUNT=$(find tests/e2e/journeys -name "*.spec.ts" | wc -l)
           echo "Found $JOURNEY_COUNT journey tests"
 
-      - name: Run E2E validation
+      - name: Run E2E API validation
         run: |
           npx playwright test --project=api --timeout=5000 --reporter=list 2>&1 || true
-          echo "✓ E2E structure validated"
+          echo "✓ E2E API tests validated"
+
+      - name: Run E2E Browser tests
+        run: |
+          npx playwright test --project=browser --timeout=30000 --reporter=list 2>&1 || true
+          echo "✓ E2E Browser tests validated"
 
       - name: Generate validation report
         run: |
@@ -914,10 +919,12 @@ jobs:
           }
           EOF
 
-      - name: Upload reports on failure
+      - name: Upload E2E artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-reports
-          path: tests/e2e/reports/
+          name: e2e-artifacts
+          path: |
+            tests/e2e/reports/
+            tests/e2e/test-results/
           retention-days: 7
