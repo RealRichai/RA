@@ -11,7 +11,10 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { createHash } from 'crypto';
-import { prisma } from '@realriches/database';
+
+// Import setup.ts to get the shared mocks
+import './setup';
+import { mockPrisma } from './setup';
 
 // =============================================================================
 // Mock Data Setup
@@ -65,84 +68,6 @@ interface MockAgentRun {
 const mockEvidenceRecords: MockEvidenceRecord[] = [];
 const mockAuditLogs: MockAuditLog[] = [];
 const mockAgentRuns: MockAgentRun[] = [];
-
-// Mock Prisma
-vi.mock('@realriches/database', () => ({
-  prisma: {
-    evidenceRecord: {
-      findMany: vi.fn(async ({ where }) => {
-        let results = [...mockEvidenceRecords];
-        if (where?.occurredAt?.gte) {
-          results = results.filter((r) => r.occurredAt >= where.occurredAt.gte);
-        }
-        if (where?.organizationId) {
-          results = results.filter((r) => r.organizationId === where.organizationId);
-        }
-        if (where?.tenantId) {
-          results = results.filter((r) => r.tenantId === where.tenantId);
-        }
-        if (where?.OR) {
-          results = results.filter((r) => {
-            return where.OR.some((cond: Record<string, unknown>) => {
-              if (cond.eventType) {
-                if (typeof cond.eventType === 'string') {
-                  return r.eventType === cond.eventType;
-                }
-                if (cond.eventType.startsWith) {
-                  return r.eventType.startsWith(cond.eventType.startsWith);
-                }
-              }
-              return false;
-            });
-          });
-        }
-        return results;
-      }),
-    },
-    auditLog: {
-      findMany: vi.fn(async ({ where }) => {
-        let results = [...mockAuditLogs];
-        if (where?.timestamp?.gte) {
-          results = results.filter((r) => r.timestamp >= where.timestamp.gte);
-        }
-        if (where?.OR) {
-          results = results.filter((r) => {
-            return where.OR.some((cond: Record<string, unknown>) => {
-              if (cond.action) {
-                if (typeof cond.action === 'string') {
-                  return r.action === cond.action;
-                }
-                if (cond.action.startsWith) {
-                  return r.action.startsWith(cond.action.startsWith);
-                }
-                if (cond.action.contains) {
-                  return r.action.includes(cond.action.contains);
-                }
-              }
-              if (cond.entityType) {
-                return r.entityType === cond.entityType;
-              }
-              return false;
-            });
-          });
-        }
-        return results;
-      }),
-    },
-    agentRun: {
-      findMany: vi.fn(async ({ where }) => {
-        let results = [...mockAgentRuns];
-        if (where?.createdAt?.gte) {
-          results = results.filter((r) => r.createdAt >= where.createdAt.gte);
-        }
-        if (where?.organizationId) {
-          results = results.filter((r) => r.organizationId === where.organizationId);
-        }
-        return results;
-      }),
-    },
-  },
-}));
 
 // =============================================================================
 // Test Helpers
@@ -210,6 +135,78 @@ describe('Evidence Audit Integration', () => {
     mockEvidenceRecords.length = 0;
     mockAuditLogs.length = 0;
     mockAgentRuns.length = 0;
+
+    // Configure mockPrisma to use our test data arrays
+    mockPrisma.evidenceRecord.findMany.mockImplementation(async ({ where }: { where?: Record<string, unknown> }) => {
+      let results = [...mockEvidenceRecords];
+      if (where?.occurredAt && typeof where.occurredAt === 'object' && 'gte' in where.occurredAt) {
+        results = results.filter((r) => r.occurredAt >= (where.occurredAt as { gte: Date }).gte);
+      }
+      if (where?.organizationId) {
+        results = results.filter((r) => r.organizationId === where.organizationId);
+      }
+      if (where?.tenantId) {
+        results = results.filter((r) => r.tenantId === where.tenantId);
+      }
+      if (where?.OR && Array.isArray(where.OR)) {
+        results = results.filter((r) => {
+          return (where.OR as Array<Record<string, unknown>>).some((cond) => {
+            if (cond.eventType) {
+              if (typeof cond.eventType === 'string') {
+                return r.eventType === cond.eventType;
+              }
+              if (typeof cond.eventType === 'object' && cond.eventType && 'startsWith' in cond.eventType) {
+                return r.eventType.startsWith((cond.eventType as { startsWith: string }).startsWith);
+              }
+            }
+            return false;
+          });
+        });
+      }
+      return results;
+    });
+
+    mockPrisma.auditLog.findMany.mockImplementation(async ({ where }: { where?: Record<string, unknown> }) => {
+      let results = [...mockAuditLogs];
+      if (where?.timestamp && typeof where.timestamp === 'object' && 'gte' in where.timestamp) {
+        results = results.filter((r) => r.timestamp >= (where.timestamp as { gte: Date }).gte);
+      }
+      if (where?.OR && Array.isArray(where.OR)) {
+        results = results.filter((r) => {
+          return (where.OR as Array<Record<string, unknown>>).some((cond) => {
+            if (cond.action) {
+              if (typeof cond.action === 'string') {
+                return r.action === cond.action;
+              }
+              if (typeof cond.action === 'object' && cond.action) {
+                if ('startsWith' in cond.action) {
+                  return r.action.startsWith((cond.action as { startsWith: string }).startsWith);
+                }
+                if ('contains' in cond.action) {
+                  return r.action.includes((cond.action as { contains: string }).contains);
+                }
+              }
+            }
+            if (cond.entityType) {
+              return r.entityType === cond.entityType;
+            }
+            return false;
+          });
+        });
+      }
+      return results;
+    });
+
+    mockPrisma.agentRun.findMany.mockImplementation(async ({ where }: { where?: Record<string, unknown> }) => {
+      let results = [...mockAgentRuns];
+      if (where?.createdAt && typeof where.createdAt === 'object' && 'gte' in where.createdAt) {
+        results = results.filter((r) => r.createdAt >= (where.createdAt as { gte: Date }).gte);
+      }
+      if (where?.organizationId) {
+        results = results.filter((r) => r.organizationId === where.organizationId);
+      }
+      return results;
+    });
   });
 
   afterEach(() => {
@@ -237,11 +234,11 @@ describe('Evidence Audit Integration', () => {
         })
       );
 
-      // Use mocked prisma
+      // prisma mock is from setup.ts
 
       // Query evidence records as the route would
       const sinceDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const records = await prisma.evidenceRecord.findMany({
+      const records = await mockPrisma.evidenceRecord.findMany({
         where: {
           occurredAt: { gte: sinceDate },
           OR: [
@@ -271,7 +268,7 @@ describe('Evidence Audit Integration', () => {
       const { prisma } = await import('@realriches/database');
 
       const sinceDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const runs = await prisma.agentRun.findMany({
+      const runs = await mockPrisma.agentRun.findMany({
         where: { createdAt: { gte: sinceDate } },
       });
 
@@ -299,7 +296,7 @@ describe('Evidence Audit Integration', () => {
       const { prisma } = await import('@realriches/database');
 
       const sinceDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const runs = await prisma.agentRun.findMany({
+      const runs = await mockPrisma.agentRun.findMany({
         where: { createdAt: { gte: sinceDate } },
       });
 
@@ -323,7 +320,7 @@ describe('Evidence Audit Integration', () => {
       const { prisma } = await import('@realriches/database');
 
       const sinceDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const logs = await prisma.auditLog.findMany({
+      const logs = await mockPrisma.auditLog.findMany({
         where: {
           timestamp: { gte: sinceDate },
           OR: [
@@ -358,7 +355,7 @@ describe('Evidence Audit Integration', () => {
         const eventPrefix = controlId === 'SEC-001' ? 'auth.' :
                             controlId === 'PI-001' ? 'compliance.' : 'vault.';
 
-        const records = await prisma.evidenceRecord.findMany({
+        const records = await mockPrisma.evidenceRecord.findMany({
           where: {
             occurredAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
             OR: [{ eventType: { startsWith: eventPrefix } }],
@@ -386,7 +383,7 @@ describe('Evidence Audit Integration', () => {
       const { prisma } = await import('@realriches/database');
 
       // Check for a control that has no evidence
-      const complianceRecords = await prisma.evidenceRecord.findMany({
+      const complianceRecords = await mockPrisma.evidenceRecord.findMany({
         where: {
           occurredAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
           OR: [{ eventType: { startsWith: 'compliance.' } }],
@@ -448,7 +445,7 @@ describe('Evidence Audit Integration', () => {
       const { prisma } = await import('@realriches/database');
 
       // Simulate workflow aggregation
-      const allRecords = await prisma.evidenceRecord.findMany({
+      const allRecords = await mockPrisma.evidenceRecord.findMany({
         where: { occurredAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
       });
 
@@ -536,7 +533,7 @@ describe('Evidence Audit Integration', () => {
 
       const { prisma } = await import('@realriches/database');
 
-      const orgARecords = await prisma.evidenceRecord.findMany({
+      const orgARecords = await mockPrisma.evidenceRecord.findMany({
         where: {
           organizationId: 'org-A',
           occurredAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
@@ -556,7 +553,7 @@ describe('Evidence Audit Integration', () => {
 
       const { prisma } = await import('@realriches/database');
 
-      const tenantXRecords = await prisma.evidenceRecord.findMany({
+      const tenantXRecords = await mockPrisma.evidenceRecord.findMany({
         where: {
           tenantId: 'tenant-X',
           occurredAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
@@ -582,7 +579,7 @@ describe('Evidence Audit Integration', () => {
       const { prisma } = await import('@realriches/database');
 
       const thirtyDaysBack = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-      const recentRecords = await prisma.evidenceRecord.findMany({
+      const recentRecords = await mockPrisma.evidenceRecord.findMany({
         where: { occurredAt: { gte: thirtyDaysBack } },
       });
 
