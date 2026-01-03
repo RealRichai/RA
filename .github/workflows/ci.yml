@@ -1057,7 +1057,9 @@ jobs:
         run: |
           echo "Running evidence audit unit tests..."
           cd apps/api
-          NODE_ENV=test npx vitest run tests/evidence-audit.test.ts tests/evidence-audit-integration.test.ts --reporter=verbose
+          # Only run unit tests here (no database needed)
+          # Integration tests run in the Unit Tests job which has database services
+          NODE_ENV=test npx vitest run tests/evidence-audit.test.ts --reporter=verbose
           echo "✓ Evidence audit tests passed"
 
       - name: Summary
