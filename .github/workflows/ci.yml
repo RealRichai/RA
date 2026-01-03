@@ -552,6 +552,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        working-directory: packages/database
+
       - name: Apply migrations to ephemeral database
         run: |
           echo "Applying migrations to ephemeral database..."
