@@ -46,14 +46,16 @@ export default defineConfig({
     },
   ],
 
-  webServer: process.env.CI
-    ? undefined
-    : {
+  // WebServer is disabled by default - start services manually or with docker-compose
+  // Set E2E_START_SERVER=true to auto-start the dev server
+  webServer: process.env.E2E_START_SERVER
+    ? {
         command: 'pnpm dev',
         url: 'http://localhost:3000',
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: true,
         timeout: 120 * 1000,
-      },
+      }
+    : undefined,
 
   // Global setup/teardown for test isolation
   globalSetup: './tests/e2e/global-setup.ts',
