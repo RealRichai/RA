@@ -538,6 +538,10 @@ importers:
       zod:
         specifier: ^3.22.0
         version: 3.25.76
+    optionalDependencies:
+      sharp:
+        specifier: ^0.33.0
+        version: 0.33.5
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
