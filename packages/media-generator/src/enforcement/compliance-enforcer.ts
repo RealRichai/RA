@@ -10,7 +10,6 @@ import { createHash } from 'crypto';
 import { getBlockRegistry, type BlockRegistry } from '../block-registry';
 import type {
   CollateralType,
-  AppliedComplianceBlock,
   ComplianceBlock,
 } from '../types';
 
@@ -409,9 +408,9 @@ export class ComplianceEnforcer {
     collateralType: CollateralType
   ): ComplianceBlock[] {
     const config = this.getMarketConfig(marketPackId);
-    const allBlocks = this.registry.getBlocks(marketPackId, collateralType);
+    const allBlocks = this.registry.getRequiredBlocks(marketPackId, collateralType);
 
-    return allBlocks.filter(block =>
+    return allBlocks.filter((block: ComplianceBlock) =>
       config.lockedBlockIds.includes(block.id) || !block.isRemovable
     );
   }

@@ -10,9 +10,9 @@
 import { createHash } from 'crypto';
 
 import { getGenerationEvidenceEmitter } from '../evidence/generation-evidence';
+import { getImageGenerator } from '../generators/image-generator';
 import { getPdfGenerator } from '../generators/pdf-generator';
 import { getPptxGenerator } from '../generators/pptx-generator';
-import { getImageGenerator } from '../generators/image-generator';
 import type {
   BatchGenerationRequest,
   BatchGenerationResult,
@@ -20,7 +20,6 @@ import type {
   CollateralTemplate,
   ListingSnapshot,
   AllOutputFormat,
-  OutputFormat,
   SocialCropFormat,
   AppliedComplianceBlock,
 } from '../types';
@@ -131,7 +130,7 @@ export class BatchGenerator {
     const duration = Date.now() - startTime;
 
     // Emit batch evidence
-    const evidenceRecordId = await this.emitBatchEvidence({
+    const evidenceRecordId = this.emitBatchEvidence({
       batchId,
       inputHash,
       listingId: request.listingId,
@@ -347,21 +346,10 @@ export class BatchGenerator {
   /**
    * Emit batch evidence record
    */
-  private async emitBatchEvidence(record: BatchEvidenceRecord): Promise<string> {
+  private emitBatchEvidence(_record: BatchEvidenceRecord): string {
     // In production, this would call the evidence service
-    // For now, we generate an ID and log
+    // For now, we just generate an ID
     const evidenceId = crypto.randomUUID();
-
-    if (process.env.NODE_ENV !== 'test') {
-      console.log('[BatchGenerator] Evidence:', {
-        evidenceId,
-        batchId: record.batchId,
-        duration: `${record.totalDuration}ms`,
-        completed: record.completedFormats.length,
-        failed: record.failedFormats.length,
-      });
-    }
-
     return evidenceId;
   }
 }

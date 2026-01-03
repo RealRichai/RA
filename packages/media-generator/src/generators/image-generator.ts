@@ -23,14 +23,15 @@ import { SocialCropDimensions, DefaultSocialCropLayout } from '../types';
 // Types
 // ============================================================================
 
-interface TextOverlay {
-  text: string;
-  x: number;
-  y: number;
-  fontSize: number;
-  color: string;
-  fontWeight?: 'normal' | 'bold';
-}
+// TextOverlay interface reserved for future use with complex text positioning
+// interface TextOverlay {
+//   text: string;
+//   x: number;
+//   y: number;
+//   fontSize: number;
+//   color: string;
+//   fontWeight?: 'normal' | 'bold';
+// }
 
 interface SharpModule {
   default: (input?: Buffer | string) => SharpInstance;
@@ -189,11 +190,11 @@ export class ImageGenerator {
         });
       } catch {
         // Fallback to gradient if photo fetch fails
-        image = await this.createGradientBackground(sharp, dimensions.width, dimensions.height);
+        image = this.createGradientBackground(sharp, dimensions.width, dimensions.height);
       }
     } else {
       // Create gradient background
-      image = await this.createGradientBackground(sharp, dimensions.width, dimensions.height);
+      image = this.createGradientBackground(sharp, dimensions.width, dimensions.height);
     }
 
     // Create text overlay
@@ -248,11 +249,11 @@ export class ImageGenerator {
   /**
    * Create gradient background
    */
-  private async createGradientBackground(
+  private createGradientBackground(
     sharp: SharpModule['default'],
     width: number,
     height: number
-  ): Promise<SharpInstance> {
+  ): SharpInstance {
     const svg = `
       <svg width="${width}" height="${height}">
         <defs>
@@ -382,7 +383,7 @@ export class ImageGenerator {
       this.sharp = sharpModule.default;
       return this.sharp;
     } catch {
-      console.warn('Sharp not available, using mock image generation');
+      // Sharp not available - will use mock image generation
       return null;
     }
   }
