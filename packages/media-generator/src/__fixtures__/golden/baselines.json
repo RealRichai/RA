@@ -1,0 +1,43 @@
+{
+  "$schema": "./baselines.schema.json",
+  "version": "1.0.0",
+  "description": "Golden test baselines for media generator quality assurance",
+  "generatedAt": "2026-01-03T00:00:00Z",
+  "baselines": {
+    "html": {
+      "nyc-apartment-flyer": {
+        "contentHash": "0f707a990c2ec23fb44fa526348fd441",
+        "normalizedHash": "201d8362bbfc495351d8aa3ea9336c8f",
+        "variableCount": 0,
+        "compliancePlaceholderPresent": true
+      }
+    },
+    "pdf": {
+      "nyc-apartment-flyer": {
+        "pageCount": 1,
+        "textContentHash": "25dd87053fcc07c89e47785da4aa26b4",
+        "bufferSizeRange": {
+          "min": 1414,
+          "max": 1730
+        }
+      }
+    },
+    "pptx": {
+      "nyc-apartment-presentation": {
+        "slideCount": 5,
+        "slideTypes": [
+          "title",
+          "details",
+          "amenities",
+          "photos",
+          "disclosures"
+        ],
+        "mockBufferHash": "f22a1a7be220cbe82ebb93583c3d40c6",
+        "bufferSizeRange": {
+          "min": 72803,
+          "max": 109205
+        }
+      }
+    }
+  }
+}

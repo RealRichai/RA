@@ -1438,3 +1438,98 @@ jobs:
 
           node test-qa.mjs
           rm test-qa.mjs
+
+  # ---------------------------------------------------------------------------
+  # TEMPLATE QUALITY GATE - Media Generator Golden Tests
+  # ---------------------------------------------------------------------------
+
+  template-quality-gate:
+    name: Template Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Build media-generator dependencies
+        run: |
+          pnpm --filter @realriches/utils build
+          pnpm --filter @realriches/config build
+
+      - name: Run golden tests (deterministic baseline check)
+        run: |
+          cd packages/media-generator
+          NODE_ENV=test npx vitest run src/__tests__/golden.test.ts --reporter=verbose
+
+      - name: Validate baselines file exists
+        run: |
+          BASELINES="packages/media-generator/src/__fixtures__/golden/baselines.json"
+          if [ ! -f "$BASELINES" ]; then
+            echo "::error::Golden baselines file not found: $BASELINES"
+            exit 1
+          fi
+          echo "Baseline file found"
+
+          # Validate JSON structure
+          if ! jq empty "$BASELINES" 2>/dev/null; then
+            echo "::error::Invalid JSON in baselines file"
+            exit 1
+          fi
+          echo "Baseline file is valid JSON"
+
+          # Check for all baseline types
+          HTML_BASELINE=$(jq -r '.baselines.html["nyc-apartment-flyer"].normalizedHash' "$BASELINES")
+          PDF_BASELINE=$(jq -r '.baselines.pdf["nyc-apartment-flyer"].textContentHash' "$BASELINES")
+          PPTX_SLIDECOUNT=$(jq -r '.baselines.pptx["nyc-apartment-presentation"].slideCount' "$BASELINES")
+
+          if [ "$HTML_BASELINE" = "PENDING_GENERATION" ] || [ "$HTML_BASELINE" = "null" ]; then
+            echo "::error::HTML baseline not generated"
+            exit 1
+          fi
+          echo "HTML baseline: $HTML_BASELINE"
+
+          if [ "$PDF_BASELINE" = "PENDING_GENERATION" ] || [ "$PDF_BASELINE" = "null" ]; then
+            echo "::error::PDF baseline not generated"
+            exit 1
+          fi
+          echo "PDF baseline: $PDF_BASELINE"
+
+          if [ "$PPTX_SLIDECOUNT" != "5" ]; then
+            echo "::error::PPTX slide count mismatch (expected 5, got $PPTX_SLIDECOUNT)"
+            exit 1
+          fi
+          echo "PPTX slide count: $PPTX_SLIDECOUNT"
+
+          echo ""
+          echo "All golden baselines validated"
+
+      - name: Run all media-generator tests
+        run: |
+          cd packages/media-generator
+          NODE_ENV=test npx vitest run --reporter=verbose
+
+      - name: Upload golden test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-test-results
+          path: |
+            packages/media-generator/src/__fixtures__/golden/
+            packages/media-generator/coverage/
+          retention-days: 7

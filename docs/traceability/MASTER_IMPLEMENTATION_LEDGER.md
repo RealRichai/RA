@@ -269,6 +269,22 @@ This document serves as the single source of truth for feature implementation st
 |---------|-------------|-------------|---------|--------|----------|-------|
 | Generation Evidence | SOC2 CC-6.1 audit trail | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/evidence/generation-evidence.ts` | `packages/media-generator/src/__tests__/deterministic.test.ts` (integration) |
 
+### 6.5 Golden Tests & Quality Assurance
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| HTML Renderer Golden Tests | Normalized DOM hash validation | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/__tests__/golden.test.ts` | 6 tests |
+| PDF Generator Golden Tests | Page count + text content hash | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/__tests__/golden.test.ts` | 6 tests |
+| PPTX Generator Golden Tests | Slide count + buffer size tolerance | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/__tests__/golden.test.ts` | 4 tests |
+| Cross-Generator Consistency | Compliance block consistency across formats | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/__tests__/golden.test.ts` | 2 tests |
+| Regression Guards | Layout and structure preservation checks | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/__tests__/golden.test.ts` | 3 tests |
+| Golden Baselines | Stored SHA256 hashes for comparison | Global | `@realriches/media-generator` | **Implemented** | `packages/media-generator/src/__fixtures__/golden/baselines.json` | N/A |
+| Template Quality Gate CI | CI job fails on baseline deviation | Global | `.github/workflows/ci.yml` | **Implemented** | `template-quality-gate` job | 21 golden tests |
+
+**Quality Assurance Documentation:**
+- `docs/product/media-quality.md` - Golden test framework documentation
+- Baseline regeneration: `REGENERATE_GOLDEN_BASELINES=true pnpm --filter @realriches/media-generator test`
+
 ---
 
 ## 7. 3D Tours (SOG/WebGPU)
@@ -644,7 +660,7 @@ This document serves as the single source of truth for feature implementation st
 | Document Vault | 14 | 0 | 0 | 14 |
 | AI Agents | 16 | 0 | 0 | 16 |
 | Agent Governance | 11 | 0 | 0 | 11 |
-| Media Generation | 9 | 0 | 0 | 9 |
+| Media Generation | 16 | 0 | 0 | 16 |
 | 3D Tours | 27 | 0 | 0 | 27 |
 | Mobile | 2 | 0 | 3 | 5 |
 | Security/SOC2 | 12 | 0 | 0 | 12 |
