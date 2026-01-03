@@ -1177,8 +1177,11 @@ jobs:
 
       - name: Build shared packages
         run: |
-          # Build packages that tour-conversion tests depend on
+          # Build packages that tour-delivery and tour-conversion depend on
           pnpm --filter @realriches/utils build
+          pnpm --filter @realriches/config build
+          pnpm --filter @realriches/database build
+          pnpm --filter @realriches/feature-flags build
 
       - name: Run tour-conversion unit tests
         run: |
