@@ -1,0 +1,29 @@
+{
+  "id": "test-listing-std-001",
+  "title": "Cozy 1BR in Austin",
+  "address": {
+    "street": "456 South Congress Ave",
+    "unit": "201",
+    "city": "Austin",
+    "state": "TX",
+    "zip": "78704"
+  },
+  "rent": 1800,
+  "bedrooms": 1,
+  "bathrooms": 1,
+  "squareFeet": 650,
+  "availableDate": "2026-03-01",
+  "description": "Charming 1-bedroom in South Congress with great views.",
+  "amenities": [
+    "Pool",
+    "Gym",
+    "Parking"
+  ],
+  "photos": [
+    "https://example.com/photo1.jpg"
+  ],
+  "marketId": "US_STANDARD",
+  "propertyType": "apartment",
+  "yearBuilt": 2015,
+  "petPolicy": "Pets allowed"
+}

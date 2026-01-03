@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "pptxgenjs": "^3.12.0",
+    "sharp": "^0.33.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {

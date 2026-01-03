@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{listing.title}} - Modern Flyer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.5;
+      color: #1a1a2e;
+      background: #ffffff;
+    }
+
+    .flyer {
+      width: 8.5in;
+      min-height: 11in;
+      padding: 0.5in;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Hero Section */
+    .hero {
+      position: relative;
+      height: 4in;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+
+    .hero-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.9;
+    }
+
+    .hero-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 24px;
+      background: linear-gradient(transparent, rgba(0,0,0,0.7));
+      color: white;
+    }
+
+    .hero-price {
+      font-size: 36px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .hero-address {
+      font-size: 18px;
+      opacity: 0.95;
+    }
+
+    /* Property Title */
+    .property-title {
+      font-size: 28px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 16px;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-box {
+      background: #f8f9ff;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 4px;
+    }
+
+    /* Description */
+    .description {
+      font-size: 14px;
+      color: #444;
+      line-height: 1.7;
+      margin-bottom: 24px;
+    }
+
+    /* Amenities */
+    .amenities-section {
+      margin-bottom: 24px;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-bottom: 12px;
+    }
+
+    .amenities-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .amenity-tag {
+      background: #e8ecff;
+      color: #667eea;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    /* Contact Section */
+    .contact-section {
+      background: #1a1a2e;
+      color: white;
+      padding: 20px;
+      border-radius: 12px;
+      margin-top: auto;
+    }
+
+    .contact-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .contact-info {
+      display: flex;
+      gap: 24px;
+      font-size: 13px;
+    }
+
+    /* Compliance Footer */
+    .compliance-footer {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid #eee;
+    }
+
+    /* Print Styles */
+    @media print {
+      .flyer {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="flyer">
+    <!-- Hero Image -->
+    <div class="hero">
+      {{#if listing.photos.0}}
+      <img src="{{listing.photos.0}}" alt="{{listing.title}}" class="hero-image" />
+      {{/if}}
+      <div class="hero-overlay">
+        <div class="hero-price">${{listing.rent}}/month</div>
+        <div class="hero-address">{{listing.address.street}} {{#if listing.address.unit}}#{{listing.address.unit}}{{/if}}</div>
+      </div>
+    </div>
+
+    <!-- Title -->
+    <h1 class="property-title">{{listing.title}}</h1>
+
+    <!-- Stats Grid -->
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-value">{{listing.bedrooms}}</div>
+        <div class="stat-label">Bedrooms</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value">{{listing.bathrooms}}</div>
+        <div class="stat-label">Bathrooms</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value">{{listing.squareFeet}}</div>
+        <div class="stat-label">Sq Ft</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value">{{formatDate listing.availableDate "MMM D"}}</div>
+        <div class="stat-label">Available</div>
+      </div>
+    </div>
+
+    <!-- Description -->
+    <p class="description">{{listing.description}}</p>
+
+    <!-- Amenities -->
+    <div class="amenities-section">
+      <h2 class="section-title">Amenities</h2>
+      <div class="amenities-grid">
+        {{#each listing.amenities}}
+        <span class="amenity-tag">{{this}}</span>
+        {{/each}}
+      </div>
+    </div>
+
+    <!-- Contact Section -->
+    <div class="contact-section">
+      <div class="contact-title">Schedule a Viewing</div>
+      <div class="contact-info">
+        <span>{{agent.name}}</span>
+        <span>{{agent.phone}}</span>
+        <span>{{agent.email}}</span>
+      </div>
+    </div>
+
+    <!-- Compliance Footer Placeholder -->
+    <div class="compliance-footer">
+      <!-- COMPLIANCE_BLOCKS_PLACEHOLDER -->
+    </div>
+  </div>
+</body>
+</html>

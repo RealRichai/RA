@@ -1,0 +1,30 @@
+{
+  "id": "test-listing-nyc-001",
+  "title": "Modern 2BR in Chelsea",
+  "address": {
+    "street": "123 West 23rd Street",
+    "unit": "4B",
+    "city": "New York",
+    "state": "NY",
+    "zip": "10011"
+  },
+  "rent": 3500,
+  "bedrooms": 2,
+  "bathrooms": 1,
+  "squareFeet": 950,
+  "availableDate": "2026-02-01",
+  "description": "Sun-drenched 2-bedroom apartment in Chelsea with hardwood floors.",
+  "amenities": [
+    "In-unit Washer/Dryer",
+    "Dishwasher",
+    "Central A/C"
+  ],
+  "photos": [
+    "https://example.com/photo1.jpg",
+    "https://example.com/photo2.jpg"
+  ],
+  "marketId": "NYC_STRICT",
+  "propertyType": "apartment",
+  "yearBuilt": 1925,
+  "petPolicy": "Cats and small dogs allowed"
+}

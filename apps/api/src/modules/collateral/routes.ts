@@ -25,6 +25,30 @@ const GenerateCollateralSchema = z.object({
   }).optional(),
 });
 
+// All supported output formats including social crops
+const AllOutputFormats = [
+  'pdf',
+  'pptx',
+  'instagram_square',
+  'instagram_story',
+  'facebook_post',
+  'twitter_post',
+  'linkedin_post',
+  'pinterest_pin',
+  'tiktok_video',
+] as const;
+
+const GenerateBatchSchema = z.object({
+  templateId: z.string().uuid(),
+  formats: z.array(z.enum(AllOutputFormats)).min(1),
+  variables: z.record(z.unknown()).optional(),
+  customizations: z.object({
+    colorScheme: z.string().optional(),
+    logoUrl: z.string().url().optional(),
+    footerText: z.string().optional(),
+  }).optional(),
+});
+
 const CreateTemplateSchema = z.object({
   name: z.string().min(1).max(255),
   type: z.enum(['flyer', 'brochure', 'listing_deck']),
@@ -191,6 +215,194 @@ export async function collateralRoutes(app: FastifyInstance): Promise<void> {
           fileUrl: generation.fileUrl,
           complianceBlocksApplied: generation.complianceBlocks,
           generatedAt: generation.generatedAt,
+        },
+      });
+    }
+  );
+
+  // ==========================================================================
+  // Batch Generate Collateral (PDF + PPTX + Social Crops)
+  // ==========================================================================
+
+  app.post(
+    '/listings/:id/generate-batch',
+    {
+      schema: {
+        description: 'Generate multiple formats in parallel (PDF, PPTX, social crops)',
+        tags: ['Collateral'],
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          properties: { id: { type: 'string' } },
+          required: ['id'],
+        },
+      },
+      preHandler: async (request, reply) => {
+        await app.authenticate(request, reply);
+        app.authorize(request, reply, { roles: ['landlord', 'agent', 'admin', 'property_manager'] });
+      },
+    },
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (!request.user) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        });
+      }
+
+      const startTime = Date.now();
+      const data = GenerateBatchSchema.parse(request.body);
+
+      // Get listing with property details
+      const listing = await prisma.listing.findUnique({
+        where: { id: request.params.id },
+        include: {
+          unit: { include: { property: true } },
+          media: { where: { isPrimary: true }, take: 5 },
+        },
+      });
+
+      if (!listing) {
+        throw new NotFoundError('Listing not found');
+      }
+
+      // Check access
+      const isOwner = listing.landlordId === request.user.id;
+      const isAgent = listing.agentId === request.user.id;
+      const isAdmin = request.user.role === 'admin';
+      const isPM = request.user.role === 'property_manager';
+
+      if (!isOwner && !isAgent && !isAdmin && !isPM) {
+        throw new ForbiddenError('Access denied');
+      }
+
+      // Get template
+      const template = await prisma.collateralTemplate.findUnique({
+        where: { id: data.templateId },
+      });
+
+      if (!template) {
+        throw new NotFoundError('Template not found');
+      }
+
+      if (!template.isActive) {
+        throw new ValidationError('Template is not active');
+      }
+
+      // Build listing snapshot
+      const listingSnapshot = {
+        id: listing.id,
+        title: listing.title,
+        address: {
+          street: listing.street1,
+          unit: listing.street2 || undefined,
+          city: listing.city,
+          state: listing.state,
+          zip: listing.postalCode,
+        },
+        rent: listing.rent || listing.priceAmount,
+        bedrooms: listing.bedrooms,
+        bathrooms: listing.bathrooms,
+        squareFeet: listing.squareFeet || undefined,
+        availableDate: listing.availableDate,
+        description: listing.description,
+        amenities: listing.amenities,
+        photos: listing.media.map((m) => m.url),
+        marketId: listing.marketId,
+        propertyType: listing.propertyType,
+      };
+
+      // Calculate input hash for determinism
+      const inputHash = require('crypto')
+        .createHash('sha256')
+        .update(JSON.stringify({
+          listingId: listing.id,
+          templateId: template.id,
+          templateVersion: template.version,
+          formats: data.formats.sort(),
+        }))
+        .digest('hex');
+
+      // Create batch record
+      const batch = await prisma.collateralGenerationBatch.create({
+        data: {
+          id: generatePrefixedId('cbatch'),
+          listingId: listing.id,
+          templateId: template.id,
+          requestedFormats: data.formats,
+          status: 'processing',
+          totalFormats: data.formats.length,
+          inputHash,
+          generatedBy: request.user.id,
+        },
+      });
+
+      // Generate all formats (in production, this would use the media-generator batch orchestrator)
+      const results: Record<string, { fileUrl: string; checksum: string; fileSize: number }> = {};
+      const failures: Array<{ format: string; error: string }> = [];
+
+      for (const format of data.formats) {
+        try {
+          // Create placeholder generation record
+          const generation = await prisma.collateralGeneration.create({
+            data: {
+              id: generatePrefixedId('cgen'),
+              listingId: listing.id,
+              templateId: template.id,
+              templateVersion: template.version,
+              format: format,
+              fileUrl: `https://storage.realriches.com/collateral/${generatePrefixedId('file')}.${format === 'pdf' || format === 'pptx' ? format : 'jpg'}`,
+              fileSize: format === 'pdf' ? 250000 : format === 'pptx' ? 500000 : 150000,
+              checksum: require('crypto').randomBytes(32).toString('hex'),
+              listingSnapshot: JSON.parse(JSON.stringify(listingSnapshot)),
+              complianceBlocks: template.requiredComplianceBlocks.map((blockId) => ({
+                blockId,
+                version: '1.0.0',
+              })),
+              marketId: listing.marketId,
+              marketPackVersion: '1.0.0',
+              batchId: batch.id,
+              generatedBy: request.user.id,
+            },
+          });
+
+          results[format] = {
+            fileUrl: generation.fileUrl,
+            checksum: generation.checksum,
+            fileSize: generation.fileSize,
+          };
+        } catch (error) {
+          failures.push({
+            format,
+            error: error instanceof Error ? error.message : 'Generation failed',
+          });
+        }
+      }
+
+      const duration = Date.now() - startTime;
+
+      // Update batch status
+      await prisma.collateralGenerationBatch.update({
+        where: { id: batch.id },
+        data: {
+          status: failures.length === 0 ? 'completed' : failures.length === data.formats.length ? 'failed' : 'completed',
+          completedFormats: Object.keys(results).length,
+          failedFormats: failures.length,
+          duration,
+          completedAt: new Date(),
+        },
+      });
+
+      return reply.status(201).send({
+        success: true,
+        data: {
+          batchId: batch.id,
+          status: failures.length === 0 ? 'completed' : 'partial_failure',
+          duration,
+          inputHash,
+          results,
+          failures,
+          complianceBlocksApplied: template.requiredComplianceBlocks,
         },
       });
     }

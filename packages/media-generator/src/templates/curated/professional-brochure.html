@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{listing.title}} - Professional Brochure</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Georgia', serif;
+      line-height: 1.6;
+      color: #2c3e50;
+      background: #ffffff;
+    }
+
+    .brochure {
+      width: 8.5in;
+      min-height: 11in;
+    }
+
+    /* Cover Page */
+    .cover-page {
+      height: 11in;
+      display: flex;
+      flex-direction: column;
+      page-break-after: always;
+    }
+
+    .cover-hero {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cover-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .cover-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 48px;
+      background: linear-gradient(transparent, rgba(0,0,0,0.85));
+      color: white;
+    }
+
+    .cover-title {
+      font-size: 42px;
+      font-weight: 400;
+      letter-spacing: -1px;
+      margin-bottom: 16px;
+    }
+
+    .cover-address {
+      font-size: 18px;
+      opacity: 0.9;
+      margin-bottom: 24px;
+    }
+
+    .cover-price {
+      font-size: 32px;
+      font-weight: 600;
+      color: #e6c87d;
+    }
+
+    .brokerage-logo {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      background: white;
+      padding: 12px 20px;
+      border-radius: 4px;
+    }
+
+    /* Details Page */
+    .details-page {
+      min-height: 11in;
+      padding: 0.75in;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 48px;
+      page-break-after: always;
+    }
+
+    .details-left {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .property-summary {
+      margin-bottom: 32px;
+    }
+
+    .summary-title {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #95a5a6;
+      margin-bottom: 16px;
+    }
+
+    .summary-description {
+      font-size: 16px;
+      line-height: 1.8;
+      color: #34495e;
+    }
+
+    .key-features {
+      flex: 1;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .feature-item {
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .feature-value {
+      font-size: 28px;
+      font-weight: 600;
+      color: #2c3e50;
+    }
+
+    .feature-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #95a5a6;
+      margin-top: 4px;
+    }
+
+    .details-right {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .photo-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .photo-grid img {
+      width: 100%;
+      height: 150px;
+      object-fit: cover;
+      border-radius: 8px;
+    }
+
+    .amenities-section {
+      flex: 1;
+    }
+
+    .amenities-list {
+      columns: 2;
+      column-gap: 24px;
+    }
+
+    .amenity-item {
+      padding: 8px 0;
+      font-size: 14px;
+      color: #34495e;
+      border-bottom: 1px solid #eee;
+      break-inside: avoid;
+    }
+
+    .amenity-item::before {
+      content: "✓";
+      color: #27ae60;
+      margin-right: 8px;
+    }
+
+    /* Compliance Page */
+    .compliance-page {
+      min-height: 11in;
+      padding: 0.75in;
+      page-break-before: always;
+    }
+
+    .compliance-header {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #95a5a6;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid #eee;
+    }
+
+    /* Contact Footer */
+    .contact-bar {
+      margin-top: 32px;
+      padding: 24px;
+      background: #2c3e50;
+      color: white;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-radius: 8px;
+    }
+
+    .agent-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .agent-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: #e6c87d;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 600;
+      color: #2c3e50;
+    }
+
+    .agent-name {
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .agent-title {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+
+    .contact-details {
+      text-align: right;
+      font-size: 14px;
+    }
+
+    .contact-details div {
+      margin-bottom: 4px;
+    }
+
+    /* Print Styles */
+    @media print {
+      .cover-page,
+      .details-page,
+      .compliance-page {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="brochure">
+    <!-- Cover Page -->
+    <div class="cover-page">
+      <div class="brokerage-logo">
+        {{brokerage.name}}
+      </div>
+      <div class="cover-hero">
+        {{#if listing.photos.0}}
+        <img src="{{listing.photos.0}}" alt="{{listing.title}}" class="cover-image" />
+        {{/if}}
+        <div class="cover-overlay">
+          <h1 class="cover-title">{{listing.title}}</h1>
+          <p class="cover-address">
+            {{listing.address.street}} {{#if listing.address.unit}}#{{listing.address.unit}}{{/if}}<br>
+            {{listing.address.city}}, {{listing.address.state}} {{listing.address.zip}}
+          </p>
+          <div class="cover-price">${{listing.rent}}/month</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Details Page -->
+    <div class="details-page">
+      <div class="details-left">
+        <div class="property-summary">
+          <h2 class="summary-title">About This Property</h2>
+          <p class="summary-description">{{listing.description}}</p>
+        </div>
+
+        <div class="key-features">
+          <h2 class="summary-title">Key Features</h2>
+          <div class="features-grid">
+            <div class="feature-item">
+              <div class="feature-value">{{listing.bedrooms}}</div>
+              <div class="feature-label">Bedrooms</div>
+            </div>
+            <div class="feature-item">
+              <div class="feature-value">{{listing.bathrooms}}</div>
+              <div class="feature-label">Bathrooms</div>
+            </div>
+            <div class="feature-item">
+              <div class="feature-value">{{listing.squareFeet}}</div>
+              <div class="feature-label">Square Feet</div>
+            </div>
+            <div class="feature-item">
+              <div class="feature-value">{{listing.yearBuilt}}</div>
+              <div class="feature-label">Year Built</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="details-right">
+        <div class="photo-grid">
+          {{#each listing.photos}}
+          {{#if @index}}{{#if (lt @index 4)}}
+          <img src="{{this}}" alt="Property photo {{@index}}" />
+          {{/if}}{{/if}}
+          {{/each}}
+        </div>
+
+        <div class="amenities-section">
+          <h2 class="summary-title">Amenities & Features</h2>
+          <div class="amenities-list">
+            {{#each listing.amenities}}
+            <div class="amenity-item">{{this}}</div>
+            {{/each}}
+          </div>
+        </div>
+
+        <div class="contact-bar">
+          <div class="agent-info">
+            <div class="agent-avatar">{{agent.initials}}</div>
+            <div>
+              <div class="agent-name">{{agent.name}}</div>
+              <div class="agent-title">{{agent.title}}</div>
+            </div>
+          </div>
+          <div class="contact-details">
+            <div>{{agent.phone}}</div>
+            <div>{{agent.email}}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Compliance Page -->
+    <div class="compliance-page">
+      <h2 class="compliance-header">Important Disclosures</h2>
+      <!-- COMPLIANCE_BLOCKS_PLACEHOLDER -->
+    </div>
+  </div>
+</body>
+</html>

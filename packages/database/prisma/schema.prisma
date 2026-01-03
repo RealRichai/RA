@@ -496,6 +496,7 @@ model Listing {
   availability       ListingAvailability?
   tourAssets         TourAsset[]
   collateralGenerations CollateralGeneration[]
+  collateralBatches     CollateralGenerationBatch[]
 
   @@index([propertyId])
   @@index([landlordId])
@@ -1778,6 +1779,7 @@ model CollateralTemplate {
   version                  String   @default("1.0.0")
   htmlTemplate             String   @map("html_template") @db.Text
   pptxTemplate             Json?    @map("pptx_template")
+  socialCropConfig         Json?    @map("social_crop_config") // SocialCropTemplateConfig
   variables                Json     @default("[]")
   requiredComplianceBlocks String[] @default([]) @map("required_compliance_blocks")
   supportedFormats         String[] @default(["pdf"]) @map("supported_formats")
@@ -1790,6 +1792,7 @@ model CollateralTemplate {
   updatedAt                DateTime @updatedAt @map("updated_at")
 
   generations CollateralGeneration[]
+  versions    CollateralTemplateVersion[]
 
   @@index([type])
   @@index([source])
@@ -1798,12 +1801,33 @@ model CollateralTemplate {
   @@map("collateral_templates")
 }
 
+model CollateralTemplateVersion {
+  id           String   @id @default(uuid()) @db.Uuid
+  templateId   String   @map("template_id") @db.Uuid
+  version      String   // semver: "1.0.0"
+  htmlTemplate String   @map("html_template") @db.Text
+  pptxConfig   Json?    @map("pptx_config")
+  socialConfig Json?    @map("social_config")
+  variables    Json     @default("[]")
+  changelog    String?
+  isActive     Boolean  @default(false) @map("is_active")
+  createdBy    String   @map("created_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  template CollateralTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, version])
+  @@index([templateId])
+  @@index([isActive])
+  @@map("collateral_template_versions")
+}
+
 model CollateralGeneration {
   id                String   @id @default(uuid()) @db.Uuid
   listingId         String   @map("listing_id") @db.Uuid
   templateId        String   @map("template_id") @db.Uuid
   templateVersion   String   @map("template_version")
-  format            String   // pdf, pptx
+  format            String   // pdf, pptx, instagram_square, etc.
   fileUrl           String   @map("file_url")
   fileSize          Int      @map("file_size")
   checksum          String   // SHA-256
@@ -1812,17 +1836,45 @@ model CollateralGeneration {
   marketId          String   @map("market_id")
   marketPackVersion String   @map("market_pack_version")
   evidenceRecordId  String?  @map("evidence_record_id") @db.Uuid
+  batchId           String?  @map("batch_id") @db.Uuid
   generatedBy       String   @map("generated_by") @db.Uuid
   generatedAt       DateTime @default(now()) @map("generated_at")
 
-  template CollateralTemplate @relation(fields: [templateId], references: [id])
-  listing  Listing             @relation(fields: [listingId], references: [id])
+  template CollateralTemplate        @relation(fields: [templateId], references: [id])
+  listing  Listing                   @relation(fields: [listingId], references: [id])
+  batch    CollateralGenerationBatch? @relation(fields: [batchId], references: [id])
 
   @@index([listingId])
   @@index([templateId])
   @@index([generatedBy])
   @@index([generatedAt])
+  @@index([batchId])
   @@map("collateral_generations")
+}
+
+model CollateralGenerationBatch {
+  id               String   @id @default(uuid()) @db.Uuid
+  listingId        String   @map("listing_id") @db.Uuid
+  templateId       String   @map("template_id") @db.Uuid
+  requestedFormats String[] @map("requested_formats")
+  status           String   @default("pending") // pending, processing, completed, failed
+  totalFormats     Int      @map("total_formats")
+  completedFormats Int      @default(0) @map("completed_formats")
+  failedFormats    Int      @default(0) @map("failed_formats")
+  inputHash        String   @map("input_hash")
+  duration         Int?     // milliseconds
+  evidenceRecordId String?  @map("evidence_record_id") @db.Uuid
+  generatedBy      String   @map("generated_by") @db.Uuid
+  startedAt        DateTime @default(now()) @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+
+  generations CollateralGeneration[]
+  listing     Listing @relation(fields: [listingId], references: [id])
+
+  @@index([listingId])
+  @@index([status])
+  @@index([generatedBy])
+  @@map("collateral_generation_batches")
 }
 
 // =============================================================================

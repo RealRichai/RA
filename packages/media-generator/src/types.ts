@@ -34,6 +34,47 @@ export type OutputFormat = (typeof OutputFormat)[keyof typeof OutputFormat];
 export const OutputFormatSchema = z.enum(['pdf', 'pptx']);
 
 // ============================================================================
+// Social Crop Formats
+// ============================================================================
+
+export const SocialCropFormat = {
+  INSTAGRAM_SQUARE: 'instagram_square',
+  INSTAGRAM_STORY: 'instagram_story',
+  FACEBOOK_POST: 'facebook_post',
+  TWITTER_POST: 'twitter_post',
+  LINKEDIN_POST: 'linkedin_post',
+  PINTEREST_PIN: 'pinterest_pin',
+  TIKTOK_VIDEO: 'tiktok_video',
+} as const;
+
+export type SocialCropFormat = (typeof SocialCropFormat)[keyof typeof SocialCropFormat];
+
+export const SocialCropFormatSchema = z.enum([
+  'instagram_square',
+  'instagram_story',
+  'facebook_post',
+  'twitter_post',
+  'linkedin_post',
+  'pinterest_pin',
+  'tiktok_video',
+]);
+
+export const SocialCropDimensions: Record<SocialCropFormat, { width: number; height: number }> = {
+  instagram_square: { width: 1080, height: 1080 },
+  instagram_story: { width: 1080, height: 1920 },
+  facebook_post: { width: 1200, height: 630 },
+  twitter_post: { width: 1200, height: 675 },
+  linkedin_post: { width: 1200, height: 627 },
+  pinterest_pin: { width: 1000, height: 1500 },
+  tiktok_video: { width: 1080, height: 1920 },
+};
+
+// Combined format type for batch generation
+export type AllOutputFormat = OutputFormat | SocialCropFormat;
+
+export const AllOutputFormatSchema = z.union([OutputFormatSchema, SocialCropFormatSchema]);
+
+// ============================================================================
 // Template Source
 // ============================================================================
 
@@ -335,3 +376,92 @@ export interface ListingSnapshot {
   utilities?: string[];
   parkingSpaces?: number;
 }
+
+// ============================================================================
+// Batch Generation Types
+// ============================================================================
+
+export interface BatchGenerationRequest {
+  listingId: string;
+  templateId: string;
+  formats: AllOutputFormat[];
+  variables?: Record<string, unknown>;
+  customizations?: CollateralCustomizations;
+  userId: string;
+}
+
+export const BatchGenerationRequestSchema = z.object({
+  listingId: z.string().uuid(),
+  templateId: z.string().uuid(),
+  formats: z.array(AllOutputFormatSchema).min(1),
+  variables: z.record(z.unknown()).optional(),
+  customizations: z.object({
+    colorScheme: z.string().optional(),
+    logoUrl: z.string().url().optional(),
+    footerText: z.string().optional(),
+  }).optional(),
+  userId: z.string().uuid(),
+});
+
+export interface BatchGenerationResult {
+  batchId: string;
+  status: 'completed' | 'partial_failure' | 'failed';
+  duration: number;
+  inputHash: string;
+  results: Map<AllOutputFormat, SingleGenerationResult>;
+  failures: Array<{ format: AllOutputFormat; error: string }>;
+  evidenceRecordId: string;
+}
+
+export interface SingleGenerationResult {
+  format: AllOutputFormat;
+  fileUrl: string;
+  fileSize: number;
+  checksum: string;
+  complianceBlocksApplied: AppliedComplianceBlock[];
+}
+
+// ============================================================================
+// Image Generation Types (Social Crops)
+// ============================================================================
+
+export interface ImageGenerationOptions {
+  quality?: number; // 1-100, default 90
+  watermark?: string;
+  includeComplianceFooter?: boolean;
+  complianceFooterHeight?: number;
+}
+
+export interface ImageGenerationResult {
+  buffer: Buffer;
+  checksum: string;
+  format: SocialCropFormat;
+  width: number;
+  height: number;
+  mimeType: 'image/png' | 'image/jpeg';
+  appliedBlocks: AppliedComplianceBlock[];
+}
+
+export interface SocialCropLayout {
+  photoAreaPercent: number;
+  textPosition: 'top' | 'bottom' | 'overlay';
+  includeComplianceFooter: boolean;
+  complianceFooterHeight: number;
+  fontSize: {
+    title: number;
+    price: number;
+    details: number;
+  };
+}
+
+export const DefaultSocialCropLayout: SocialCropLayout = {
+  photoAreaPercent: 75,
+  textPosition: 'bottom',
+  includeComplianceFooter: true,
+  complianceFooterHeight: 60,
+  fontSize: {
+    title: 32,
+    price: 48,
+    details: 24,
+  },
+};

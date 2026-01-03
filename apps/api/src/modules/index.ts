@@ -31,6 +31,7 @@ import { commercialRoutes } from './commercial/routes';
 import { commonAreaRoutes } from './common-areas/routes';
 import { communicationRoutes } from './communications/routes';
 import { complianceRoutes } from './compliance/routes';
+import { demoRoutes } from './demo/routes';
 import { esignatureRoutes } from './documents/esignature';
 import { documentRoutes } from './documents/routes';
 import { evidenceRoutes } from './evidence/routes';
@@ -93,6 +94,9 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
 
   // Webhooks (no auth, signature verification)
   await app.register(webhookRoutes, { prefix: '/webhooks' });
+
+  // Demo routes (public, no auth required)
+  await app.register(demoRoutes, { prefix: '/demo' });
 
   // API routes with prefix
   await app.register(
