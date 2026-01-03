@@ -112,7 +112,7 @@ function buildUserPrompt(input: CopyGeneratorInput): string {
     listingDraft.squareFeet ? `Square Feet: ${listingDraft.squareFeet}` : null,
     `Monthly Rent: $${listingDraft.monthlyRent.toLocaleString()}`,
     `Address: ${listingDraft.address.street}, ${listingDraft.address.city}, ${listingDraft.address.state} ${listingDraft.address.zipCode}`,
-    listingDraft.unit ? `Unit: ${listingDraft.address.unit}` : null,
+    listingDraft.address.unit ? `Unit: ${listingDraft.address.unit}` : null,
   ].filter(Boolean).join('\n');
 
   const amenitiesInfo = listingDraft.amenities.length > 0

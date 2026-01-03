@@ -2,5 +2,6 @@
  * Templates module
  */
 
-export { TemplateLoader, DefaultTemplateLoader } from './template-loader';
+export type { TemplateLoader } from './template-loader';
+export { DefaultTemplateLoader } from './template-loader';
 export { TemplateSanitizer } from './template-sanitizer';

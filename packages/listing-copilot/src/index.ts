@@ -26,7 +26,8 @@ export { CopilotComplianceGate } from './compliance/copilot-compliance-gate';
 export { ChannelSimulator } from './channels/channel-simulator';
 
 // Templates
-export { TemplateLoader, DefaultTemplateLoader } from './templates/template-loader';
+export type { TemplateLoader } from './templates/template-loader';
+export { DefaultTemplateLoader } from './templates/template-loader';
 export { TemplateSanitizer } from './templates/template-sanitizer';
 
 // Evidence

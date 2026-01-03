@@ -9,7 +9,6 @@ import type {
   CopilotEvidenceRecord,
   ToolUsageEntry,
   PolicyGateResult,
-  CopilotStatus,
 } from '../types';
 
 // ============================================================================
@@ -94,7 +93,7 @@ export class CopilotEvidenceEmitter {
     listingId?: string;
     promptHash: string;
     budgetConsumed: number;
-    status: CopilotStatus;
+    status: 'completed' | 'blocked' | 'failed';
   }): CopilotEvidenceRecord {
     return {
       runId: params.runId,

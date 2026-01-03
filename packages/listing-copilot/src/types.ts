@@ -26,8 +26,8 @@ export const ListingDraftSchema = z.object({
     state: z.string(),
     zipCode: z.string(),
   }),
-  amenities: z.array(z.string()).default([]),
-  images: z.array(z.string()).default([]),
+  amenities: z.array(z.string()).optional().default([]),
+  images: z.array(z.string()).optional().default([]),
   /** Broker fee information for FARE Act compliance */
   hasBrokerFee: z.boolean().default(false),
   brokerFeeAmount: z.number().optional(),
@@ -55,8 +55,8 @@ export const PropertyFactsSchema = z.object({
     waterIncluded: z.boolean().default(false),
     internetIncluded: z.boolean().default(false),
   }).optional(),
-  nearbyTransit: z.array(z.string()).default([]),
-  neighborhoodHighlights: z.array(z.string()).default([]),
+  nearbyTransit: z.array(z.string()).optional().default([]),
+  neighborhoodHighlights: z.array(z.string()).optional().default([]),
   securityDeposit: z.number().optional(),
   leaseTermMonths: z.number().int().positive().optional(),
   availableDate: z.string().optional(),
@@ -88,11 +88,11 @@ export type ChannelTarget = z.infer<typeof ChannelTargetSchema>;
 
 export const CopilotOptionsSchema = z.object({
   /** Dry-run mode - simulates channel posting without actually posting. Default: true */
-  dryRun: z.boolean().default(true),
+  dryRun: z.boolean().optional().default(true),
   /** Skip compliance checks - for testing only. Default: false */
-  skipCompliance: z.boolean().default(false),
+  skipCompliance: z.boolean().optional().default(false),
   /** Target channels for publishing */
-  channels: z.array(ChannelTargetSchema).default([]),
+  channels: z.array(ChannelTargetSchema).optional().default([]),
 });
 
 export type CopilotOptions = z.infer<typeof CopilotOptionsSchema>;

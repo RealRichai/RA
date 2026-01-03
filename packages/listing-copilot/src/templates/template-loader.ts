@@ -213,7 +213,7 @@ export class DefaultTemplateLoader implements TemplateLoader {
   /**
    * Load default template for a type.
    */
-  loadDefault(type: TemplateType): LoadedTemplate {
+  loadDefault(type: TemplateType): Promise<LoadedTemplate> {
     let content: string;
 
     switch (type) {
@@ -230,12 +230,12 @@ export class DefaultTemplateLoader implements TemplateLoader {
         throw new TemplateValidationError(`Unknown template type: ${type as string}`);
     }
 
-    return {
+    return Promise.resolve({
       id: `default-${type}`,
       type,
       content,
       isDefault: true,
-    };
+    });
   }
 
   /**
