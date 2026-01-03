@@ -1,0 +1,128 @@
+version: '3.8'
+
+# E2E Test Environment
+# Hermetic, isolated environment for market-ready testing
+#
+# Usage:
+#   docker-compose -f docker-compose.test.yml up -d
+#   pnpm test:e2e
+#   docker-compose -f docker-compose.test.yml down -v
+
+services:
+  # PostgreSQL for test database
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: realriches_test
+      POSTGRES_PASSWORD: test_password_e2e
+      POSTGRES_DB: realriches_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U realriches_test -d realriches_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis for sessions and caching
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MinIO for S3-compatible object storage (vault, tours)
+  minio-test:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+    volumes:
+      - minio_test_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # API service
+  api-test:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://realriches_test:test_password_e2e@postgres-test:5432/realriches_test
+      REDIS_URL: redis://redis-test:6379
+      S3_ENDPOINT: http://minio-test:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin123
+      S3_BUCKET: realriches-test
+      JWT_SECRET: test-jwt-secret-for-e2e-testing
+      ENCRYPTION_KEY: test-encryption-key-32-bytes!!
+      PORT: 4000
+    ports:
+      - "4001:4000"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      minio-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Web frontend
+  web-test:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: development
+    environment:
+      NODE_ENV: test
+      NEXT_PUBLIC_API_URL: http://api-test:4000
+    ports:
+      - "3001:3000"
+    depends_on:
+      api-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Playwright test runner
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.40.0-jammy
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      E2E_BASE_URL: http://web-test:3000
+      E2E_API_URL: http://api-test:4000
+      CI: "true"
+    depends_on:
+      web-test:
+        condition: service_healthy
+    command: ["npx", "playwright", "test"]
+
+volumes:
+  postgres_test_data:
+  minio_test_data:
