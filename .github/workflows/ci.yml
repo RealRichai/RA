@@ -1092,8 +1092,8 @@ jobs:
       - name: Run shadow-write tests with chaos disabled
         run: |
           cd apps/api
-          # Run shadow-write tests (chaos is disabled by default)
-          NODE_ENV=test CHAOS_ENABLED=false npx vitest run --testNamePattern "Shadow Write" --reporter=verbose
+          # Run shadow-write tests with dedicated config (no setup.ts mock conflicts)
+          NODE_ENV=test CHAOS_ENABLED=false npx vitest run --config vitest.shadow-write.config.ts --reporter=verbose
 
       - name: Validate discrepancy verifier (fail-rate 0)
         run: |

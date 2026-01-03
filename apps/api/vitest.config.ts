@@ -12,6 +12,7 @@ export default defineConfig({
       'tests/transactions-integration.test.ts',
       'tests/metrics.test.ts',
       'tests/otel.test.ts',
+      'tests/shadow-write.test.ts',
     ],
     coverage: {
       provider: 'v8',
