@@ -14,6 +14,7 @@ import type {
   OpsGenieResponder,
   AlertSeverity,
 } from '../types';
+
 import { BaseAlertProvider, AlertProviderError } from './provider-interface';
 
 // =============================================================================

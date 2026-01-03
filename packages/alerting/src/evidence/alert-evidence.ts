@@ -86,7 +86,7 @@ function sanitizeForEvidence(obj: Record<string, unknown>): Record<string, unkno
       sanitized[key] = sanitizeForEvidence(value as Record<string, unknown>);
     } else if (Array.isArray(value)) {
       // Sanitize arrays of objects
-      sanitized[key] = value.map((item) =>
+      sanitized[key] = value.map((item): unknown =>
         typeof item === 'object' && item !== null
           ? sanitizeForEvidence(item as Record<string, unknown>)
           : item

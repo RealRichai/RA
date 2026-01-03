@@ -8,6 +8,7 @@
 import type { Result } from '@realriches/utils';
 
 import type { AlertRequest, AlertResponse, SlackProviderConfig, AlertSeverity } from '../types';
+
 import { BaseAlertProvider, AlertProviderError } from './provider-interface';
 
 // =============================================================================
@@ -68,10 +69,10 @@ export class SlackProvider extends BaseAlertProvider {
     this.isConfigured = !!config.webhookUrl && config.enabled;
   }
 
-  async validateCredentials(): Promise<boolean> {
+  validateCredentials(): Promise<boolean> {
     // Slack webhooks don't have a validation endpoint
     // We consider it valid if the URL is configured
-    return this.isConfigured;
+    return Promise.resolve(this.isConfigured);
   }
 
   async send(alert: AlertRequest): Promise<Result<AlertResponse, Error>> {

@@ -8,6 +8,7 @@
 import type { Result } from '@realriches/utils';
 
 import type { AlertRequest, AlertResponse, PagerDutyProviderConfig, AlertSeverity } from '../types';
+
 import { BaseAlertProvider, AlertProviderError } from './provider-interface';
 
 // =============================================================================
@@ -64,10 +65,10 @@ export class PagerDutyProvider extends BaseAlertProvider {
     this.isConfigured = !!config.routingKey && config.enabled;
   }
 
-  async validateCredentials(): Promise<boolean> {
+  validateCredentials(): Promise<boolean> {
     // PagerDuty Events API v2 doesn't have a validation endpoint
     // We consider it valid if the routing key is configured
-    return this.isConfigured;
+    return Promise.resolve(this.isConfigured);
   }
 
   async send(alert: AlertRequest): Promise<Result<AlertResponse, Error>> {

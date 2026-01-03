@@ -4,6 +4,12 @@
  * Loads alerting configuration from environment variables.
  */
 
+import { OpsGenieProvider } from '../providers/opsgenie';
+import { PagerDutyProvider } from '../providers/pagerduty';
+import type { IAlertProvider } from '../providers/provider-interface';
+import { SlackProvider } from '../providers/slack';
+import { AlertRouter } from '../router/alert-router';
+import { DEFAULT_ALERTING_CONFIG } from '../types';
 import type {
   AlertingConfig,
   SlackProviderConfig,
@@ -11,12 +17,6 @@ import type {
   OpsGenieProviderConfig,
   AlertProviderType,
 } from '../types';
-import { DEFAULT_ALERTING_CONFIG } from '../types';
-import { SlackProvider } from '../providers/slack';
-import { PagerDutyProvider } from '../providers/pagerduty';
-import { OpsGenieProvider } from '../providers/opsgenie';
-import type { IAlertProvider } from '../providers/provider-interface';
-import { AlertRouter } from '../router/alert-router';
 
 // =============================================================================
 // Environment Variable Names

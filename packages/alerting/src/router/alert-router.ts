@@ -7,6 +7,8 @@
 
 import { type Result, success, failure, logger } from '@realriches/utils';
 
+import { emitAlertEvidence } from '../evidence/alert-evidence';
+import type { IAlertProvider } from '../providers/provider-interface';
 import type {
   AlertRequest,
   AlertResponse,
@@ -16,8 +18,6 @@ import type {
   AlertSeverity,
 } from '../types';
 import { AlertRequestSchema, DEFAULT_ALERTING_CONFIG } from '../types';
-import type { IAlertProvider } from '../providers/provider-interface';
-import { emitAlertEvidence } from '../evidence/alert-evidence';
 
 // =============================================================================
 // Router Configuration
