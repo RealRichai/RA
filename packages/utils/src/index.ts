@@ -10,3 +10,4 @@ export * from './result';
 export * from './retry';
 export * from './pagination';
 export * from './validation';
+export * from './metrics';

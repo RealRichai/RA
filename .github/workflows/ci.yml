@@ -526,3 +526,219 @@ jobs:
           echo "  ✓ Composition root properly configured"
           echo "  ✓ Dynamic imports for test-only stores"
           echo ""
+
+  ops-runbooks:
+    name: Ops Runbook Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate runbook files exist
+        run: |
+          echo "Checking for required runbook files..."
+          MISSING=""
+
+          REQUIRED_FILES=(
+            "docs/ops/backup-strategy.md"
+            "docs/ops/restore-steps.md"
+            "docs/ops/restore-drill.md"
+            "docs/ops/incident-response.md"
+            "docs/ops/rollback-plan.md"
+          )
+
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              MISSING="$MISSING\n  - $file"
+            else
+              echo "✓ Found: $file"
+            fi
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing required runbook files:$MISSING"
+            exit 1
+          fi
+
+          echo "✓ All required runbook files exist"
+
+      - name: Validate backup-strategy.md headings
+        run: |
+          echo "Validating backup-strategy.md..."
+          FILE="docs/ops/backup-strategy.md"
+
+          REQUIRED_HEADINGS=(
+            "## Overview"
+            "## Backup Types"
+            "## Recovery Point Objective"
+            "## Recovery Time Objective"
+            "## Retention Policy"
+          )
+
+          for heading in "${REQUIRED_HEADINGS[@]}"; do
+            if ! grep -q "$heading" "$FILE"; then
+              echo "::error::Missing required heading in $FILE: $heading"
+              exit 1
+            fi
+            echo "✓ Found: $heading"
+          done
+
+          echo "✓ backup-strategy.md validation passed"
+
+      - name: Validate restore-steps.md headings
+        run: |
+          echo "Validating restore-steps.md..."
+          FILE="docs/ops/restore-steps.md"
+
+          REQUIRED_HEADINGS=(
+            "## Overview"
+            "## Prerequisites"
+            "## Restore Scenarios"
+            "## Post-Restore Checklist"
+          )
+
+          for heading in "${REQUIRED_HEADINGS[@]}"; do
+            if ! grep -q "$heading" "$FILE"; then
+              echo "::error::Missing required heading in $FILE: $heading"
+              exit 1
+            fi
+            echo "✓ Found: $heading"
+          done
+
+          echo "✓ restore-steps.md validation passed"
+
+      - name: Validate incident-response.md headings
+        run: |
+          echo "Validating incident-response.md..."
+          FILE="docs/ops/incident-response.md"
+
+          REQUIRED_HEADINGS=(
+            "## Overview"
+            "## Severity Levels"
+            "## Escalation Matrix"
+          )
+
+          for heading in "${REQUIRED_HEADINGS[@]}"; do
+            if ! grep -q "$heading" "$FILE"; then
+              echo "::error::Missing required heading in $FILE: $heading"
+              exit 1
+            fi
+            echo "✓ Found: $heading"
+          done
+
+          echo "✓ incident-response.md validation passed"
+
+      - name: Validate rollback-plan.md headings
+        run: |
+          echo "Validating rollback-plan.md..."
+          FILE="docs/ops/rollback-plan.md"
+
+          REQUIRED_HEADINGS=(
+            "## Overview"
+            "## Application Rollback"
+            "## Database Rollback"
+            "## Rollback Verification"
+          )
+
+          for heading in "${REQUIRED_HEADINGS[@]}"; do
+            if ! grep -q "$heading" "$FILE"; then
+              echo "::error::Missing required heading in $FILE: $heading"
+              exit 1
+            fi
+            echo "✓ Found: $heading"
+          done
+
+          echo "✓ rollback-plan.md validation passed"
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "  OPS RUNBOOK VALIDATION COMPLETE"
+          echo "=========================================="
+          echo ""
+          echo "Validated:"
+          echo "  ✓ backup-strategy.md"
+          echo "  ✓ restore-steps.md"
+          echo "  ✓ restore-drill.md"
+          echo "  ✓ incident-response.md"
+          echo "  ✓ rollback-plan.md"
+          echo ""
+
+  ops-scripts:
+    name: Ops Scripts Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify ops scripts are executable
+        run: |
+          echo "Checking ops scripts are executable..."
+          FAILED=""
+
+          SCRIPTS=(
+            "scripts/ops/verify-backups.sh"
+            "scripts/ops/generate-restore-checklist.sh"
+          )
+
+          for script in "${SCRIPTS[@]}"; do
+            if [ ! -f "$script" ]; then
+              echo "::error::Missing script: $script"
+              FAILED="$FAILED\n  - $script (missing)"
+            elif [ ! -x "$script" ]; then
+              echo "::error::Script not executable: $script"
+              FAILED="$FAILED\n  - $script (not executable)"
+            else
+              echo "✓ Executable: $script"
+            fi
+          done
+
+          if [ -n "$FAILED" ]; then
+            echo "::error::Script validation failed:$FAILED"
+            exit 1
+          fi
+
+          echo "✓ All ops scripts are executable"
+
+      - name: Test verify-backups.sh syntax
+        run: |
+          echo "Testing verify-backups.sh syntax..."
+          bash -n scripts/ops/verify-backups.sh
+          echo "✓ verify-backups.sh syntax is valid"
+
+      - name: Test generate-restore-checklist.sh syntax
+        run: |
+          echo "Testing generate-restore-checklist.sh syntax..."
+          bash -n scripts/ops/generate-restore-checklist.sh
+          echo "✓ generate-restore-checklist.sh syntax is valid"
+
+      - name: Run verify-backups.sh in CI mode
+        run: |
+          echo "Running verify-backups.sh in CI mode..."
+          CI=true ./scripts/ops/verify-backups.sh --verbose
+          echo "✓ verify-backups.sh runs successfully"
+
+      - name: Run generate-restore-checklist.sh
+        run: |
+          echo "Running generate-restore-checklist.sh..."
+          ./scripts/ops/generate-restore-checklist.sh > /tmp/checklist.md
+          if [ -s /tmp/checklist.md ]; then
+            echo "✓ Checklist generated successfully"
+            head -20 /tmp/checklist.md
+          else
+            echo "::error::Checklist generation produced empty output"
+            exit 1
+          fi
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "  OPS SCRIPTS VALIDATION COMPLETE"
+          echo "=========================================="
+          echo ""
+          echo "Validated:"
+          echo "  ✓ verify-backups.sh"
+          echo "  ✓ generate-restore-checklist.sh"
+          echo ""
