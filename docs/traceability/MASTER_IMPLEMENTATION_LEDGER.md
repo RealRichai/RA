@@ -567,6 +567,25 @@ This document serves as the single source of truth for feature implementation st
 | Docker Test Environment | Isolated postgres, redis, minio, api, web | Global | E2E | **Implemented** | `docker-compose.test.yml` | N/A |
 | CI Integration | Browser tests in GitHub Actions with artifacts | Global | CI | **Implemented** | `.github/workflows/ci.yml` (e2e-market-ready job) | N/A |
 
+### 16.4 Chaos Engineering
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| FaultInjector | Deterministic fault injection with seeded RNG | Global | `@realriches/testing` | **Implemented** | `packages/testing/src/fault-injector.ts` | `packages/testing/src/__tests__/fault-injector.test.ts` (30 tests) |
+| Production Guard | Hard block: CHAOS_ENABLED forbidden in production | Global | `@realriches/testing` | **Implemented** | `packages/testing/src/fault-injector.ts:67-72` | `packages/testing/src/__tests__/fault-injector.test.ts` |
+| ChaosProductionError | Custom error for production guard violations | Global | `@realriches/testing` | **Implemented** | `packages/testing/src/fault-injector.ts:15-22` | `packages/testing/src/__tests__/fault-injector.test.ts` |
+| InjectedFaultError | Trackable error with faultId for observability | Global | `@realriches/testing` | **Implemented** | `packages/testing/src/fault-injector.ts:24-36` | `packages/testing/src/__tests__/fault-injector.test.ts` |
+| ShadowWriteHarness | Generic dual-write test harness with metrics | Global | `@realriches/testing` | **Implemented** | `packages/testing/src/shadow-write-harness.ts` | `packages/testing/src/__tests__/shadow-write-harness.test.ts` (15 tests) |
+| Shadow Write Service | Dual-write for Listings with fault injection | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/shadow-write/service.ts` | `apps/api/tests/shadow-write.test.ts` |
+| Shadow Write Metrics | Prometheus metrics (failures, discrepancies, duration) | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/shadow-write/metrics.ts` | `apps/api/tests/shadow-write.test.ts` |
+| Shadow Write Evidence | EvidenceRecord emission for SOC2 audit trail | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/shadow-write/evidence.ts` | `apps/api/tests/shadow-write.test.ts` |
+| Discrepancy Verifier | Bounded verification job with pagination | Global | `@realriches/api` | **Implemented** | `apps/api/src/modules/shadow-write/discrepancy-verifier.ts` | `apps/api/tests/shadow-write.test.ts` |
+| Discrepancy Verifier Job | Hourly BullMQ job (1000 entity limit, 5min timeout) | Global | `@realriches/api` | **Implemented** | `apps/api/src/jobs/shadow-discrepancy-verifier.ts` | N/A (integration) |
+| Chaos GameDay Runner | Reproducible chaos experiment runner script | Global | Scripts | **Implemented** | `scripts/ops/chaos_gameday.sh` | `.github/workflows/ci.yml` (chaos-harness-smoke job) |
+| GameDay Safety Checks | Environment validation, fail-rate cap (0.3 max) | Global | Scripts | **Implemented** | `scripts/ops/chaos_gameday.sh:107-166` | `.github/workflows/ci.yml` (chaos-harness-smoke job) |
+| GameDay Artifact Collection | Logs, metrics, evidence snapshots | Global | Scripts | **Implemented** | `scripts/ops/chaos_gameday.sh:217-280` | N/A |
+| CI Chaos Harness Smoke | Validates guards, scripts, determinism (no live chaos) | Global | CI | **Implemented** | `.github/workflows/ci.yml` (chaos-harness-smoke job) | N/A |
+
 ---
 
 ## Summary Statistics
@@ -588,8 +607,8 @@ This document serves as the single source of truth for feature implementation st
 | Email Service | 11 | 0 | 0 | 11 |
 | Partner Contracts | 9 | 0 | 0 | 9 |
 | Feature Flags | 4 | 0 | 0 | 4 |
-| Testing Infrastructure | 18 | 0 | 0 | 18 |
-| **TOTAL** | **196** | **1** | **3** | **200** |
+| Testing Infrastructure | 32 | 0 | 0 | 32 |
+| **TOTAL** | **210** | **1** | **3** | **214** |
 
 ---
 
