@@ -1000,8 +1000,8 @@ jobs:
         run: |
           echo "Testing production guard..."
 
-          # Create test script
-          cat > /tmp/test-guard.mjs << 'EOF'
+          # Create test script in project directory so relative imports work
+          cat > test-guard.mjs << 'EOF'
           import { FaultInjector, ChaosProductionError } from './packages/testing/dist/index.js';
 
           // Test 1: Should throw in production
@@ -1081,7 +1081,8 @@ jobs:
           console.log('\n✓ All production guard tests passed');
           EOF
 
-          node /tmp/test-guard.mjs
+          node test-guard.mjs
+          rm test-guard.mjs
 
       - name: Run FaultInjector unit tests
         run: |
@@ -1098,8 +1099,8 @@ jobs:
         run: |
           echo "Testing discrepancy verifier with fail-rate 0..."
 
-          # Create test script
-          cat > /tmp/test-verifier.mjs << 'EOF'
+          # Create test script in project directory so relative imports work
+          cat > test-verifier.mjs << 'EOF'
           // This validates the verifier can be imported and instantiated
           // without actually running against a database
 
@@ -1139,4 +1140,5 @@ jobs:
           # Build API first
           pnpm --filter @realriches/api build 2>/dev/null || true
 
-          node /tmp/test-verifier.mjs || true
+          node test-verifier.mjs || true
+          rm -f test-verifier.mjs
