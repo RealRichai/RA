@@ -99,6 +99,7 @@ module.exports = {
     'coverage/',
     '*.js',
     'vitest.config.ts',
+    'vitest.*.config.ts',
     '*.test.ts',
     '**/tests/**',
     '**/prisma/seed.ts',
