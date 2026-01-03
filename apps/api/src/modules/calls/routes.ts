@@ -6,12 +6,12 @@
 
 import { voice } from '@realriches/agent-governance';
 import type { voice as VoiceTypes, ResultErr } from '@realriches/agent-governance';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 
 const { getTwilioProductionProvider, requiresTwoPartyConsent } = voice;
 type TwilioConfig = VoiceTypes.TwilioConfig;
 type VoiceCall = VoiceTypes.VoiceCall;
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 
 // =============================================================================
 // Schemas
