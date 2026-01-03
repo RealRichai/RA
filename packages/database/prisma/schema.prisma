@@ -8219,7 +8219,12 @@ model TourAsset {
   listingId         String          @map("listing_id") @db.Uuid
   market            String
 
-  // PLY source (raw 3DGS capture)
+  // Provenance tracking (SOG/WebGPU compliance)
+  uploaderId        String?         @map("uploader_id") @db.Uuid
+  uploaderEmail     String?         @map("uploader_email")
+  uploadedAt        DateTime?       @map("uploaded_at")
+
+  // PLY source (raw 3DGS capture) - PERMANENT RETENTION
   plyS3Key          String          @map("ply_s3_key")
   plyChecksum       String          @map("ply_checksum")
   plyVersionId      String?         @map("ply_version_id")
@@ -8255,6 +8260,7 @@ model TourAsset {
   @@index([market])
   @@index([status])
   @@index([createdAt])
+  @@index([uploaderId])
   @@map("tour_assets")
 }
 

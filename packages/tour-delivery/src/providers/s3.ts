@@ -3,6 +3,9 @@
  *
  * Used for PLY file retention (permanent source of truth).
  * PLY files should never be served directly to clients.
+ *
+ * RETENTION POLICY: PLY files are retained permanently. Delete operations
+ * are blocked unless invoked by SUPERADMIN with PLY_DELETE_OVERRIDE=true.
  */
 
 import {
@@ -20,13 +23,34 @@ import type {
   SignedUrlOptions,
   SignedUrlResult,
 } from '../types';
+import {
+  getPlyRetentionGuard,
+  isPlyKey,
+  type RetentionContext,
+  type PlyRetentionGuard,
+} from '../retention-guard';
+
+export interface S3StorageProviderOptions {
+  config: StorageProviderConfig;
+  /** Custom retention guard (for testing) */
+  retentionGuard?: PlyRetentionGuard;
+  /** Bypass retention guard (DANGEROUS - only for migration scripts) */
+  bypassRetentionGuard?: boolean;
+}
 
 export class S3StorageProvider implements StorageProvider {
   readonly name = 's3-ply';
   private client: S3Client;
   private bucket: string;
+  private retentionGuard: PlyRetentionGuard;
+  private bypassRetentionGuard: boolean;
 
-  constructor(config: StorageProviderConfig) {
+  constructor(config: StorageProviderConfig);
+  constructor(options: S3StorageProviderOptions);
+  constructor(configOrOptions: StorageProviderConfig | S3StorageProviderOptions) {
+    const isOptions = 'config' in configOrOptions;
+    const config = isOptions ? configOrOptions.config : configOrOptions;
+
     this.bucket = config.bucket;
     this.client = new S3Client({
       region: config.region,
@@ -36,6 +60,11 @@ export class S3StorageProvider implements StorageProvider {
       },
       ...(config.endpoint && { endpoint: config.endpoint }),
     });
+
+    this.retentionGuard = isOptions && configOrOptions.retentionGuard
+      ? configOrOptions.retentionGuard
+      : getPlyRetentionGuard();
+    this.bypassRetentionGuard = isOptions ? (configOrOptions.bypassRetentionGuard ?? false) : false;
   }
 
   async getSignedReadUrl(options: SignedUrlOptions): Promise<SignedUrlResult> {
@@ -85,7 +114,24 @@ export class S3StorageProvider implements StorageProvider {
     }
   }
 
-  async delete(key: string): Promise<void> {
+  /**
+   * Delete a file from S3.
+   *
+   * RETENTION POLICY: PLY files (.ply) are protected by retention policy.
+   * Delete will throw PlyRetentionError unless:
+   * - SUPERADMIN role is provided in context
+   * - PLY_DELETE_OVERRIDE=true environment variable is set
+   *
+   * @param key - S3 key to delete
+   * @param context - Retention context with actor info (required for PLY files)
+   * @throws PlyRetentionError if PLY file deletion is blocked
+   */
+  async delete(key: string, context?: RetentionContext): Promise<void> {
+    // Check if this is a PLY file and retention guard should be applied
+    if (isPlyKey(key) && !this.bypassRetentionGuard) {
+      this.retentionGuard.guardDelete(key, context ?? {});
+    }
+
     await this.client.send(
       new DeleteObjectCommand({
         Bucket: this.bucket,

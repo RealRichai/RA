@@ -1149,3 +1149,287 @@ jobs:
 
           node test-verifier.mjs || true
           rm -f test-verifier.mjs
+
+  # ---------------------------------------------------------------------------
+  # TOUR CONVERSION VALIDATION - SOG/WebGPU Compliance Tests
+  # ---------------------------------------------------------------------------
+
+  tour-conversion-validation:
+    name: Tour Conversion Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages
+        run: |
+          # Build packages that tour-conversion tests depend on
+          pnpm --filter @realriches/utils build
+
+      - name: Run tour-conversion unit tests
+        run: |
+          cd packages/tour-conversion
+          NODE_ENV=test npx vitest run --reporter=verbose
+
+      - name: Run tour-delivery unit tests
+        run: |
+          cd packages/tour-delivery
+          NODE_ENV=test npx vitest run --reporter=verbose
+
+      - name: Validate PLY retention guard
+        run: |
+          echo "Testing PLY retention guard..."
+
+          cat > test-retention.mjs << 'EOF'
+          import {
+            PlyRetentionGuard,
+            PlyRetentionError,
+            isPlyKey,
+          } from './packages/tour-delivery/dist/retention-guard.js';
+
+          console.log('Test 1: isPlyKey function');
+          if (!isPlyKey('test.ply')) {
+            console.log('FAIL: isPlyKey should return true for .ply files');
+            process.exit(1);
+          }
+          if (isPlyKey('test.sog')) {
+            console.log('FAIL: isPlyKey should return false for .sog files');
+            process.exit(1);
+          }
+          console.log('PASS: isPlyKey correctly identifies PLY files');
+
+          console.log('\nTest 2: Block delete without SUPERADMIN');
+          const guard = new PlyRetentionGuard({ emitEvidence: false });
+          const result = guard.checkDelete('test.ply', { role: 'ADMIN' });
+          if (result.allowed) {
+            console.log('FAIL: Non-SUPERADMIN should be blocked');
+            process.exit(1);
+          }
+          console.log('PASS: Non-SUPERADMIN delete blocked');
+
+          console.log('\nTest 3: Block SUPERADMIN without override env');
+          delete process.env.PLY_DELETE_OVERRIDE;
+          const result2 = guard.checkDelete('test.ply', { role: 'SUPERADMIN' });
+          if (result2.allowed) {
+            console.log('FAIL: SUPERADMIN without override should be blocked');
+            process.exit(1);
+          }
+          console.log('PASS: SUPERADMIN without override blocked');
+
+          console.log('\nTest 4: Allow SUPERADMIN with override env');
+          process.env.PLY_DELETE_OVERRIDE = 'true';
+          const result3 = guard.checkDelete('test.ply', { role: 'SUPERADMIN' });
+          if (!result3.allowed) {
+            console.log('FAIL: SUPERADMIN with override should be allowed');
+            process.exit(1);
+          }
+          console.log('PASS: SUPERADMIN with override allowed');
+
+          console.log('\nTest 5: guardDelete throws PlyRetentionError');
+          delete process.env.PLY_DELETE_OVERRIDE;
+          try {
+            guard.guardDelete('blocked.ply', { role: 'USER' });
+            console.log('FAIL: guardDelete should throw');
+            process.exit(1);
+          } catch (error) {
+            if (!(error instanceof PlyRetentionError)) {
+              console.log('FAIL: Should throw PlyRetentionError');
+              process.exit(1);
+            }
+            console.log('PASS: guardDelete throws PlyRetentionError');
+          }
+
+          console.log('\n✓ All PLY retention guard tests passed');
+          EOF
+
+          # Build tour-delivery first
+          pnpm --filter @realriches/tour-delivery build
+
+          node test-retention.mjs
+          rm test-retention.mjs
+
+      - name: Validate checksum and provenance
+        run: |
+          echo "Testing checksum and provenance..."
+
+          cat > test-provenance.mjs << 'EOF'
+          import { writeFileSync, unlinkSync, mkdirSync, rmdirSync } from 'fs';
+          import { join } from 'path';
+          import { tmpdir } from 'os';
+
+          import {
+            computeFileChecksum,
+            computeBufferChecksum,
+            verifyChecksum,
+          } from './packages/tour-conversion/dist/checksum.js';
+
+          import {
+            AssetProvenanceService,
+          } from './packages/tour-conversion/dist/provenance.js';
+
+          const testDir = join(tmpdir(), `ci-provenance-${Date.now()}`);
+          mkdirSync(testDir, { recursive: true });
+
+          try {
+            console.log('Test 1: Compute file checksum');
+            const testFile = join(testDir, 'test.ply');
+            writeFileSync(testFile, 'test ply content');
+            const checksum = await computeFileChecksum(testFile);
+            if (!checksum || checksum.length !== 64) {
+              console.log('FAIL: Invalid checksum format');
+              process.exit(1);
+            }
+            console.log('PASS: File checksum computed (SHA256)');
+
+            console.log('\nTest 2: Verify checksum');
+            const verified = await verifyChecksum(testFile, checksum);
+            if (!verified) {
+              console.log('FAIL: Checksum verification failed');
+              process.exit(1);
+            }
+            console.log('PASS: Checksum verification works');
+
+            console.log('\nTest 3: Buffer checksum');
+            const bufferChecksum = computeBufferChecksum(Buffer.from('test'));
+            if (!bufferChecksum || bufferChecksum.length !== 64) {
+              console.log('FAIL: Invalid buffer checksum');
+              process.exit(1);
+            }
+            console.log('PASS: Buffer checksum works');
+
+            console.log('\nTest 4: Provenance service');
+            const service = new AssetProvenanceService();
+            const uploadResult = await service.recordUpload('asset-123', testFile, {
+              listingId: 'listing-456',
+              market: 'nyc',
+              uploaderId: 'user-789',
+            });
+            if (!uploadResult.checksum || !uploadResult.sizeBytes) {
+              console.log('FAIL: Provenance upload failed');
+              process.exit(1);
+            }
+            console.log('PASS: Provenance service records uploads');
+
+            console.log('\nTest 5: Integrity verification');
+            const integrityResult = await service.verifyPlyIntegrity(
+              'asset-123',
+              testFile,
+              uploadResult.checksum
+            );
+            if (!integrityResult.valid) {
+              console.log('FAIL: Integrity verification failed');
+              process.exit(1);
+            }
+            console.log('PASS: Integrity verification works');
+
+            console.log('\n✓ All checksum and provenance tests passed');
+
+          } finally {
+            // Cleanup
+            try { unlinkSync(join(testDir, 'test.ply')); } catch {}
+            try { rmdirSync(testDir); } catch {}
+          }
+          EOF
+
+          # Build tour-conversion first
+          pnpm --filter @realriches/tour-conversion build
+
+          node test-provenance.mjs
+          rm test-provenance.mjs
+
+      - name: Validate quality regression harness
+        run: |
+          echo "Testing quality regression harness..."
+
+          cat > test-qa.mjs << 'EOF'
+          import {
+            QualityRegressionHarness,
+            DEFAULT_REGRESSION_CONFIG,
+          } from './packages/tour-conversion/dist/quality-regression.js';
+
+          console.log('Test 1: Default config values');
+          if (DEFAULT_REGRESSION_CONFIG.maxScoreDrop !== 0.05) {
+            console.log('FAIL: Invalid default maxScoreDrop');
+            process.exit(1);
+          }
+          if (DEFAULT_REGRESSION_CONFIG.minSSIMThreshold !== 0.85) {
+            console.log('FAIL: Invalid default minSSIMThreshold');
+            process.exit(1);
+          }
+          console.log('PASS: Default config values correct');
+
+          console.log('\nTest 2: Create harness');
+          const harness = new QualityRegressionHarness();
+          const config = harness.getConfig();
+          if (config.maxScoreDrop !== DEFAULT_REGRESSION_CONFIG.maxScoreDrop) {
+            console.log('FAIL: Harness config not set correctly');
+            process.exit(1);
+          }
+          console.log('PASS: Harness created with defaults');
+
+          console.log('\nTest 3: Register baseline');
+          harness.registerBaseline({
+            assetId: 'test-asset',
+            plyChecksum: 'abc',
+            sogChecksum: 'def',
+            converterVersion: '1.0.0',
+            qaScore: 0.92,
+            pHashBaseline: 'baseline',
+            ssimBaseline: 0.92,
+            recordedAt: new Date(),
+          });
+
+          const mockReport = {
+            passed: true,
+            score: 0.93,
+            frameScores: [],
+            metrics: {
+              averageSSIM: 0.93,
+              minSSIM: 0.91,
+              maxSSIM: 0.95,
+              averagePHashDistance: 3,
+              framesRendered: 12,
+              framesPassed: 12,
+              renderTimeMs: 1000,
+            },
+            generatedAt: new Date(),
+            duration: 1000,
+            mode: 'mock',
+          };
+
+          const result = harness.checkRegression('test-asset', mockReport, '1.0.0');
+          if (!result.passed) {
+            console.log('FAIL: Should pass when score improves');
+            process.exit(1);
+          }
+          console.log('PASS: Regression check works (no regression when score improves)');
+
+          console.log('\nTest 4: Detect regression');
+          const regressedReport = { ...mockReport, score: 0.80 };
+          regressedReport.metrics = { ...mockReport.metrics, averageSSIM: 0.80 };
+          const regressedResult = harness.checkRegression('test-asset', regressedReport, '1.0.0');
+          if (!regressedResult.regressionDetected) {
+            console.log('FAIL: Should detect regression');
+            process.exit(1);
+          }
+          console.log('PASS: Regression detection works');
+
+          console.log('\n✓ All quality regression harness tests passed');
+          EOF
+
+          node test-qa.mjs
+          rm test-qa.mjs

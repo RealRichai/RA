@@ -39,6 +39,23 @@ export interface SignedUrlResult {
   key: string;
 }
 
+/**
+ * Context for retention-guarded operations.
+ * Required for PLY delete operations to verify SUPERADMIN role.
+ */
+export interface RetentionContext {
+  /** The actor attempting the operation */
+  actorId?: string;
+  actorEmail?: string;
+  /** Actor's role - only SUPERADMIN can delete PLY files */
+  role?: string;
+  /** Organization context for evidence */
+  organizationId?: string;
+  /** Request context for audit trail */
+  requestId?: string;
+  ipAddress?: string;
+}
+
 export interface StorageProvider {
   /** Provider name */
   readonly name: string;
@@ -52,8 +69,14 @@ export interface StorageProvider {
   /** Check if an object exists */
   exists(key: string): Promise<boolean>;
 
-  /** Delete an object */
-  delete(key: string): Promise<void>;
+  /**
+   * Delete an object.
+   *
+   * NOTE: For PLY storage providers, deletion is guarded by retention policy.
+   * PLY files require SUPERADMIN role + PLY_DELETE_OVERRIDE=true to delete.
+   * Pass context with role information for PLY files.
+   */
+  delete(key: string, context?: RetentionContext): Promise<void>;
 
   /** Get object metadata */
   getMetadata(key: string): Promise<{ size: number; lastModified: Date } | null>;

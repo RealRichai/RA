@@ -45,6 +45,33 @@ export {
   resetTourConversionService,
 } from './service';
 
+// Provenance service
+export {
+  AssetProvenanceService,
+  getAssetProvenanceService,
+  createAssetProvenanceService,
+  resetAssetProvenanceService,
+  verifyFileIntegrity,
+  type AssetProvenance,
+  type ProvenanceRecord,
+  type IntegrityCheckResult,
+  type ProvenanceVerificationResult,
+  type ProvenanceEmitter,
+} from './provenance';
+
+// Quality regression harness
+export {
+  QualityRegressionHarness,
+  getQualityRegressionHarness,
+  createQualityRegressionHarness,
+  resetQualityRegressionHarness,
+  runCIRegressionTest,
+  DEFAULT_REGRESSION_CONFIG,
+  type QualityBaseline,
+  type RegressionCheckResult,
+  type RegressionConfig,
+} from './quality-regression';
+
 // Worker
 export {
   getConversionQueue,

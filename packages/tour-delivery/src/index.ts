@@ -4,6 +4,7 @@ export type {
   StorageProvider,
   SignedUrlOptions,
   SignedUrlResult,
+  RetentionContext,
   TourAccessRequest,
   TourAccessResult,
   TourViewSession,
@@ -19,6 +20,19 @@ export {
   DEFAULT_GATING_CONFIG,
   DEFAULT_SIGNED_URL_TTL,
 } from './types';
+
+// Retention Guard
+export {
+  PlyRetentionGuard,
+  PlyRetentionError,
+  getPlyRetentionGuard,
+  createPlyRetentionGuard,
+  resetPlyRetentionGuard,
+  isPlyKey,
+  type RetentionCheckResult,
+  type RetentionGuardConfig,
+  type RetentionEvidenceEvent,
+} from './retention-guard';
 
 // Providers
 export {

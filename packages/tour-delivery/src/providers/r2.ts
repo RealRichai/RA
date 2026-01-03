@@ -19,6 +19,7 @@ import type {
   StorageProviderConfig,
   SignedUrlOptions,
   SignedUrlResult,
+  RetentionContext,
 } from '../types';
 
 export class R2StorageProvider implements StorageProvider {
@@ -87,7 +88,12 @@ export class R2StorageProvider implements StorageProvider {
     }
   }
 
-  async delete(key: string): Promise<void> {
+  /**
+   * Delete a file from R2.
+   * SOG files are regenerable from PLY source, so no retention guard needed.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async delete(key: string, _context?: RetentionContext): Promise<void> {
     await this.client.send(
       new DeleteObjectCommand({
         Bucket: this.bucket,

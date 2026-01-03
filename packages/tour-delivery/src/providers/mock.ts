@@ -8,6 +8,7 @@ import type {
   StorageProvider,
   SignedUrlOptions,
   SignedUrlResult,
+  RetentionContext,
 } from '../types';
 
 interface StoredObject {
@@ -88,7 +89,8 @@ export class MockStorageProvider implements StorageProvider {
     return Promise.resolve(this.storage.has(key));
   }
 
-  delete(key: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  delete(key: string, _context?: RetentionContext): Promise<void> {
     this.storage.delete(key);
     return Promise.resolve();
   }
