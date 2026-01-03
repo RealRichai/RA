@@ -11,6 +11,7 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { createHash } from 'crypto';
+import { prisma } from '@realriches/database';
 
 // =============================================================================
 // Mock Data Setup
@@ -58,11 +59,12 @@ interface MockAgentRun {
   requestId: string | null;
   createdAt: Date;
   marketId: string | null;
+  organizationId?: string | null;
 }
 
-let mockEvidenceRecords: MockEvidenceRecord[] = [];
-let mockAuditLogs: MockAuditLog[] = [];
-let mockAgentRuns: MockAgentRun[] = [];
+const mockEvidenceRecords: MockEvidenceRecord[] = [];
+const mockAuditLogs: MockAuditLog[] = [];
+const mockAgentRuns: MockAgentRun[] = [];
 
 // Mock Prisma
 vi.mock('@realriches/database', () => ({
@@ -205,9 +207,9 @@ function createAgentRun(overrides: Partial<MockAgentRun> = {}): MockAgentRun {
 
 describe('Evidence Audit Integration', () => {
   beforeEach(() => {
-    mockEvidenceRecords = [];
-    mockAuditLogs = [];
-    mockAgentRuns = [];
+    mockEvidenceRecords.length = 0;
+    mockAuditLogs.length = 0;
+    mockAgentRuns.length = 0;
   });
 
   afterEach(() => {
@@ -235,8 +237,7 @@ describe('Evidence Audit Integration', () => {
         })
       );
 
-      // Import after mocks are set up
-      const { prisma } = await import('@realriches/database');
+      // Use mocked prisma
 
       // Query evidence records as the route would
       const sinceDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
