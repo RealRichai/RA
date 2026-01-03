@@ -5,9 +5,12 @@
  *
  * Feature-flagged demo page for testing the SplatViewer component
  * in staging environments.
+ *
+ * Uses local demo assets from /demo/sog/ directory.
+ * Run `pnpm generate:demo-assets` to regenerate assets.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { SplatViewer, useFeatureDetection } from '@/components/tour';
 
@@ -16,24 +19,25 @@ interface DemoTour {
   id: string;
   name: string;
   url: string;
+  status?: 'available' | 'checking' | 'unavailable';
 }
 
-// Demo SOG URLs (can be overridden via query params in staging)
-const DEMO_SOG_URLS: DemoTour[] = [
+// Local demo SOG assets (served from public/demo/sog/)
+const DEMO_SOG_TOURS: DemoTour[] = [
   {
     id: 'demo-apartment-1',
     name: 'Modern Apartment',
-    url: 'https://realriches-sog-demo.r2.cloudflarestorage.com/tours/demo/apartment-1.sog',
+    url: '/demo/sog/apartment-1.ply',
   },
   {
     id: 'demo-house-1',
     name: 'Suburban House',
-    url: 'https://realriches-sog-demo.r2.cloudflarestorage.com/tours/demo/house-1.sog',
+    url: '/demo/sog/house-1.ply',
   },
 ];
 
 // Default tour (always defined)
-const DEFAULT_TOUR: DemoTour = DEMO_SOG_URLS[0] ?? {
+const DEFAULT_TOUR: DemoTour = DEMO_SOG_TOURS[0] ?? {
   id: 'default',
   name: 'Default',
   url: '',
@@ -45,6 +49,7 @@ const IS_STAGING = process.env.NEXT_PUBLIC_VERCEL_ENV === 'preview' ||
 
 export default function TourDemoPage() {
   const [selectedTour, setSelectedTour] = useState<DemoTour>(DEFAULT_TOUR);
+  const [availableTours, setAvailableTours] = useState<DemoTour[]>(DEMO_SOG_TOURS);
   const [customUrl, setCustomUrl] = useState('');
   const [showPerformance, setShowPerformance] = useState(true);
   const [autoRotate, setAutoRotate] = useState(false);
@@ -52,8 +57,33 @@ export default function TourDemoPage() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [viewProgress, setViewProgress] = useState(0);
+  const [assetsChecked, setAssetsChecked] = useState(false);
 
   const featureDetection = useFeatureDetection();
+
+  // Check asset availability on mount
+  useEffect(() => {
+    async function checkAssets() {
+      const checked = await Promise.all(
+        DEMO_SOG_TOURS.map(async (tour) => {
+          try {
+            const res = await fetch(tour.url, { method: 'HEAD' });
+            return { ...tour, status: res.ok ? 'available' : 'unavailable' } as DemoTour;
+          } catch {
+            return { ...tour, status: 'unavailable' } as DemoTour;
+          }
+        })
+      );
+      setAvailableTours(checked);
+      setAssetsChecked(true);
+      // Auto-select first available tour
+      const firstAvailable = checked.find((t) => t.status === 'available');
+      if (firstAvailable) {
+        setSelectedTour(firstAvailable);
+      }
+    }
+    void checkAssets();
+  }, []);
 
   // Check feature flag - demo only available in staging/dev
   if (!IS_STAGING) {
@@ -70,6 +100,8 @@ export default function TourDemoPage() {
   }
 
   const activeUrl = customUrl || selectedTour.url;
+  const hasAvailableAssets = availableTours.some((t) => t.status === 'available');
+  const noAssetsMessage = assetsChecked && !hasAvailableAssets && !customUrl;
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -109,7 +141,7 @@ export default function TourDemoPage() {
             <select
               value={selectedTour.id}
               onChange={(e) => {
-                const tour = DEMO_SOG_URLS.find(t => t.id === e.target.value);
+                const tour = availableTours.find(t => t.id === e.target.value);
                 if (tour) {
                   setSelectedTour(tour);
                   setCustomUrl('');
@@ -117,12 +149,22 @@ export default function TourDemoPage() {
                 }
               }}
               className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
-              disabled={!!customUrl}
+              disabled={!!customUrl || !assetsChecked}
             >
-              {DEMO_SOG_URLS.map(tour => (
-                <option key={tour.id} value={tour.id}>{tour.name}</option>
+              {availableTours.map(tour => (
+                <option
+                  key={tour.id}
+                  value={tour.id}
+                  disabled={tour.status === 'unavailable'}
+                >
+                  {tour.name}
+                  {tour.status === 'unavailable' && ' (unavailable)'}
+                </option>
               ))}
             </select>
+            {!assetsChecked && (
+              <p className="text-xs text-gray-500 mt-1">Checking asset availability...</p>
+            )}
           </div>
 
           {/* Custom URL */}
@@ -196,6 +238,25 @@ export default function TourDemoPage() {
               >
                 Dismiss
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* No assets available overlay */}
+        {noAssetsMessage && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 z-10">
+            <div className="text-center max-w-md">
+              <div className="text-yellow-500 text-4xl mb-4">⚠</div>
+              <h3 className="text-xl font-bold mb-2">Demo Assets Not Found</h3>
+              <p className="text-gray-400 mb-4">
+                The demo SOG assets are not available. Run the following command to generate them:
+              </p>
+              <code className="block bg-gray-800 rounded px-4 py-2 text-sm font-mono mb-4">
+                pnpm generate:demo-assets
+              </code>
+              <p className="text-gray-500 text-sm">
+                Or enter a custom SOG URL above to test with your own assets.
+              </p>
             </div>
           </div>
         )}

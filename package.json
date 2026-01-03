@@ -29,12 +29,14 @@
     "changeset": "changeset",
     "release": "turbo build && changeset publish",
     "policy:no-human-todos": "grep -rn \"HUMAN_IMPLEMENTATION_REQUIRED\" apps packages prisma docs --include=\"*.ts\" --include=\"*.tsx\" --include=\"*.js\" --exclude-dir=coverage --exclude-dir=.next --exclude-dir=dist --exclude-dir=.turbo && exit 1 || exit 0",
-    "traceability:check": "node scripts/traceability_check.mjs"
+    "traceability:check": "node scripts/traceability_check.mjs",
+    "generate:demo-assets": "npx tsx scripts/generate_demo_assets.ts"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.1",
     "@playwright/test": "^1.40.0",
     "@types/node": "^25.0.3",
+    "tsx": "^4.19.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-security": "^3.0.1",

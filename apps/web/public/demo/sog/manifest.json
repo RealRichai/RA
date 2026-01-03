@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "description": "Demo 3DGS tour assets for RealRiches",
+  "generatedAt": "2026-01-03T16:44:59.939Z",
+  "tours": [
+    {
+      "id": "demo-apartment-1",
+      "name": "Modern Apartment",
+      "filename": "apartment-1.ply",
+      "thumbnail": "apartment-1-thumb.jpg",
+      "description": "A modern apartment showcase with open floor plan",
+      "sizeBytes": 747,
+      "status": "generated"
+    },
+    {
+      "id": "demo-house-1",
+      "name": "Suburban House",
+      "filename": "house-1.ply",
+      "thumbnail": "house-1-thumb.jpg",
+      "description": "A suburban family home with landscaped yard",
+      "sizeBytes": 779,
+      "status": "generated"
+    }
+  ],
+  "instructions": "Run 'pnpm generate:demo-assets' to regenerate these assets"
+}
