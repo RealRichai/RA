@@ -18,6 +18,7 @@ import { rateLimitAdminRoutes } from './admin/rate-limits';
 import { roleManagementRoutes } from './admin/roles';
 import { systemSettingsAdminRoutes } from './admin/system-settings';
 import { webhookAdminRoutes } from './admin/webhooks';
+import { agentUsageRoutes } from './agent-usage/routes';
 import { aiRoutes } from './ai/routes';
 import { amenityRoutes } from './amenities/routes';
 import { analyticsRoutes } from './analytics/routes';
@@ -110,6 +111,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(listingRoutes, { prefix: '/listings' });
       await api.register(leaseRoutes, { prefix: '/leases' });
       await api.register(complianceRoutes, { prefix: '/compliance' });
+      await api.register(agentUsageRoutes, { prefix: '/agent-usage' });
       await api.register(aiRoutes, { prefix: '/ai' });
       await api.register(paymentRoutes, { prefix: '/payments' });
       await api.register(documentRoutes, { prefix: '/documents' });

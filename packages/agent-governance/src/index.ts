@@ -20,6 +20,12 @@ export * from './control-tower';
 // Queue module
 export * from './queues';
 
+// Usage tracking module
+export * from './usage';
+
+// Persistence module
+export * from './persistence';
+
 // Voice AI module - use namespace to avoid conflicts with core types
 export * as voice from './voice';
 

@@ -5,6 +5,7 @@
  * Jobs are scheduled with cron patterns for recurring execution.
  */
 
+export { AgentUsageAggregationJob } from './agent-usage-aggregation';
 export { AnalyticsAggregationJob } from './analytics-aggregation';
 export { ComplianceAuditJob } from './compliance-audit';
 export { DataCleanupJob } from './data-cleanup';

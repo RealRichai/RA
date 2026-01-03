@@ -7,6 +7,7 @@
 import { logger } from '@realriches/utils';
 import type { Redis } from 'ioredis';
 
+import { AgentUsageAggregationJob } from './agent-usage-aggregation';
 import { AnalyticsAggregationJob } from './analytics-aggregation';
 import { ComplianceAuditJob } from './compliance-audit';
 import { DataCleanupJob } from './data-cleanup';
@@ -37,6 +38,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   WebhookRetryJob.initializeRedis(redis);
   DataCleanupJob.initializeRedis(redis);
   AnalyticsAggregationJob.initializeRedis(redis);
+  AgentUsageAggregationJob.initializeRedis(redis);
   ComplianceAuditJob.initializeRedis(redis);
   DocumentExpirationJob.initializeRedis(redis);
   SyndicationSyncJob.initializeRedis(redis);
@@ -57,6 +59,7 @@ export async function setupJobs(redis: Redis): Promise<JobScheduler> {
   scheduler.register(WebhookRetryJob.getDefinition());
   scheduler.register(DataCleanupJob.getDefinition());
   scheduler.register(AnalyticsAggregationJob.getDefinition());
+  scheduler.register(AgentUsageAggregationJob.getDefinition());
   scheduler.register(ComplianceAuditJob.getDefinition());
   scheduler.register(DocumentExpirationJob.getDefinition());
   scheduler.register(SyndicationSyncJob.getDefinition());

@@ -9,6 +9,7 @@ import swaggerUI from '@fastify/swagger-ui';
 import { getConfig } from '@realriches/config';
 import type { FastifyInstance } from 'fastify';
 
+import { agentBudgetPlugin } from './agent-budget';
 import { aiPlugin } from './ai';
 import { auditPlugin } from './audit';
 import { authPlugin } from './auth';
@@ -143,6 +144,11 @@ export async function registerPlugins(app: FastifyInstance): Promise<void> {
   await app.register(planEnforcementPlugin, {
     enabled: true,
     cacheTtlSeconds: 60,
+  });
+
+  // Agent budget enforcement (depends on Redis and Prisma)
+  await app.register(agentBudgetPlugin, {
+    enabled: true,
   });
 
   // Prometheus metrics

@@ -257,6 +257,14 @@ export const mockPrisma = {
   rentSchedule: createModelMock(),
   rentCharge: createModelMock(),
   paymentMethod: createModelMock(),
+
+  // Agent Governance models
+  agentRun: createModelMock(),
+  agentBudget: createModelMock(),
+  aIBudgetUsage: createModelMock(),
+  notification: createModelMock(),
+  userOrganization: createModelMock(),
+  organization: createModelMock(),
 };
 
 // Mock Email Service

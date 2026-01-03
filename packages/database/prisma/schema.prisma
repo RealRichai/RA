@@ -1660,6 +1660,19 @@ model AIBudgetUsage {
   @@map("ai_budget_usage")
 }
 
+model AgentBudget {
+  id                String   @id @default(uuid()) @db.Uuid
+  organizationId    String   @unique @map("organization_id") @db.Uuid
+  dailyLimitCents   Int      @default(10000) @map("daily_limit_cents")
+  monthlyLimitCents Int      @default(100000) @map("monthly_limit_cents")
+  alertThresholds   Json     @default("[0.8, 0.9, 1.0]") @map("alert_thresholds")
+  isEnabled         Boolean  @default(true) @map("is_enabled")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("agent_budgets")
+}
+
 // =============================================================================
 // Marketing
 // =============================================================================
