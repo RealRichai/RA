@@ -10,10 +10,8 @@
  * - Control catalog alignment
  */
 
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createHash } from 'crypto';
-
-import './setup';
 
 // =============================================================================
 // Unit Tests - Pure Functions
