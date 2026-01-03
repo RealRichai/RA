@@ -144,18 +144,78 @@ STRIPE_SECRET_KEY=sk_...
 | Branch | Purpose | CI | Deploy |
 |--------|---------|-----|--------|
 | `main` | Production-ready code | On push/PR | Manual trigger |
-| `develop` | Integration branch | On push/PR | - |
-| `feature/*` | Feature development | On PR to develop | - |
+| `feature/*` | Feature development | On PR to main | - |
 
 ### CI Pipeline
 
-The CI workflow runs on all pushes and PRs:
+The CI workflow (`.github/workflows/ci.yml`) runs on all pushes and PRs to `main`. It enforces investor-grade quality gates across 14 parallel jobs.
 
-1. **Secrets Guard** - Fails if `.env` or sensitive files are committed
-2. **Lint & Type Check** - ESLint + TypeScript strict mode
-3. **Unit Tests** - Vitest with coverage, requires Postgres + Redis
-4. **Security Scan** - Snyk vulnerability scanning
-5. **Build Verification** - Full production build with artifacts
+#### Quality Gates
+
+| Job | What It Checks | Local Equivalent |
+|-----|----------------|------------------|
+| **Policy Gates** | No `HUMAN_IMPLEMENTATION_REQUIRED` markers, traceability docs exist | `./scripts/policy_scan.sh` |
+| **Secrets Guard** | No `.env`, `.pem`, `.key` files committed | `git ls-files \| grep -E "\.env$\|\.pem$"` |
+| **Lint** | ESLint rules, import order, security rules | `pnpm lint` |
+| **Type Check** | TypeScript strict mode | `pnpm typecheck` |
+| **Unit Tests** | Vitest with coverage (requires Postgres + Redis) | `pnpm test:coverage` |
+| **Integration Tests** | Acceptance tests with real services | `pnpm test:acceptance` |
+| **Build** | Full production build | `pnpm build` |
+| **Security Baseline** | Dependency audit, auth middleware check | `pnpm audit --audit-level high` |
+| **Evidence Audit** | SOC2 control catalog, evidence routes, tests | `cd apps/api && npx vitest run --config vitest.evidence-audit.config.ts` |
+| **Persistence Guard** | No InMemory stores in production code | `grep -r "new InMemory" apps/api/src/modules/` |
+| **Ops Runbooks** | Required runbook docs exist with proper headings | `ls docs/ops/*.md` |
+| **Ops Scripts** | Backup/restore scripts executable and valid | `bash -n scripts/ops/*.sh` |
+| **Performance Smoke** | k6 test structure valid | `k6 inspect tests/performance/smoke.js` |
+| **E2E Market-Ready** | Playwright journey tests structure | `npx playwright test --project=api` |
+
+#### Job Dependencies
+
+```
+Policy Gates ─┐
+Secrets Guard ┼─→ Lint ─────┐
+              │   Type Check ┼─→ Unit Tests ─→ Integration Tests ─→ Build
+              └─────────────┘
+```
+
+#### Running CI Locally
+
+```bash
+# Full CI check (what runs on GitHub)
+pnpm lint && pnpm typecheck && pnpm test:coverage && pnpm build
+
+# Quick pre-commit check
+pnpm lint && pnpm typecheck
+
+# Policy check only
+./scripts/policy_scan.sh
+
+# Evidence audit tests only (no database required)
+cd apps/api && NODE_ENV=test npx vitest run --config vitest.evidence-audit.config.ts
+```
+
+#### Environment Variables
+
+CI jobs use these test credentials (do not use in production):
+
+| Variable | CI Value |
+|----------|----------|
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/realriches_test` |
+| `REDIS_URL` | `redis://localhost:6379` |
+| `JWT_SECRET` | `test-jwt-secret-for-ci-only-min-32-chars` |
+| `ENCRYPTION_KEY` | `test-encryption-key-32-bytes-xx` |
+
+#### Turbo Caching
+
+The CI uses Turbo remote caching for faster builds. To enable locally:
+
+```bash
+# Login to Turbo (optional)
+npx turbo login
+
+# Link to remote cache (optional)
+npx turbo link
+```
 
 ### Deploy Pipeline
 
@@ -201,17 +261,17 @@ Works on both macOS and Linux.
 
 ## Policy Checks
 
-The codebase enforces policies via CI and local scripts.
+The codebase enforces policies via the CI pipeline's **Policy Gates** job.
 
 ### HUMAN_IMPLEMENTATION_REQUIRED Policy
 
 Source files must not contain `HUMAN_IMPLEMENTATION_REQUIRED` markers. This policy ensures all implementation TODOs are resolved before merging.
 
 **CI Enforcement:**
-- Workflow: `.github/workflows/no-human-todos.yml`
-- Runs on: push to main/canonical-main, all PRs
+- Job: `Policy Gates` in `.github/workflows/ci.yml`
+- Runs on: push/PR to `main`
 - Scans: `apps/`, `packages/`, `prisma/`, `docs/`
-- Excludes: `coverage/`, `.next/`, `dist/`, `.turbo/`
+- Excludes: `coverage/`, `.next/`, `dist/`, `.turbo/`, `node_modules/`
 
 **Run Locally:**
 
@@ -221,11 +281,22 @@ Source files must not contain `HUMAN_IMPLEMENTATION_REQUIRED` markers. This poli
 
 # Using pnpm
 pnpm policy:no-human-todos
+
+# Using ripgrep directly
+rg "HUMAN_IMPLEMENTATION_REQUIRED" apps packages prisma docs
 ```
 
 **Exit Codes:**
 - `0` - No violations found
 - `1` - Violations found (blocks CI)
+
+### Traceability Policy
+
+The Policy Gates job also enforces traceability documentation:
+
+- `docs/traceability/MASTER_IMPLEMENTATION_LEDGER.md` must exist
+- `docs/traceability/GAP_REGISTER.md` must exist
+- `STATUS_REPORT.md` must reference both files
 
 ## License
 
