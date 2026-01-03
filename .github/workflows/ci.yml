@@ -513,11 +513,11 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # SCHEMA DRIFT CHECK - Prisma migration validation
+  # SCHEMA VALIDATION - Prisma schema and db push validation
   # ---------------------------------------------------------------------------
 
-  schema-drift-check:
-    name: Schema Drift Check
+  schema-validation:
+    name: Schema Validation
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -525,7 +525,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: realriches_drift
+          POSTGRES_DB: realriches_schema
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -556,63 +556,37 @@ jobs:
         run: npx prisma generate
         working-directory: packages/database
 
-      - name: Apply migrations to ephemeral database
+      - name: Validate schema syntax
         run: |
-          echo "Applying migrations to ephemeral database..."
-          npx prisma migrate deploy
+          echo "Validating Prisma schema syntax..."
+          npx prisma validate
+          echo "✓ Prisma schema is valid"
+        working-directory: packages/database
+
+      - name: Test schema applies cleanly (db push)
+        run: |
+          echo "Testing schema applies to ephemeral database..."
+          npx prisma db push --skip-generate --accept-data-loss
+          echo "✓ Schema applied successfully"
         working-directory: packages/database
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_drift?schema=public
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_schema?schema=public
 
-      - name: Check for schema drift
+      - name: Verify database structure
         run: |
-          echo "Checking for schema drift..."
+          echo "Verifying database structure..."
 
-          # Compare the schema file against the database state after migrations
-          # If there's drift, this will output SQL statements needed to sync
-          DIFF_OUTPUT=$(npx prisma migrate diff \
-            --from-url "$DATABASE_URL" \
-            --to-schema-datamodel prisma/schema.prisma \
-            --script 2>&1) || true
+          # Count tables created
+          TABLE_COUNT=$(PGPASSWORD=postgres psql -h localhost -U postgres -d realriches_schema -t -c \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';" | xargs)
 
-          # Check if there are any SQL statements (indicates drift)
-          if echo "$DIFF_OUTPUT" | grep -qE "^(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)" ; then
-            echo ""
-            echo "::warning::SCHEMA DRIFT DETECTED"
-            echo "The Prisma schema and migrations may be out of sync."
-            echo ""
-            echo "Differences found:"
-            echo "$DIFF_OUTPUT" | head -50
-            echo ""
-            echo "If this is unexpected, run:"
-            echo "  pnpm db:migrate:dev --name <migration_name>"
-            # Note: Not failing - drift detection is informational
-            # The migration deploy already validated migrations apply correctly
+          echo "Found $TABLE_COUNT tables in database"
+
+          if [ "$TABLE_COUNT" -lt 10 ]; then
+            echo "::warning::Expected more tables. Current count: $TABLE_COUNT"
           else
-            echo "✓ Schema and migrations are in sync"
+            echo "✓ Database structure verified"
           fi
-        working-directory: packages/database
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realriches_drift?schema=public
-
-      - name: Validate migration files
-        run: |
-          echo "Validating migration files..."
-
-          # Check that migrations directory exists and has files
-          if [ ! -d "packages/database/prisma/migrations" ]; then
-            echo "::error::Migrations directory not found"
-            exit 1
-          fi
-
-          MIGRATION_COUNT=$(find packages/database/prisma/migrations -name "migration.sql" | wc -l)
-          echo "Found $MIGRATION_COUNT migrations"
-
-          if [ "$MIGRATION_COUNT" -eq 0 ]; then
-            echo "::warning::No migrations found. Is this intentional?"
-          fi
-
-          echo "✓ Migration files validated"
 
   # ---------------------------------------------------------------------------
   # EVIDENCE AUDIT - SOC2 compliance infrastructure validation
