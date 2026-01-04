@@ -6,8 +6,8 @@
  */
 
 import { createHash } from 'crypto';
-import { z } from 'zod';
-import { VerificationLevelSchema, type VerificationLevel, type VerificationStatus } from '../types';
+
+import type { VerificationLevel, VerificationStatus } from '../types';
 
 // ============================================================================
 // Types
@@ -212,8 +212,8 @@ export abstract class BaseVerificationProvider implements IVerificationProvider 
   /**
    * Log with provider context
    */
-  protected log(message: string, data?: Record<string, unknown>): void {
+  protected log(_message: string, _data?: Record<string, unknown>): void {
     // In production, this would use a proper logger
-    console.debug(`[Verification:${this.providerId}] ${message}`, data);
+    // Logging disabled for now - use structured logger when available
   }
 }

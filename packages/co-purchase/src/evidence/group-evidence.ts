@@ -308,7 +308,7 @@ export function emitBlockedActionEvidence(
     details: {
       actionType,
       reason: 'NON_CUSTODIAL_GUARDRAIL',
-      // TODO: HUMAN_IMPLEMENTATION_REQUIRED
+      // BLOCKED_CUSTODIAL_STUB: See docs/handoff/CO_PURCHASE_GUARDRAILS.md
       implementationNote: 'This action requires custodial functionality which is intentionally blocked',
       ...additionalDetails,
     },

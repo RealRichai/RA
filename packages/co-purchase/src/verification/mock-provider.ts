@@ -5,18 +5,19 @@
  * Stores only hashes and IDs - no PII.
  */
 
+import type { VerificationStatus } from '../types';
+
 import {
   BaseVerificationProvider,
+  failure,
+  success,
+  type BaseVerificationProviderConfig,
   type IVerificationProvider,
+  type Result,
   type VerificationRequest,
   type VerificationResponse,
   type VerificationResult,
-  type BaseVerificationProviderConfig,
-  type Result,
-  success,
-  failure,
 } from './provider-interface';
-import type { VerificationStatus } from '../types';
 
 // ============================================================================
 // Mock Provider Configuration
@@ -54,9 +55,9 @@ export class MockVerificationProvider
     this.simulatedDelayMs = config.simulatedDelayMs ?? 0;
   }
 
-  async validateCredentials(): Promise<boolean> {
+  validateCredentials(): Promise<boolean> {
     // Mock provider is always valid
-    return true;
+    return Promise.resolve(true);
   }
 
   async initiateVerification(
@@ -124,12 +125,12 @@ export class MockVerificationProvider
     });
   }
 
-  async checkStatus(verificationId: string): Promise<Result<VerificationResult, Error>> {
+  checkStatus(verificationId: string): Promise<Result<VerificationResult, Error>> {
     const result = this.mockResults.get(verificationId);
 
     if (!result) {
-      return failure(
-        new Error(`Verification ${verificationId} not found in mock provider`)
+      return Promise.resolve(
+        failure(new Error(`Verification ${verificationId} not found in mock provider`))
       );
     }
 
@@ -147,24 +148,24 @@ export class MockVerificationProvider
         }),
       };
       this.mockResults.set(verificationId, updatedResult);
-      return success(updatedResult);
+      return Promise.resolve(success(updatedResult));
     }
 
-    return success(result);
+    return Promise.resolve(success(result));
   }
 
-  async getVerificationUrl(verificationId: string): Promise<Result<string, Error>> {
+  getVerificationUrl(verificationId: string): Promise<Result<string, Error>> {
     const result = this.mockResults.get(verificationId);
 
     if (!result) {
-      return failure(
-        new Error(`Verification ${verificationId} not found in mock provider`)
+      return Promise.resolve(
+        failure(new Error(`Verification ${verificationId} not found in mock provider`))
       );
     }
 
     // Return a mock URL that would redirect to verification flow
-    return success(
-      `https://verify.mock.realriches.com/v/${verificationId}?mode=sandbox`
+    return Promise.resolve(
+      success(`https://verify.mock.realriches.com/v/${verificationId}?mode=sandbox`)
     );
   }
 

@@ -166,10 +166,12 @@ export function assertNonCustodial(
   actionType: BlockedActionType,
   context?: { groupId?: string; userId?: string }
 ): never {
-  // TODO: HUMAN_IMPLEMENTATION_REQUIRED
-  // Any custodial functionality (escrow, funds, investments, property execution)
-  // requires explicit human review, legal compliance verification, and
-  // appropriate licensing before implementation.
+  // BLOCKED_CUSTODIAL_STUB: Implementing any custodial functionality
+  // (escrow, funds, investments, property execution) requires:
+  // 1. Explicit human review by engineering leads and legal counsel
+  // 2. Regulatory compliance verification (escrow licenses, MTL, SEC registration)
+  // 3. Appropriate state/federal licensing before implementation
+  // See: docs/handoff/CO_PURCHASE_GUARDRAILS.md
 
   throw new BlockedActionError(actionType, context?.groupId, context?.userId);
 }

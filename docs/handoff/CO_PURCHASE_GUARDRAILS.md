@@ -119,18 +119,18 @@ All group pages must display the `NonCustodialDisclaimer` component:
 </Card>
 ```
 
-## TODO: HUMAN_IMPLEMENTATION_REQUIRED Locations
+## BLOCKED_CUSTODIAL_STUB Locations
 
-The following locations contain `TODO: HUMAN_IMPLEMENTATION_REQUIRED` markers that must be addressed before implementing custodial functionality:
+The following locations contain `BLOCKED_CUSTODIAL_STUB` markers indicating intentionally blocked custodial functionality. These require human review, legal compliance, and appropriate licensing before implementation:
 
 1. `packages/co-purchase/src/guardrails/blocked-actions.ts`
-   - `assertNonCustodial()` function
+   - `assertNonCustodial()` function - Throws BlockedActionError for all custodial actions
 
-2. `apps/api/src/modules/co-purchase/routes.ts`
+2. `apps/api/src/modules/co-purchase/routes.ts` (when implemented)
    - All blocked route handlers (`/escrow/*`, `/funds/*`, `/investment/*`, etc.)
 
 3. `packages/co-purchase/src/evidence/group-evidence.ts`
-   - `emitBlockedActionEvidence()` function
+   - `emitBlockedActionEvidence()` function - Records blocked action attempts
 
 ## Regulatory Considerations for Future Custodial Features
 
