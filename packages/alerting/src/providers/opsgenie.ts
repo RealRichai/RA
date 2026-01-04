@@ -156,7 +156,7 @@ export class OpsGenieProvider extends BaseAlertProvider {
       if (alert.context.requestId) details['requestId'] = alert.context.requestId;
     }
 
-    const tags = [alert.source, alert.severity];
+    const tags: string[] = [alert.source, alert.severity];
     if (alert.context?.market) {
       tags.push(alert.context.market);
     }

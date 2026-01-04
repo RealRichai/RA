@@ -218,7 +218,7 @@ export abstract class BaseAlertProvider implements IAlertProvider {
    * Create success response
    */
   protected successResponse(
-    alert: AlertRequest,
+    _alert: AlertRequest,
     providerAlertId: string | undefined,
     durationMs: number
   ): Result<AlertResponse, Error> {

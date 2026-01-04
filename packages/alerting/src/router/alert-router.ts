@@ -163,7 +163,8 @@ export class AlertRouter {
     );
 
     return results.map((result, index) => {
-      const provider = providers[index];
+      // Provider is guaranteed to exist since index comes from the same array
+      const provider = providers[index]!;
 
       if (result.status === 'fulfilled') {
         if (result.value.ok) {
