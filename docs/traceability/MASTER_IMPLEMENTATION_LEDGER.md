@@ -1,7 +1,7 @@
 # Master Implementation Ledger
 
 > **Version:** 1.0.0
-> **Last Updated:** 2026-01-04
+> **Last Updated:** 2026-01-03
 > **Audit Commit:** 993b48b63b00dfd3fa75598ca01d1f8b08f0e2cb
 > **Branch:** main
 
@@ -743,6 +743,108 @@ This document serves as the single source of truth for feature implementation st
 
 ---
 
+## 19. Co-Purchase Group Workspace
+
+### 19.1 Package Foundation
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| Package Structure | Non-custodial co-purchase workspace package | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/package.json` | N/A |
+| Core Types | TypeScript types for groups, members, invitations | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/types.ts` | N/A |
+| Package Exports | Index barrel with all public exports | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/index.ts` | N/A |
+
+### 19.2 Prisma Data Models
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| CoPurchaseGroup Model | Group entity with status workflow | `CO_PURCHASE_GROUPS` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| CoPurchaseGroupMember | Member with verification status | `CO_PURCHASE_GROUPS` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| CoPurchaseGroupInvitation | Token-based invitations | `CO_PURCHASE_GROUPS` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| CoPurchaseChecklistItem | Shared task tracking | `CO_PURCHASE_GROUPS` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| CoPurchaseGroupDocument | Vault document references | `CO_PURCHASE_GROUPS` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| GroupRole Enum | organizer, member, viewer | `CO_PURCHASE_GROUPS` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| GroupStatus Enum | forming, verification, document_collection, ready, archived | `CO_PURCHASE_GROUPS` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| InvitationStatus Enum | pending, accepted, declined, expired, revoked | `CO_PURCHASE_GROUPS` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| VerificationStatus Enum | not_started, pending, in_progress, verified, failed, expired | `CO_PURCHASE_GROUPS` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+| ChecklistItemStatus Enum | pending, in_progress, completed, blocked | `CO_PURCHASE_GROUPS` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma` | N/A |
+
+### 19.3 Guardrails (Critical)
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| BlockedActionError | Custom error for blocked custodial actions | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/guardrails/blocked-actions.ts` | `packages/co-purchase/src/__tests__/guardrails.test.ts` |
+| assertNonCustodial | Throws BlockedActionError for regulated actions | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/guardrails/blocked-actions.ts` | `packages/co-purchase/src/__tests__/guardrails.test.ts` |
+| isActionBlocked | Check if action type is blocked | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/guardrails/blocked-actions.ts` | `packages/co-purchase/src/__tests__/guardrails.test.ts` |
+| getAllBlockedActions | Returns list of 23 blocked action types | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/guardrails/blocked-actions.ts` | `packages/co-purchase/src/__tests__/guardrails.test.ts` |
+| BLOCKED_ACTION_DISCLAIMER | Non-custodial platform disclaimer text | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/guardrails/blocked-actions.ts` | `packages/co-purchase/src/__tests__/guardrails.test.ts` |
+| emitBlockedActionEvidence | SOC2 evidence for blocked attempts | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/guardrails/blocked-actions.ts` | `packages/co-purchase/src/__tests__/guardrails.test.ts` |
+| 23 Blocked Action Types | Escrow, funds, investment, payment, purchase, etc. | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/guardrails/blocked-actions.ts` | `packages/co-purchase/src/__tests__/guardrails.test.ts` |
+
+### 19.4 Verification Adapter
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| IVerificationProvider | Interface for verification providers | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/verification/provider-interface.ts` | `packages/co-purchase/src/__tests__/verification.test.ts` |
+| MockVerificationProvider | Mock implementation for dev/test | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/verification/mock-provider.ts` | `packages/co-purchase/src/__tests__/verification.test.ts` |
+| VerificationResult | Hash-only result storage (no PII) | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/verification/provider-interface.ts` | `packages/co-purchase/src/__tests__/verification.test.ts` |
+| Provider Registry | Singleton registry for providers | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/verification/mock-provider.ts` | `packages/co-purchase/src/__tests__/verification.test.ts` |
+
+### 19.5 Evidence Emission
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| SOC2 Control Mappings | CC6.1, CC6.6, CC7.4 control IDs | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/evidence/group-evidence.ts` | N/A |
+| PII Sanitization | Strip PII before logging | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/evidence/group-evidence.ts` | N/A |
+| Event Type Coverage | group.created, member.joined, verification.completed | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/evidence/group-evidence.ts` | N/A |
+
+### 19.6 API Routes
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| POST /co-purchase/groups | Create co-purchase group | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| GET /co-purchase/groups | List user's groups | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| GET /co-purchase/groups/:id | Get group details | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| PATCH /co-purchase/groups/:id | Update group | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| DELETE /co-purchase/groups/:id | Archive group | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| GET /co-purchase/groups/:id/members | List group members | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| POST /co-purchase/groups/:id/members/:memberId/role | Update member role | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| DELETE /co-purchase/groups/:id/members/:memberId | Remove member | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| POST /co-purchase/groups/:id/invitations | Send invitation | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| POST /co-purchase/invitations/:token/accept | Accept invitation | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| POST /co-purchase/invitations/:token/decline | Decline invitation | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| GET /co-purchase/groups/:id/checklist | Get checklist items | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| POST /co-purchase/groups/:id/checklist | Add checklist item | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| PATCH /co-purchase/groups/:id/checklist/:itemId | Update checklist item | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| POST /co-purchase/groups/:id/verification/initiate | Start verification | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| GET /co-purchase/groups/:id/verification/status | Check verification status | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+
+### 19.7 Blocked Routes (403 Forbidden)
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| /co-purchase/groups/:id/escrow/* | All escrow operations blocked | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| /co-purchase/groups/:id/funds/* | All funds operations blocked | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| /co-purchase/groups/:id/investment/* | All investment operations blocked | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| /co-purchase/groups/:id/payment/* | All payment operations blocked | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+| /co-purchase/groups/:id/purchase/* | All purchase operations blocked | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+
+### 19.8 Feature Flag
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| CO_PURCHASE_GROUPS Flag | Alpha feature flag, disabled by default | `CO_PURCHASE_GROUPS` | `@realriches/feature-flags` | **Implemented** | `packages/feature-flags/src/flags.ts` | N/A |
+| Market Gating | Market-gated rollout support | `CO_PURCHASE_GROUPS` | `@realriches/feature-flags` | **Implemented** | `packages/feature-flags/src/flags.ts` | N/A |
+| Route Guard | Feature flag check on all routes | `CO_PURCHASE_GROUPS` | `@realriches/api` | **Implemented** | `apps/api/src/modules/co-purchase/routes.ts:25-35` | `apps/api/src/modules/co-purchase/__tests__/routes.test.ts` |
+
+### 19.9 Handoff Documentation
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| CO_PURCHASE_GUARDRAILS.md | Regulatory considerations and blocked actions | `CO_PURCHASE_GROUPS` | docs | **Implemented** | `docs/handoff/CO_PURCHASE_GUARDRAILS.md` | N/A |
+| BLOCKED_CUSTODIAL_STUB markers | Handoff markers for custodial features | `CO_PURCHASE_GROUPS` | `@realriches/co-purchase` | **Implemented** | `packages/co-purchase/src/guardrails/blocked-actions.ts` | N/A |
+
+---
+
 ## Summary Statistics
 
 | Category | Implemented | Partial | Missing | Total |
@@ -765,7 +867,8 @@ This document serves as the single source of truth for feature implementation st
 | Testing Infrastructure | 32 | 0 | 0 | 32 |
 | External Alerting | 12 | 0 | 0 | 12 |
 | Listing Copilot | 48 | 0 | 0 | 48 |
-| **TOTAL** | **281** | **1** | **3** | **285** |
+| Co-Purchase Groups | 53 | 0 | 0 | 53 |
+| **TOTAL** | **334** | **1** | **3** | **338** |
 
 ---
 

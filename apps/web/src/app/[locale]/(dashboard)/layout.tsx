@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Users,
   Shield,
+  UsersRound,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -29,6 +30,7 @@ const navigationItems = [
   { key: 'properties', href: '/dashboard/properties', icon: Building },
   { key: 'listings', href: '/dashboard/listings', icon: FileText },
   { key: 'leases', href: '/dashboard/leases', icon: FileText },
+  { key: 'groups', href: '/dashboard/groups', icon: UsersRound },
   { key: 'maintenance', href: '/dashboard/maintenance', icon: Wrench },
   { key: 'payments', href: '/dashboard/payments', icon: CreditCard },
   { key: 'aiAssistant', href: '/dashboard/ai', icon: MessageSquare },
