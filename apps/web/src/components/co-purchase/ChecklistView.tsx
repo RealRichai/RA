@@ -69,17 +69,18 @@ export function ChecklistView({
   className,
 }: ChecklistViewProps) {
   const [newItemTitle, setNewItemTitle] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState(defaultCategories[0]);
+  const [selectedCategory, setSelectedCategory] = useState<string>(defaultCategories[0] ?? 'Other');
 
-  const groupedItems = items.reduce(
+  const groupedItems = items.reduce<Record<string, ChecklistItem[]>>(
     (acc, item) => {
-      if (!acc[item.category]) {
-        acc[item.category] = [];
+      const category = item.category;
+      if (!acc[category]) {
+        acc[category] = [];
       }
-      acc[item.category].push(item);
+      acc[category].push(item);
       return acc;
     },
-    {} as Record<string, ChecklistItem[]>
+    {}
   );
 
   const completedCount = items.filter((item) => item.status === 'completed').length;

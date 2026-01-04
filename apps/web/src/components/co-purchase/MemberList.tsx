@@ -23,8 +23,6 @@ interface MemberListProps {
   members: Member[];
   currentUserId?: string;
   isOrganizer?: boolean;
-  _onUpdateRole?: (memberId: string, role: 'member' | 'viewer') => void;
-  _onRemoveMember?: (memberId: string) => void;
   className?: string;
 }
 
@@ -83,8 +81,6 @@ export function MemberList({
   members,
   currentUserId,
   isOrganizer = false,
-  _onUpdateRole,
-  _onRemoveMember,
   className,
 }: MemberListProps) {
   return (
