@@ -105,6 +105,9 @@ importers:
       '@realriches/ai-sdk':
         specifier: workspace:*
         version: link:../../packages/ai-sdk
+      '@realriches/co-purchase':
+        specifier: workspace:*
+        version: link:../../packages/co-purchase
       '@realriches/compliance-engine':
         specifier: workspace:*
         version: link:../../packages/compliance-engine
@@ -120,6 +123,9 @@ importers:
       '@realriches/email-service':
         specifier: workspace:*
         version: link:../../packages/email-service
+      '@realriches/feature-flags':
+        specifier: workspace:*
+        version: link:../../packages/feature-flags
       '@realriches/revenue-engine':
         specifier: workspace:*
         version: link:../../packages/revenue-engine

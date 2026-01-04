@@ -26,6 +26,7 @@ import { mfaRoutes } from './auth/mfa';
 import { authRoutes } from './auth/routes';
 import { budgetRoutes } from './budgets/routes';
 import { buildingSystemRoutes } from './building-systems/routes';
+import { coPurchaseRoutes } from './co-purchase/routes';
 import { collateralRoutes } from './collateral/routes';
 import { commerceRoutes } from './commerce/routes';
 import { commercialRoutes } from './commercial/routes';
@@ -114,6 +115,7 @@ export async function registerModules(app: FastifyInstance): Promise<void> {
       await api.register(leaseRoutes, { prefix: '/leases' });
       await api.register(complianceRoutes, { prefix: '/compliance' });
       await api.register(copilotRoutes, { prefix: '/copilot' });
+      await api.register(coPurchaseRoutes);
       await api.register(agentUsageRoutes, { prefix: '/agent-usage' });
       await api.register(aiRoutes, { prefix: '/ai' });
       await api.register(paymentRoutes, { prefix: '/payments' });

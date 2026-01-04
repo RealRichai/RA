@@ -2,8 +2,15 @@
   "name": "@realriches/co-purchase",
   "version": "1.0.0",
   "description": "Non-custodial co-purchase group workspace for collaboration, verification, and document collection",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "require": "./dist/index.js",
+      "types": "./src/index.ts"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
