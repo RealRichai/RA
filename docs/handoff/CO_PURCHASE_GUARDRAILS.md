@@ -92,17 +92,17 @@ All blocked routes are defined in `apps/api/src/modules/co-purchase/routes.ts`:
 
 ```typescript
 fastify.all('/groups/:id/escrow/*', () => {
-  // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Escrow functionality
+  // BLOCKED_CUSTODIAL_STUB: Escrow requires licensing
   assertNonCustodial('ESCROW_CREATION');
 });
 
 fastify.all('/groups/:id/funds/*', () => {
-  // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Funds handling
+  // BLOCKED_CUSTODIAL_STUB: Funds handling requires MTL
   assertNonCustodial('FUNDS_HANDLING');
 });
 
 fastify.all('/groups/:id/investment/*', () => {
-  // TODO: HUMAN_IMPLEMENTATION_REQUIRED - Investment marketplace
+  // BLOCKED_CUSTODIAL_STUB: Investment requires SEC registration
   assertNonCustodial('INVESTMENT_MARKETPLACE');
 });
 ```
