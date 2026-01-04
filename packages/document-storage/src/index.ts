@@ -73,3 +73,51 @@ export {
   type EmailJob,
   type NotificationJob,
 } from './signature-service';
+
+// Vault Onboarding
+export {
+  VaultOnboardingService,
+  getVaultOnboardingService,
+  VAULT_FOLDERS,
+  REQUIRED_DOCS,
+  DEFAULT_ONBOARDING_STEPS,
+  type VaultOnboardingState,
+  type OnboardingStep,
+  type DocumentCategory,
+  type PropertyType,
+  type OnboardingStatus,
+  type InitializeVaultInput,
+  type UploadVaultDocumentInput,
+} from './vault-onboarding';
+
+// Evidence Persistence
+export {
+  VaultEvidencePersistence,
+  getVaultEvidencePersistence,
+  persistVaultEvidence,
+  queryVaultEvidence,
+  SOC2_CONTROL_IDS,
+  sanitizeMetadata,
+  type VaultEvidenceRecord,
+  type StoredVaultEvidence,
+  type EvidenceQueryOptions,
+  type VaultEvidenceEventType,
+  type VaultEvidenceOutcome,
+  type SOC2ControlId,
+} from './evidence';
+
+// Upsell Triggers
+export {
+  UpsellTriggerService,
+  getUpsellTriggerService,
+  detectUpsellTriggers,
+  isUpsellEnabledForMarket,
+  UPSELL_PARTNER_MAP,
+  TRIGGER_PARTNER_MAP,
+  MARKET_UPSELL_CONFIGS,
+  type UpsellTrigger,
+  type UpsellTriggerType,
+  type PartnerType,
+  type MarketUpsellConfig,
+  type CreateUpsellTriggerInput,
+} from './upsell';

@@ -349,6 +349,7 @@ model Property {
   propertyAmenities  Amenity[]
   amenityBookings    AmenityBooking[]
   amenityRecurringBookings AmenityRecurringBooking[]
+  vault              PropertyVault?
 
   @@index([ownerId])
   @@index([managerId])
@@ -1318,9 +1319,10 @@ model Document {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
-  uploader   User       @relation(fields: [uploadedBy], references: [id])
-  properties Property[] @relation("PropertyDocuments")
-  signatures DocumentSignature[]
+  uploader       User       @relation(fields: [uploadedBy], references: [id])
+  properties     Property[] @relation("PropertyDocuments")
+  signatures     DocumentSignature[]
+  vaultDocuments VaultDocument[]
 
   @@index([uploadedBy])
   @@index([entityType, entityId])
@@ -9155,4 +9157,181 @@ model CoPurchaseGroupDocument {
   @@index([groupId])
   @@index([category])
   @@map("co_purchase_group_documents")
+}
+
+// =============================================================================
+// Property Vault Onboarding (Section 20)
+// =============================================================================
+
+enum VaultOnboardingStatus {
+  not_started
+  in_progress
+  completed
+}
+
+enum VaultEvidenceEventType {
+  UPLOAD
+  DOWNLOAD
+  VIEW
+  DELETE
+  ACL_CHECK
+  SHARE
+  UPSELL_VIEW
+  UPSELL_CONVERT
+  UPSELL_DISMISS
+}
+
+enum VaultEvidenceOutcome {
+  SUCCESS
+  DENIED
+  FAILED
+}
+
+model PropertyVault {
+  id         String                @id @default(uuid()) @db.Uuid
+  propertyId String                @unique @map("property_id") @db.Uuid
+  status     VaultOnboardingStatus @default(not_started)
+
+  // Folder structure configuration (JSON array of enabled folders)
+  folderStructure Json @default("[]") @map("folder_structure")
+
+  // Required documents based on property type (computed at creation)
+  requiredDocs String[] @default([]) @map("required_docs")
+
+  // Already uploaded document categories
+  uploadedDocs String[] @default([]) @map("uploaded_docs")
+
+  // Onboarding completion tracking
+  onboardingStep   Int       @default(0) @map("onboarding_step")
+  onboardingConfig Json?     @map("onboarding_config")
+  completedAt      DateTime? @map("completed_at")
+
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  property       Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  documents      VaultDocument[]
+  evidenceLogs   VaultEvidence[]
+  upsellTriggers UpsellTrigger[]
+
+  @@index([status])
+  @@map("property_vaults")
+}
+
+model VaultDocument {
+  id        String @id @default(uuid()) @db.Uuid
+  vaultId   String @map("vault_id") @db.Uuid
+  documentId String @map("document_id") @db.Uuid
+
+  // Categorization within vault folder structure
+  folder   String // e.g., 'OWNERSHIP', 'INSURANCE', 'PERMITS'
+  category String // e.g., 'DEED', 'PROPERTY_INSURANCE', 'BUILDING_PERMITS'
+
+  // Additional tagging
+  tags        String[] @default([])
+  description String?
+  isRequired  Boolean  @default(false) @map("is_required")
+
+  // Upload context
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  uploadedAt       DateTime @default(now()) @map("uploaded_at")
+
+  // Relations
+  vault    PropertyVault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  document Document      @relation(fields: [documentId], references: [id])
+
+  @@index([vaultId])
+  @@index([folder])
+  @@index([category])
+  @@map("vault_documents")
+}
+
+model VaultEvidence {
+  id           String                 @id @default(uuid()) @db.Uuid
+  eventType    VaultEvidenceEventType
+  eventOutcome VaultEvidenceOutcome
+
+  // SOC2 Control ID (e.g., CC6.1, CC6.6, CC7.4)
+  controlId String @map("control_id")
+
+  // Entity context
+  propertyId String  @map("property_id") @db.Uuid
+  vaultId    String? @map("vault_id") @db.Uuid
+  documentId String? @map("document_id") @db.Uuid
+
+  // Actor context
+  actorUserId String @map("actor_user_id") @db.Uuid
+  actorRole   String @map("actor_role")
+  actorEmail  String @map("actor_email")
+
+  // Request context
+  resourcePath String  @map("resource_path")
+  ipAddress    String? @map("ip_address")
+  userAgent    String? @map("user_agent")
+  requestId    String? @map("request_id")
+
+  // Additional metadata (sanitized - no PII)
+  metadata Json @default("{}")
+
+  // Timestamp
+  timestamp DateTime @default(now())
+
+  // Relations
+  vault PropertyVault? @relation(fields: [vaultId], references: [id])
+
+  @@index([propertyId])
+  @@index([vaultId])
+  @@index([actorUserId])
+  @@index([timestamp])
+  @@index([eventType])
+  @@index([controlId])
+  @@map("vault_evidence")
+}
+
+model UpsellTrigger {
+  id         String @id @default(uuid()) @db.Uuid
+  propertyId String @map("property_id") @db.Uuid
+  vaultId    String @map("vault_id") @db.Uuid
+
+  // Trigger type
+  triggerType String @map("trigger_type") // e.g., 'MISSING_INSURANCE', 'MISSING_GUARANTOR'
+
+  // Missing document categories that triggered this
+  missingCategories String[] @default([]) @map("missing_categories")
+
+  // Eligible partner providers (filtered by market)
+  eligiblePartners String[] @default([]) @map("eligible_partners")
+
+  // Market for gating
+  market String
+
+  // Priority (lower = more important)
+  priority Int @default(0)
+
+  // User interaction state
+  dismissed     Boolean   @default(false)
+  dismissedAt   DateTime? @map("dismissed_at")
+  dismissedById String?   @map("dismissed_by_id") @db.Uuid
+
+  // Conversion tracking
+  convertedAt   DateTime? @map("converted_at")
+  convertedById String?   @map("converted_by_id") @db.Uuid
+  partnerId     String?   @map("partner_id")
+  attributionId String?   @map("attribution_id") @db.Uuid
+
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  vault PropertyVault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([vaultId])
+  @@index([market])
+  @@index([triggerType])
+  @@index([dismissed])
+  @@map("upsell_triggers")
 }

@@ -120,6 +120,17 @@ export const FeatureFlag = {
    * This is a NON-CUSTODIAL feature - no funds handling or investment marketplace.
    */
   CO_PURCHASE_GROUPS: 'CO_PURCHASE_GROUPS',
+
+  // ============================================================================
+  // Document Vault Features
+  // ============================================================================
+
+  /**
+   * PROPERTY_VAULT_ONBOARDING
+   * Enables guided vault onboarding workflow for properties.
+   * Includes folder structure, document tagging, evidence logging, and upsell triggers.
+   */
+  PROPERTY_VAULT_ONBOARDING: 'PROPERTY_VAULT_ONBOARDING',
 } as const;
 
 export type FeatureFlag = (typeof FeatureFlag)[keyof typeof FeatureFlag];
@@ -148,6 +159,7 @@ export const FeatureFlagSchema = z.enum([
   'PARTNER_ATTRIBUTION_TRACKING',
   'PARTNER_COMMISSION_PAYMENTS',
   'CO_PURCHASE_GROUPS',
+  'PROPERTY_VAULT_ONBOARDING',
 ]);
 
 /**
@@ -169,7 +181,8 @@ export type FeatureCategory =
   | 'COMPLIANCE'
   | 'PAYMENTS'
   | 'PARTNER'
-  | 'COLLABORATION';
+  | 'COLLABORATION'
+  | 'VAULT';
 
 export type RolloutPhase =
   | 'ALPHA'      // Internal testing only
@@ -396,6 +409,17 @@ export const FEATURE_FLAG_REGISTRY: Record<FeatureFlag, FeatureFlagMetadata> = {
     description: 'Non-custodial co-purchase group workspaces for collaborative property buying. Enables member verification, document collection, and shared checklists. Does NOT include funds handling or investment marketplace.',
     category: 'COLLABORATION',
     rolloutPhase: 'ALPHA',
+    defaultEnabled: false,
+    marketGated: true,
+  },
+
+  // Vault Features
+  PROPERTY_VAULT_ONBOARDING: {
+    key: 'PROPERTY_VAULT_ONBOARDING',
+    name: 'Property Vault Onboarding',
+    description: 'Guided vault onboarding workflow for properties. Includes folder structure creation, document tagging, evidence logging for SOC2 compliance, and market-gated upsell triggers for missing documents.',
+    category: 'VAULT',
+    rolloutPhase: 'BETA',
     defaultEnabled: false,
     marketGated: true,
   },

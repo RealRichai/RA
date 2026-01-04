@@ -845,6 +845,81 @@ This document serves as the single source of truth for feature implementation st
 
 ---
 
+## 20. Property Vault Onboarding
+
+Transforms the document vault from passive storage into an active onboarding product with guided workflows, strict ACL enforcement, evidence logging, and market-aware upsell triggers for missing documents. Feature gated by `PROPERTY_VAULT_ONBOARDING`.
+
+### 20.1 Database Models
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| PropertyVault Model | Vault state and folder structure per property | `PROPERTY_VAULT_ONBOARDING` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma:9188-9219` | N/A |
+| VaultDocument Model | Document categorization within vault folders | `PROPERTY_VAULT_ONBOARDING` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma:9221-9247` | N/A |
+| VaultEvidence Model | SOC2-compliant evidence logs | `PROPERTY_VAULT_ONBOARDING` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma:9249-9289` | N/A |
+| UpsellTrigger Model | Market-gated upsell triggers | `PROPERTY_VAULT_ONBOARDING` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma:9291-9335` | N/A |
+| VaultOnboardingStatus Enum | not_started, in_progress, completed | `PROPERTY_VAULT_ONBOARDING` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma:9164-9168` | N/A |
+| VaultEvidenceEventType Enum | UPLOAD, DOWNLOAD, VIEW, DELETE, ACL_CHECK, etc. | `PROPERTY_VAULT_ONBOARDING` | `@realriches/database` | **Implemented** | `packages/database/prisma/schema.prisma:9170-9180` | N/A |
+
+### 20.2 Vault Onboarding Service
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| VAULT_FOLDERS | 6 folder categories (OWNERSHIP, INSURANCE, PERMITS, etc.) | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/vault-onboarding/types.ts:15-24` | `packages/document-storage/src/__tests__/vault-onboarding.test.ts` |
+| REQUIRED_DOCS | Required docs per property type (9 types) | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/vault-onboarding/types.ts:40-50` | `packages/document-storage/src/__tests__/vault-onboarding.test.ts` |
+| DEFAULT_ONBOARDING_STEPS | 4-step guided wizard (ownership, insurance, permits, leases) | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/vault-onboarding/types.ts:68-93` | `packages/document-storage/src/__tests__/vault-onboarding.test.ts` |
+| VaultOnboardingService | Initialize, upload, status, completion | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/vault-onboarding/service.ts` | N/A |
+
+### 20.3 Evidence Persistence (SOC2 Compliance)
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| SOC2_CONTROL_IDS | 10 control mappings (CC6.1, CC6.6, CC7.2, CC7.4, etc.) | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/evidence/types.ts:33-48` | `packages/document-storage/src/__tests__/vault-evidence.test.ts` |
+| sanitizeMetadata | PII redaction (SSN, email, phone, credit card) | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/evidence/types.ts:122-151` | `packages/document-storage/src/__tests__/vault-evidence.test.ts` |
+| VaultEvidencePersistence | persist(), query(), queryByProperty() | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/evidence/persistence.ts` | `packages/document-storage/src/__tests__/vault-evidence.test.ts` |
+| Event Types | 9 types (UPLOAD, DOWNLOAD, ACL_CHECK, UPSELL_VIEW, etc.) | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/evidence/types.ts:14-24` | `packages/document-storage/src/__tests__/vault-evidence.test.ts` |
+
+### 20.4 Upsell Trigger Engine
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| TRIGGER_PARTNER_MAP | 6 trigger types to partner mapping | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/upsell/types.ts:58-66` | `packages/document-storage/src/__tests__/upsell-triggers.test.ts` |
+| MARKET_UPSELL_CONFIGS | 6 markets (NYC, LA, CHICAGO, MIAMI, BOSTON, DEFAULT) | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/upsell/types.ts:80-114` | `packages/document-storage/src/__tests__/upsell-triggers.test.ts` |
+| UpsellTriggerService | detect, create, dismiss, convert triggers | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/upsell/triggers.ts` | `packages/document-storage/src/__tests__/upsell-triggers.test.ts` |
+| Market Gating | LA disables MISSING_GUARANTOR, etc. | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/upsell/types.ts:92-95` | `packages/document-storage/src/__tests__/upsell-triggers.test.ts` |
+| Partner Types | 8 providers (LEMONADE, ASSURANT, LEASELOCK, RHINO, etc.) | `PROPERTY_VAULT_ONBOARDING` | `@realriches/document-storage` | **Implemented** | `packages/document-storage/src/upsell/types.ts:21-30` | `packages/document-storage/src/__tests__/upsell-triggers.test.ts` |
+
+### 20.5 API Routes
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| POST /properties/:id/vault/initialize | Create vault with folder structure | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+| GET /properties/:id/vault/status | Get onboarding progress | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+| POST /properties/:id/vault/documents | Upload with category | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+| GET /properties/:id/vault/missing | List missing required docs | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+| GET /properties/:id/vault/upsells | Get market-gated triggers | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+| POST /properties/:id/vault/upsells/:id/dismiss | Dismiss trigger | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+| POST /properties/:id/vault/upsells/:id/convert | Track conversion | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+| GET /properties/:id/vault/evidence | Query evidence logs | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+
+### 20.6 Security
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| ACL Enforcement | Property-level access control (owner, manager, admin) | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts:46-75` | N/A |
+| Evidence on ACL Check | Log all access attempts (SUCCESS and DENIED) | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+| Evidence on Upload | Log document uploads with CC6.6 | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+| Evidence on Upsell Actions | Log view, dismiss, convert with CC7.2 | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts` | N/A |
+
+### 20.7 Feature Flag
+
+| Feature | Description | Market/Flag | Package | Status | Evidence | Tests |
+|---------|-------------|-------------|---------|--------|----------|-------|
+| PROPERTY_VAULT_ONBOARDING Flag | Beta feature flag, disabled by default | `PROPERTY_VAULT_ONBOARDING` | `@realriches/feature-flags` | **Implemented** | `packages/feature-flags/src/flags.ts:128-133` | N/A |
+| Market Gating | Enabled for NYC, LA, CHICAGO, MIAMI, BOSTON | `PROPERTY_VAULT_ONBOARDING` | `@realriches/feature-flags` | **Implemented** | `packages/feature-flags/src/flags.ts:416-425` | N/A |
+| Route Guard | Feature flag check on all routes | `PROPERTY_VAULT_ONBOARDING` | `@realriches/api` | **Implemented** | `apps/api/src/modules/vault-onboarding/routes.ts:24-40` | N/A |
+
+---
+
 ## Summary Statistics
 
 | Category | Implemented | Partial | Missing | Total |
@@ -868,7 +943,8 @@ This document serves as the single source of truth for feature implementation st
 | External Alerting | 12 | 0 | 0 | 12 |
 | Listing Copilot | 48 | 0 | 0 | 48 |
 | Co-Purchase Groups | 53 | 0 | 0 | 53 |
-| **TOTAL** | **334** | **1** | **3** | **338** |
+| Property Vault Onboarding | 27 | 0 | 0 | 27 |
+| **TOTAL** | **361** | **1** | **3** | **365** |
 
 ---
 
