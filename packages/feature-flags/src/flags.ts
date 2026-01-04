@@ -109,6 +109,17 @@ export const FeatureFlag = {
 
   /** Partner commission payments */
   PARTNER_COMMISSION_PAYMENTS: 'PARTNER_COMMISSION_PAYMENTS',
+
+  // ============================================================================
+  // Collaboration Features
+  // ============================================================================
+
+  /**
+   * CO_PURCHASE_GROUPS
+   * Enables co-purchase group workspaces for collaborative property buying.
+   * This is a NON-CUSTODIAL feature - no funds handling or investment marketplace.
+   */
+  CO_PURCHASE_GROUPS: 'CO_PURCHASE_GROUPS',
 } as const;
 
 export type FeatureFlag = (typeof FeatureFlag)[keyof typeof FeatureFlag];
@@ -136,6 +147,7 @@ export const FeatureFlagSchema = z.enum([
   'PARTNER_REVENUE_DASHBOARD',
   'PARTNER_ATTRIBUTION_TRACKING',
   'PARTNER_COMMISSION_PAYMENTS',
+  'CO_PURCHASE_GROUPS',
 ]);
 
 /**
@@ -156,7 +168,8 @@ export type FeatureCategory =
   | 'AI'
   | 'COMPLIANCE'
   | 'PAYMENTS'
-  | 'PARTNER';
+  | 'PARTNER'
+  | 'COLLABORATION';
 
 export type RolloutPhase =
   | 'ALPHA'      // Internal testing only
@@ -374,6 +387,17 @@ export const FEATURE_FLAG_REGISTRY: Record<FeatureFlag, FeatureFlagMetadata> = {
     rolloutPhase: 'BETA',
     defaultEnabled: false,
     marketGated: false,
+  },
+
+  // Collaboration Features
+  CO_PURCHASE_GROUPS: {
+    key: 'CO_PURCHASE_GROUPS',
+    name: 'Co-Purchase Groups',
+    description: 'Non-custodial co-purchase group workspaces for collaborative property buying. Enables member verification, document collection, and shared checklists. Does NOT include funds handling or investment marketplace.',
+    category: 'COLLABORATION',
+    rolloutPhase: 'ALPHA',
+    defaultEnabled: false,
+    marketGated: true,
   },
 };
 

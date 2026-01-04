@@ -8957,3 +8957,202 @@ model CopilotTemplate {
   @@index([type])
   @@map("copilot_templates")
 }
+
+// =============================================================================
+// Co-Purchase Groups (Non-Custodial Collaboration)
+// =============================================================================
+//
+// IMPORTANT: This is a NON-CUSTODIAL collaboration platform.
+// No funds handling, escrow, or investment marketplace functionality.
+// All custodial actions are blocked by guardrails in @realriches/co-purchase.
+//
+
+enum CoPurchaseGroupRole {
+  organizer
+  member
+  viewer
+}
+
+enum CoPurchaseGroupStatus {
+  forming
+  verification
+  document_collection
+  ready
+  archived
+}
+
+enum CoPurchaseInvitationStatus {
+  pending
+  accepted
+  declined
+  expired
+  revoked
+}
+
+enum CoPurchaseVerificationStatus {
+  not_started
+  pending
+  in_progress
+  verified
+  failed
+  expired
+}
+
+enum CoPurchaseChecklistItemStatus {
+  pending
+  in_progress
+  completed
+  blocked
+}
+
+model CoPurchaseGroup {
+  id                 String                @id @default(uuid()) @db.Uuid
+  name               String
+  description        String?
+  status             CoPurchaseGroupStatus @default(forming)
+  targetPropertyType String?               @map("target_property_type")
+  targetMarket       String?               @map("target_market")
+  estimatedBudgetMin Int?                  @map("estimated_budget_min")
+  estimatedBudgetMax Int?                  @map("estimated_budget_max")
+
+  // Organizer (creator)
+  organizerId String @map("organizer_id") @db.Uuid
+
+  // Metadata
+  metadata   Json?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  // Relations
+  members        CoPurchaseGroupMember[]
+  invitations    CoPurchaseGroupInvitation[]
+  checklistItems CoPurchaseChecklistItem[]
+  documents      CoPurchaseGroupDocument[]
+
+  @@index([organizerId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("co_purchase_groups")
+}
+
+model CoPurchaseGroupMember {
+  id      String              @id @default(uuid()) @db.Uuid
+  groupId String              @map("group_id") @db.Uuid
+  userId  String              @map("user_id") @db.Uuid
+  role    CoPurchaseGroupRole @default(member)
+
+  // Verification status (stores only IDs and hashes, NO PII)
+  verificationStatus CoPurchaseVerificationStatus @default(not_started) @map("verification_status")
+  verificationId     String?                      @map("verification_id")
+  verificationHash   String?                      @map("verification_hash")
+  verifiedAt         DateTime?                    @map("verified_at")
+  verificationExpiry DateTime?                    @map("verification_expiry")
+
+  // Non-custodial disclaimer consent tracking
+  disclaimerAccepted   Boolean   @default(false) @map("disclaimer_accepted")
+  disclaimerAcceptedAt DateTime? @map("disclaimer_accepted_at")
+
+  // Metadata
+  joinedAt DateTime  @default(now()) @map("joined_at")
+  leftAt   DateTime? @map("left_at")
+  metadata Json?
+
+  // Relations
+  group             CoPurchaseGroup           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  assignedChecklist CoPurchaseChecklistItem[] @relation("AssignedMember")
+  uploadedDocuments CoPurchaseGroupDocument[]
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+  @@index([verificationStatus])
+  @@map("co_purchase_group_members")
+}
+
+model CoPurchaseGroupInvitation {
+  id              String                      @id @default(uuid()) @db.Uuid
+  groupId         String                      @map("group_id") @db.Uuid
+  invitedEmail    String                      @map("invited_email")
+  invitedByUserId String                      @map("invited_by_user_id") @db.Uuid
+  role            CoPurchaseGroupRole         @default(member)
+  status          CoPurchaseInvitationStatus  @default(pending)
+  message         String?
+
+  // Token for secure acceptance (store hash only)
+  tokenHash String @unique @map("token_hash")
+
+  // Timestamps
+  createdAt   DateTime  @default(now()) @map("created_at")
+  expiresAt   DateTime  @map("expires_at")
+  respondedAt DateTime? @map("responded_at")
+
+  // Relations
+  group CoPurchaseGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@index([invitedEmail])
+  @@index([status])
+  @@map("co_purchase_group_invitations")
+}
+
+model CoPurchaseChecklistItem {
+  id          String                        @id @default(uuid()) @db.Uuid
+  groupId     String                        @map("group_id") @db.Uuid
+  title       String
+  description String?
+  category    String                        @default("general")
+  status      CoPurchaseChecklistItemStatus @default(pending)
+
+  // Assignment (optional)
+  assignedMemberId String? @map("assigned_member_id") @db.Uuid
+
+  // Ordering
+  sortOrder Int @default(0) @map("sort_order")
+
+  // Completion tracking
+  completedAt       DateTime? @map("completed_at")
+  completedByUserId String?   @map("completed_by_user_id") @db.Uuid
+
+  // Metadata
+  dueDate   DateTime? @map("due_date")
+  metadata  Json?
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  group          CoPurchaseGroup        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  assignedMember CoPurchaseGroupMember? @relation("AssignedMember", fields: [assignedMemberId], references: [id])
+
+  @@index([groupId])
+  @@index([status])
+  @@map("co_purchase_checklist_items")
+}
+
+model CoPurchaseGroupDocument {
+  id                 String  @id @default(uuid()) @db.Uuid
+  groupId            String  @map("group_id") @db.Uuid
+  uploadedByMemberId String  @map("uploaded_by_member_id") @db.Uuid
+
+  // Document reference (uses existing Document vault)
+  documentId  String @map("document_id") @db.Uuid
+  documentKey String @map("document_key")
+
+  // Categorization
+  category    String  @default("general")
+  description String?
+
+  // Visibility
+  visibleToAll Boolean @default(true) @map("visible_to_all")
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  group      CoPurchaseGroup       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  uploadedBy CoPurchaseGroupMember @relation(fields: [uploadedByMemberId], references: [id])
+
+  @@index([groupId])
+  @@index([category])
+  @@map("co_purchase_group_documents")
+}
